@@ -7,6 +7,13 @@ import { generatePassword, passwordStrength } from '@coffer/crypto';
  * 三种状态：未登录 / 已解锁但本站没有匹配条目 / 已解锁且匹配到了。
  * 无论哪种，用户最多两次点击就能拿到密码 —— 密码管理器弹窗的全部意义
  * 就是「别让我离开当前页面去做别的事」。
+ *
+ * ── 版面
+ *
+ * 360px 宽的一条，所以只做**一栏**：顶部一条 `.band` 放品牌和锁定，
+ * 下面依次是提示、待确认的保存、当前站点、匹配到的条目、生成器。
+ * 顺序就是优先级 —— 需要用户做决定的（保存 / 填充）排在上面，
+ * 浏览性的（生成器）排在最后。
  */
 
 interface ItemSummary {
@@ -82,75 +89,102 @@ export function Popup() {
   useEffect(() => { void refresh().catch((e: unknown) => setError(String(e))); }, [refresh]);
 
   if (status === null) {
-    return <div className="p-6 text-[var(--text-sm)] text-[var(--ink-tertiary)]">正在载入…</div>;
+    return (
+      <div className="flex flex-col">
+        <PopupBand />
+        <p className="p-4 text-[var(--text-sm)] text-[var(--ink-tertiary)]">正在载入…</p>
+      </div>
+    );
   }
 
   return (
-    <div className="flex flex-col gap-3 p-4">
-      <Header status={status} onLock={async () => {
+    <div className="screen-in flex flex-col">
+      <PopupBand unlocked={status.unlocked} onLock={async () => {
         await send({ type: 'coffer:lock' });
         await refresh();
       }} />
 
-      {error && <Note tone="risk">{error}</Note>}
-      {notice && <Note tone="accent">{notice}</Note>}
+      <div className="flex flex-col gap-3 p-3.5">
+        {error && <Note tone="risk">{error}</Note>}
+        {notice && <Note tone="accent">{notice}</Note>}
 
-      {status.unlocked && pending && (
-        <SavePrompt
-          pending={pending}
-          busy={busy}
-          onSave={async () => {
+        {status.unlocked && pending && (
+          <SavePrompt
+            pending={pending}
+            busy={busy}
+            onSave={async () => {
+              setBusy(true); setError(null);
+              try {
+                await send({ type: 'coffer:save-capture', ...(tabId === undefined ? {} : { tabId }) });
+                setPending(null);
+                setNotice(pending.action === 'update' ? '已更新' : '已保存');
+                window.close();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : '保存失败');
+              } finally { setBusy(false); }
+            }}
+            onDismiss={async () => {
+              await send({ type: 'coffer:dismiss-capture', ...(tabId === undefined ? {} : { tabId }) });
+              setPending(null);
+            }}
+          />
+        )}
+
+        {!status.unlocked ? (
+          <ConnectForm busy={busy} onSubmit={async (p) => {
             setBusy(true); setError(null);
             try {
-              await send({ type: 'coffer:save-capture', ...(tabId === undefined ? {} : { tabId }) });
-              setPending(null);
-              setNotice(pending.action === 'update' ? '已更新' : '已保存');
-              window.close();
+              await send({ type: 'coffer:connect', ...p });
+              await refresh();
             } catch (e) {
-              setError(e instanceof Error ? e.message : '保存失败');
+              setError(e instanceof Error ? e.message : '连接失败');
             } finally { setBusy(false); }
-          }}
-          onDismiss={async () => {
-            await send({ type: 'coffer:dismiss-capture', ...(tabId === undefined ? {} : { tabId }) });
-            setPending(null);
-          }}
-        />
-      )}
-
-      {!status.unlocked ? (
-        <ConnectForm busy={busy} onSubmit={async (p) => {
-          setBusy(true); setError(null);
-          try {
-            await send({ type: 'coffer:connect', ...p });
-            await refresh();
-          } catch (e) {
-            setError(e instanceof Error ? e.message : '连接失败');
-          } finally { setBusy(false); }
-        }} />
-      ) : (
-        <>
-          <SiteLine url={tabUrl} />
-          {items.length === 0
-            ? <Empty reason={tabUrl ? '这个站点没有匹配的条目' : '当前标签页不是网页'} />
-            : items.map((it) => (
-              <ItemRow key={it.id} item={it} onFill={async () => {
-                if (tabId === undefined) return;
-                setBusy(true); setError(null); setNotice(null);
-                try {
-                  const r = await send<{ ok: boolean; failed: unknown[] }>({
-                    type: 'coffer:fill', itemId: it.id, tabId,
-                  });
-                  if (r.ok) { setNotice('已填充'); window.close(); }
-                  else setError(`有 ${r.failed.length} 个字段没填成功 —— 页面可能改版了`);
-                } catch (e) {
-                  setError(e instanceof Error ? e.message : '填充失败');
-                } finally { setBusy(false); }
-              }} />
-            ))}
-          <Generator />
-        </>
-      )}
+          }} />
+        ) : (
+          <>
+            <SiteLine url={tabUrl} account={status.account?.email ?? null} />
+            {items.length === 0
+              ? <Empty reason={tabUrl ? '这个站点没有匹配的条目' : '当前标签页不是网页'} />
+              : items.map((it) => (
+                <ItemRow key={it.id} item={it} onFill={async () => {
+                  if (tabId === undefined) return;
+                  setBusy(true); setError(null); setNotice(null);
+                  try {
+                    const r = await send<{ ok: boolean; failed: unknown[] }>({
+                      type: 'coffer:fill', itemId: it.id, tabId,
+                    });
+                    if (r.ok) { setNotice('已填充'); window.close(); }
+                    else setError(`有 ${r.failed.length} 个字段没填成功 —— 页面可能改版了`);
+                  } catch (e) {
+                    setError(e instanceof Error ? e.message : '填充失败');
+                  } finally { setBusy(false); }
+                }} />
+              ))}
+            <Generator />
+          </>
+        )}
+      </div>
     </div>
+  );
+}
+
+/** 顶部带子 —— 和其他界面同一条高度，弹窗里也保持这个骨架 */
+function PopupBand({ unlocked, onLock }: { unlocked?: boolean; onLock?: () => void }) {
+  return (
+    <header className="band">
+      <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
+        <IconLock size={13} />
+      </span>
+      <span className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold tracking-[-0.01em]">
+        Coffer
+      </span>
+      {unlocked && onLock && (
+        <button onClick={onLock} className="btn btn-ghost gap-1.5" title="锁定保险库">
+          <IconLock size={13} />
+          锁定
+        </button>
+      )}
+    </header>
   );
 }
 
@@ -171,48 +205,39 @@ function SavePrompt({ pending, busy, onSave, onDismiss }: {
   try { host = new URL(pending.url).host; } catch { /* 原样显示 */ }
 
   return (
-    <div className="rounded-[var(--radius-md)] border border-[var(--accent)] bg-[var(--surface-raised)] p-3">
-      <p className="mb-0.5 text-[var(--text-sm)] font-medium">
+    <div className="rounded-[var(--radius-md)] border border-[var(--accent)] bg-[var(--accent-tint)] p-3">
+      <p className="text-[var(--text-sm)] font-medium">
         {pending.action === 'update' ? '更新这条登录？' : '保存这条登录？'}
       </p>
-      <p className="mb-3 truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]" title={pending.url}>
+      <p className="mt-0.5 truncate text-[var(--text-xs)] text-[var(--ink-secondary)]" title={pending.url}>
         {host}
         {pending.username ? ` · ${pending.username}` : ''}
       </p>
-      <div className="flex gap-2">
-        <button onClick={onSave} disabled={busy}
-          className="flex-1 rounded-[var(--radius-md)] bg-[var(--accent)] px-3 py-1.5 text-[var(--text-sm)] font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)] disabled:opacity-50">
+      <div className="mt-3 flex gap-2">
+        <button onClick={onSave} disabled={busy} className="btn btn-primary flex-1 py-2">
           {busy ? '保存中…' : pending.action === 'update' ? '更新' : '保存'}
         </button>
-        <button onClick={onDismiss} disabled={busy}
-          className="rounded-[var(--radius-md)] px-3 py-1.5 text-[var(--text-sm)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">
-          不用
-        </button>
+        <button onClick={onDismiss} disabled={busy} className="btn btn-quiet py-2">不用</button>
       </div>
     </div>
   );
 }
 
-function Header({ status, onLock }: { status: Status; onLock: () => void }) {
-  return (
-    <div className="flex items-center justify-between">
-      <span className="text-[var(--text-lg)] font-semibold tracking-tight">Coffer</span>
-      {status.unlocked && (
-        <button onClick={onLock}
-          className="rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-xs)] text-[var(--ink-tertiary)] hover:bg-[var(--surface-hover)]">
-          锁定
-        </button>
-      )}
-    </div>
-  );
-}
-
-function SiteLine({ url }: { url: string }) {
+/** 当前站点 + 是哪个账户 —— 两个都要说，用户可能在多个账户间开着同一个站点 */
+function SiteLine({ url, account }: { url: string; account: string | null }) {
   let host = url;
   try { host = new URL(url).host; } catch { /* 不是网址就原样显示 */ }
   return (
-    <div className="truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]" title={url}>
-      {host || '（无站点）'}
+    <div className="flex items-center gap-2 px-0.5">
+      <IconGlobe size={13} className="shrink-0 text-[var(--ink-tertiary)]" />
+      <span className="min-w-0 flex-1 truncate text-[var(--text-xs)] text-[var(--ink-secondary)]" title={url}>
+        {host || '（无站点）'}
+      </span>
+      {account && (
+        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]" title={account}>
+          {account}
+        </span>
+      )}
     </div>
   );
 }
@@ -249,58 +274,77 @@ function ItemRow({ item, onFill }: { item: ItemSummary; onFill: () => void }) {
   if (item.hasTotp) fields.push({ key: 'totp', label: '验证码' });
 
   return (
-    <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2.5">
-      <div className="flex items-center gap-2">
-        <span className="shrink-0 text-[var(--text-lg)]" aria-hidden>{item.favorite ? '★' : '🔑'}</span>
+    <div className="card p-2.5">
+      <div className="flex items-center gap-2.5">
+        <span className="tile" data-type="login">
+          <IconKey size={16} />
+        </span>
         <span className="min-w-0 flex-1">
-          <span className="block truncate text-[var(--text-md)]">{item.name}</span>
+          <span className="flex items-center gap-1.5">
+            <span className="min-w-0 truncate text-[var(--text-md)] leading-snug">{item.name}</span>
+            {item.favorite && <IconStar size={12} filled className="shrink-0 text-[var(--caution)]" />}
+          </span>
           {item.username && (
-            <span className="block truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]">{item.username}</span>
+            <span className="mt-0.5 block truncate text-[var(--text-xs)] leading-snug text-[var(--ink-tertiary)]">
+              {item.username}
+            </span>
           )}
         </span>
         {item.hasPassword && (
-          <button onClick={onFill}
-            className="shrink-0 rounded-[var(--radius-sm)] bg-[var(--accent)] px-2.5 py-1 text-[var(--text-xs)] font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)]">
-            填充
-          </button>
+          <button onClick={onFill} className="btn btn-primary shrink-0">填充</button>
         )}
       </div>
 
       {fields.length > 0 && (
-        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--border-subtle)] pt-2">
+        <div className="mt-2.5 flex flex-wrap items-center gap-1 border-t border-[var(--border-subtle)] pt-2">
           {fields.map((f) => (
             <button key={f.key} onClick={() => { void copy(f.key); }}
-              className="rounded-[var(--radius-sm)] px-2 py-0.5 text-[var(--text-xs)] text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)]">
-              {copied === f.key ? '已复制 ✓' : `复制${f.label}`}
+              data-state={copied === f.key ? 'ok' : undefined}
+              className="btn btn-ghost gap-1.5">
+              {copied === f.key ? <IconCheck size={12} /> : <IconCopy size={12} />}
+              {copied === f.key ? '已复制' : `复制${f.label}`}
             </button>
           ))}
           {/* 复制后会清空剪贴板，把这件事说出来 —— 否则用户过一会儿粘贴不出来
               会以为是坏了 */}
-          <span className="ml-auto text-[var(--text-xs)] text-[var(--ink-tertiary)]">30 秒后清空</span>
+          <span className="ml-auto shrink-0 pr-1 text-[var(--text-2xs)] text-[var(--ink-tertiary)]">
+            30 秒后清空
+          </span>
         </div>
       )}
 
       {error && (
-        <p className="mt-1.5 text-[var(--text-xs)] text-[var(--risk)]">{error}</p>
+        <p className="mt-1.5 flex items-start gap-1.5 text-[var(--text-xs)] text-[var(--risk)]">
+          <IconAlert size={12} className="mt-0.5 shrink-0" />
+          <span>{error}</span>
+        </p>
       )}
     </div>
   );
 }
 
+/** 空状态要说明**为什么**空，并给出下一步 —— 一句「没有结果」等于没说 */
 function Empty({ reason }: { reason: string }) {
   return (
-    <div className="rounded-[var(--radius-md)] bg-[var(--surface-sunken)] px-3 py-6 text-center text-[var(--text-sm)] text-[var(--ink-tertiary)]">
-      {reason}
+    <div className="card-well px-4 py-7 text-center">
+      <span className="mx-auto mb-2.5 grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-paper)] text-[var(--ink-tertiary)]">
+        <IconSearch size={17} />
+      </span>
+      <p className="text-[var(--text-sm)] text-[var(--ink-secondary)]">{reason}</p>
+      <p className="mt-1 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+        在 Coffer 里把网址加到对应条目上，这里就能匹配到
+      </p>
     </div>
   );
 }
 
 function Note({ tone, children }: { tone: 'risk' | 'accent'; children: React.ReactNode }) {
-  const color = tone === 'risk' ? 'var(--risk)' : 'var(--accent)';
+  const color = tone === 'risk' ? 'var(--risk)' : 'var(--ink-secondary)';
   return (
-    <p className="rounded-[var(--radius-md)] bg-[var(--surface-sunken)] px-3 py-2 text-[var(--text-sm)]"
-      style={{ color }}>
-      {children}
+    <p className="flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2 text-[var(--text-sm)]"
+      role="status">
+      {tone === 'risk' && <IconAlert size={14} className="mt-0.5 shrink-0" style={{ color }} />}
+      <span className="min-w-0 flex-1" style={{ color }}>{children}</span>
     </p>
   );
 }
@@ -314,24 +358,26 @@ function ConnectForm({ busy, onSubmit }: {
   const [masterPassword, setMasterPassword] = useState('');
 
   return (
-    <form className="flex flex-col gap-2" onSubmit={(e) => {
+    <form className="flex flex-col gap-2.5" onSubmit={(e) => {
       e.preventDefault();
       onSubmit({ serverUrl: serverUrl.trim(), email: email.trim(), masterPassword });
     }}>
-      <p className="text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+      <p className="text-[var(--text-xs)] leading-relaxed text-[var(--ink-tertiary)]">
         主密码只在本地用于派生密钥，永不发送到服务器。
       </p>
       <input required type="url" value={serverUrl} placeholder="https://vault.example.com"
+        aria-label="服务器地址"
         onChange={(e) => setServerUrl(e.target.value)}
-        className={inputCls} />
+        className="field text-[var(--text-sm)]" />
       <input required type="email" value={email} placeholder="邮箱"
+        aria-label="邮箱"
         onChange={(e) => setEmail(e.target.value)}
-        className={inputCls} />
+        className="field text-[var(--text-sm)]" />
       <input required type="password" value={masterPassword} placeholder="主密码"
+        aria-label="主密码"
         onChange={(e) => setMasterPassword(e.target.value)}
-        className={`${inputCls} secret`} />
-      <button type="submit" disabled={busy}
-        className="rounded-[var(--radius-md)] bg-[var(--accent)] px-3 py-2 font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)] disabled:opacity-50">
+        className="field secret text-[var(--text-sm)]" />
+      <button type="submit" disabled={busy} className="btn btn-primary py-2.5">
         {busy ? '正在解锁…' : '解锁'}
       </button>
     </form>
@@ -354,17 +400,17 @@ function Generator() {
   const strength = value ? passwordStrength(value) : null;
 
   return (
-    <div className="mt-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] p-3">
-      <div className="mb-2 flex items-center justify-between">
-        <span className="text-[var(--text-xs)] font-medium uppercase tracking-wide text-[var(--ink-tertiary)]">
+    <div className="card p-3">
+      <div className="flex items-center gap-2">
+        <span className="min-w-0 flex-1 text-[var(--text-xs)] font-medium text-[var(--ink-tertiary)]">
           生成密码
         </span>
         <button onClick={() => setValue(generatePassword({ length, digits, symbols }))}
-          className="text-[var(--text-xs)] text-[var(--accent)] hover:underline">换一个</button>
+          className="btn btn-ghost shrink-0">换一个</button>
       </div>
 
-      <div className="mb-2 flex items-center gap-2">
-        <code className="secret min-w-0 flex-1 truncate rounded-[var(--radius-sm)] bg-[var(--surface-sunken)] px-2 py-1.5 text-[var(--text-sm)]">
+      <div className="mt-2 flex items-center gap-2">
+        <code className="secret min-w-0 flex-1 truncate rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-2 py-1.5 text-[var(--text-sm)]">
           {value}
         </code>
         <button
@@ -380,18 +426,21 @@ function Generator() {
               } catch { /* 读剪贴板可能被拒绝 */ }
             }, 30_000);
           }}
-          className="shrink-0 rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-xs)] text-[var(--accent)] hover:bg-[var(--surface-hover)]">
-          {copied ? '已复制 ✓' : '复制'}
+          data-state={copied ? 'ok' : undefined}
+          className="btn btn-quiet shrink-0 gap-1.5 text-[var(--accent)]"
+        >
+          {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
+          {copied ? '已复制' : '复制'}
         </button>
       </div>
 
-      <label className="mb-1 flex items-center gap-2 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+      <label className="mt-2.5 flex items-center gap-2 text-[var(--text-xs)] text-[var(--ink-secondary)]">
         长度
         <input type="range" min={8} max={64} value={length}
           onChange={(e) => setLength(Number(e.target.value))} className="flex-1" />
-        <span className="secret w-6 text-right">{length}</span>
+        <span className="tnum w-6 text-right">{length}</span>
       </label>
-      <div className="flex gap-4 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+      <div className="mt-1.5 flex gap-4 text-[var(--text-xs)] text-[var(--ink-secondary)]">
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={digits} onChange={(e) => setDigits(e.target.checked)} />
           包含数字
@@ -403,14 +452,14 @@ function Generator() {
       </div>
 
       {strength && (
-        <div className="mt-2 flex items-center gap-2">
-          <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--surface-sunken)]">
-            <div className="h-full rounded-full" style={{
+        <div className="mt-2.5 flex items-center gap-2.5">
+          <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--border-subtle)]">
+            <div className="h-full rounded-full transition-[width] duration-[var(--dur-base)]" style={{
               width: `${Math.min(100, (strength.score / 4) * 100)}%`,
               background: strength.score >= 3 ? 'var(--safe)' : strength.score >= 2 ? 'var(--caution)' : 'var(--risk)',
             }} />
           </div>
-          <span className="text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+          <span className="shrink-0 text-[var(--text-2xs)] tabular-nums text-[var(--ink-tertiary)]">
             约 {Math.round(strength.entropyBits)} 位熵
           </span>
         </div>
@@ -419,4 +468,71 @@ function Generator() {
   );
 }
 
-const inputCls = 'w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-2.5 py-1.5 text-[var(--text-sm)] outline-none focus:border-[var(--accent)]';
+/* ── 图标 ─────────────────────────────────────────────────
+ *
+ * 和桌面端 apps/desktop/src/components/icons.tsx 是同一套画法
+ * （24 网格、1.75 描边、圆角端点），但只放弹窗用得到的这几个 ——
+ * 两个 app 之间没有共享包，为一个图标集建一个不划算。
+ * 弹窗这里上一版用的是 emoji（🔑★），理由见桌面端那份的说明。
+ */
+
+function Svg({ size = 14, ...rest }: React.SVGProps<SVGSVGElement> & { size?: number }) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"
+      aria-hidden focusable="false" {...rest} />
+  );
+}
+
+const IconKey = (p: { size?: number }) => (
+  <Svg {...p}>
+    <circle cx="8" cy="15" r="3.5" />
+    <path d="M10.6 12.4 19 4M16.5 6.5 19 9M14 9l2.5 2.5" />
+  </Svg>
+);
+
+const IconLock = (p: { size?: number }) => (
+  <Svg {...p}>
+    <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
+    <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" />
+  </Svg>
+);
+
+const IconStar = ({ filled, ...p }: { size?: number; filled?: boolean }) => (
+  <Svg {...p} fill={filled ? 'currentColor' : 'none'}>
+    <path d="m12 3.6 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.8l5.9-.9z" />
+  </Svg>
+);
+
+const IconCopy = (p: { size?: number }) => (
+  <Svg {...p}>
+    <rect x="8.5" y="8.5" width="12" height="12" rx="2.5" />
+    <path d="M15.5 5.5v-1a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h1" />
+  </Svg>
+);
+
+const IconCheck = (p: { size?: number }) => (
+  <Svg {...p}><path d="m5 12.5 4.5 4.5L19 7.5" /></Svg>
+);
+
+const IconAlert = (p: { size?: number }) => (
+  <Svg {...p}>
+    <path d="M10.3 3.9 1.9 18.3a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0" />
+    <path d="M12 9v4.5M12 17.5h.01" />
+  </Svg>
+);
+
+const IconGlobe = (p: { size?: number }) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M3.2 9.5h17.6M3.2 14.5h17.6" />
+    <path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18" />
+  </Svg>
+);
+
+const IconSearch = (p: { size?: number }) => (
+  <Svg {...p}>
+    <circle cx="11" cy="11" r="6.5" />
+    <path d="m16 16 4.5 4.5" />
+  </Svg>
+);

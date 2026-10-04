@@ -62,26 +62,30 @@ export function ItemEditor({ client, item, onDone, onCancel }: Props) {
 
   return (
     <div className="flex h-full flex-col">
+      {/* 头部里面的内容也按表单那一列的宽度居中 —— 否则标题贴左边、
+          表单居中，中间空一大块，看起来像两个不相干的区域 */}
       <header className="band shrink-0 px-6">
-        <h2 className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold">
-          {isNew ? '新建条目' : '编辑条目'}
-        </h2>
-        <button
-          type="button"
-          onClick={() => patch({ favorite: !draft.favorite })}
-          title={draft.favorite ? '取消收藏' : '加入收藏'}
-          aria-pressed={draft.favorite}
-          className={`rounded-[var(--radius-sm)] p-1.5 transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
-            draft.favorite ? 'text-[var(--caution)]' : 'text-[var(--ink-tertiary)]'
-          }`}
-        >
-          <IconStar size={16} filled={draft.favorite} />
-        </button>
-        <button onClick={onCancel} disabled={busy} className="btn btn-quiet">取消</button>
-        <button onClick={save} disabled={busy} className="btn btn-primary">
-          {busy && <IconSpinner size={14} />}
-          {busy ? '保存中…' : '保存'}
-        </button>
+        <div className="mx-auto flex w-full items-center gap-2" style={{ maxWidth: 'var(--detail-w)' }}>
+          <h2 className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold">
+            {isNew ? '新建条目' : '编辑条目'}
+          </h2>
+          <button
+            type="button"
+            onClick={() => patch({ favorite: !draft.favorite })}
+            title={draft.favorite ? '取消收藏' : '加入收藏'}
+            aria-pressed={draft.favorite}
+            className={`rounded-[var(--radius-sm)] p-1.5 transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
+              draft.favorite ? 'text-[var(--caution)]' : 'text-[var(--ink-tertiary)]'
+            }`}
+          >
+            <IconStar size={16} filled={draft.favorite} />
+          </button>
+          <button onClick={onCancel} disabled={busy} className="btn btn-quiet">取消</button>
+          <button onClick={save} disabled={busy} className="btn btn-primary">
+            {busy && <IconSpinner size={14} />}
+            {busy ? '保存中…' : '保存'}
+          </button>
+        </div>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-6 py-7">

@@ -4,6 +4,7 @@ import {
   autotypeStatus, autotypeType, autotypeOpenSettings,
   AUTOTYPE_SUCCESS_NOTE, type PermissionState,
 } from '../autotype';
+import { IconAlert, IconKeyboard } from './icons';
 
 /**
  * 「输入到其他应用」。
@@ -81,44 +82,58 @@ export function AutotypeAction({ username, password }: {
 
   if (permission === 'denied') {
     return (
-      <div className="mt-2 rounded-[var(--radius-md)] bg-[var(--surface-sunken)] p-3">
-        <p className="mb-2 text-[var(--text-xs)] leading-relaxed text-[var(--ink-secondary)]">
-          要向其他应用输入，需要在「系统设置 → 隐私与安全性 → 辅助功能」里
-          勾选 Coffer。<strong className="font-medium">Coffer 只会往当前焦点发送按键，
-          不会读取任何应用的界面内容。</strong>
+      /*
+        ⚠️ 这一块是**很多用户的默认状态**（全新安装都还没有辅助功能授权），
+        所以它不能长得像一条错误。上一版把整段解释堆在这里，
+        结果它比旁边的密码字段还抢眼 —— 一块界面里最响的东西
+        不该是「某个功能还不可用」。
+
+        拆成三层：一行说清要做什么、一个按钮、一行才是不放心的那段保证。
+      */
+      <div className="card-well px-3.5 py-3">
+        <p className="flex items-center gap-2 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+          <IconAlert size={14} className="shrink-0 text-[var(--caution)]" />
+          需要辅助功能权限才能向其他应用输入
         </p>
         <button
           onClick={() => { void autotypeOpenSettings(); }}
-          className="rounded-[var(--radius-sm)] bg-[var(--accent)] px-2.5 py-1 text-[var(--text-xs)] font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)]"
+          className="btn btn-quiet mt-2.5 ml-[22px]"
         >
           打开系统设置
         </button>
+        <p className="mt-2.5 ml-[22px] text-[var(--text-xs)] leading-relaxed text-[var(--ink-tertiary)]">
+          Coffer 只会往当前焦点发送按键，不会读取任何应用的界面内容。
+        </p>
       </div>
     );
   }
 
   return (
-    <div className="mt-2">
+    <div>
       {count === null ? (
-        <button
-          onClick={start}
-          disabled={permission === null}
-          className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] px-2.5 py-1 text-[var(--text-xs)] text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] disabled:opacity-40"
-        >
+        <button onClick={start} disabled={permission === null} className="btn btn-quiet gap-1.5">
+          <IconKeyboard size={13} />
           输入到其他应用…
         </button>
       ) : (
-        <p className="text-[var(--text-xs)] text-[var(--accent)]">
-          {count} 秒后发送，请切换到目标窗口…
+        /*
+          倒计时用大一号的字 + 强调色：这几秒里用户要完成的动作是
+          「切到目标窗口」，提示必须显眼到他不会错过。
+        */
+        <p className="flex items-center gap-2 text-[var(--text-sm)] text-[var(--accent)]" role="status">
+          <IconKeyboard size={15} className="shrink-0" />
+          <span className="tabular-nums font-medium">{count}</span>
+          秒后发送，请切换到目标窗口…
         </p>
       )}
 
       {result && (
         <p
-          className="mt-1.5 text-[var(--text-xs)]"
+          className="mt-2 flex items-start gap-2 text-[var(--text-xs)]"
           style={{ color: result.ok ? 'var(--ink-tertiary)' : 'var(--risk)' }}
         >
-          {result.message}
+          {!result.ok && <IconAlert size={13} className="mt-0.5 shrink-0" />}
+          <span>{result.message}</span>
         </p>
       )}
     </div>

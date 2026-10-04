@@ -205,6 +205,21 @@ export const IconChevronDown = (p: IconProps) => (
   </Svg>
 );
 
+export const IconArrowLeft = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M19 12H5" />
+    <path d="m11 6-6 6 6 6" />
+  </Svg>
+);
+
+export const IconServer = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3" y="4" width="18" height="7" rx="2" />
+    <rect x="3" y="13" width="18" height="7" rx="2" />
+    <path d="M7 7.5h.01M7 16.5h.01" />
+  </Svg>
+);
+
 export const IconAlert = (p: IconProps) => (
   <Svg {...p}>
     <path d="M10.3 3.9 1.9 18.3a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0" />

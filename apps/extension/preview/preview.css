@@ -1,0 +1,10 @@
+/*
+ * 预览专用的样式入口。
+ *
+ * ⚠️ 必须显式声明 `@source`。Tailwind 4 按**构建根目录**自动扫描类名，
+ * 而预览配置的 root 是 `preview/` —— 扫不到 `src/` 里的组件，
+ * 于是产出的 CSS 里几乎没有工具类，界面变成一堆裸文本。
+ * 桌面端的 preview.css 踩过同一个坑（见那边的说明）。
+ */
+@import '../src/styles.css';
+@source '../src';

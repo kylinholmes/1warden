@@ -69,11 +69,13 @@ export function SecretField({ label, value, masked = false }: Props) {
       </span>
 
       {/*
-        操作按钮平时淡出，悬停或聚焦时才出现。
-        不是为了好看 —— 一屏十几个字段如果每个都挂着「显示」「复制」，
-        真正的信息（值本身）就被按钮淹了。键盘用户 tab 进来时它同样可见。
+        ⚠️ 按钮**始终可见**，只是画得很轻（tertiary 灰）。
+        上一版是悬停才出现（opacity-0 → group-hover），看着很干净，
+        但对普通用户是实打实的发现问题：界面上一眼看不出「这里能复制」，
+        而复制恰恰是密码管理器里最高频的动作。
+        保持低调的办法是不给它颜色和边框，而不是把它藏起来。
       */}
-      <span className="flex shrink-0 items-center gap-0.5 opacity-0 transition-opacity duration-[var(--dur-fast)] focus-within:opacity-100 group-hover:opacity-100">
+      <span className="flex shrink-0 items-center gap-0.5">
         {masked && (
           <button
             onClick={() => setRevealed((r) => !r)}

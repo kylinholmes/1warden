@@ -259,6 +259,17 @@ body {
 input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 
 /*
+ * 原生控件的默认蓝（Chrome 的 #1a73e8 那一族）和我们的青蓝不在一个色系里，
+ * 摆在一起像两个产品。一行 accent-color 就统一了，
+ * 而且仍然保留系统控件的键盘与无障碍行为 —— 不值得为几个勾选框自己造轮子。
+ */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: var(--accent);
+}
+
+/*
  * ────────────────────────────────────────────────────────────────
  * 组件基元
  *
@@ -376,6 +387,9 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
     color: var(--ink-primary);
     padding: 8px 11px;
     font-size: var(--text-md);
+    /* 输入框里的行高要单独收紧：继承正文的 1.6 会让每个框高出四五个像素，
+       一列七八个框叠起来就明显发飘。单行控件不需要阅读用的行距 */
+    line-height: 1.4;
     outline: none;
     transition: border-color var(--dur-fast) var(--ease-enter),
       box-shadow var(--dur-fast) var(--ease-enter);
@@ -457,12 +471,18 @@ input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
 }
 .code-turn { animation: coffer-code-turn 420ms var(--ease-enter) both; }
 
-/* 解锁成功的那一下 —— 头像圈轻轻扩开，作为「开了」的确认 */
-@keyframes coffer-unlock-pulse {
-  0% { transform: scale(1); box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 45%, transparent); }
-  100% { transform: scale(1.06); box-shadow: 0 0 0 14px color-mix(in oklab, var(--accent) 0%, transparent); }
+/*
+ * 解锁进行中 —— 头像外圈缓缓向外扩散。
+ *
+ * 派上用场的地方是「按下解锁」到「保险库出现」之间那一段（派生密钥 + 网络
+ * 往返，通常接近一秒）。这段时间界面如果完全不动，用户会怀疑自己没点上，
+ * 然后去点第二下。让它动，但只动一点点 —— 这是**等待**的反馈，不是庆祝。
+ */
+@keyframes coffer-breathe {
+  0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 38%, transparent); }
+  60% { box-shadow: 0 0 0 10px color-mix(in oklab, var(--accent) 0%, transparent); }
 }
-.unlock-pulse { animation: coffer-unlock-pulse var(--dur-slow) var(--ease-enter) both; }
+.breathe { animation: coffer-breathe 1.5s var(--ease-move) infinite; }
 
 /* 转圈 —— 用在「正在解锁」「查询中」 */
 @keyframes coffer-spin { to { transform: rotate(360deg); } }

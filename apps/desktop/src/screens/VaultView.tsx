@@ -142,7 +142,7 @@ export function VaultView({ client, onLock }: Props) {
   const fullWidth = category.kind === 'security' || category.kind === 'import';
 
   return (
-    <div className="flex h-full" data-bump={bump}>
+    <div className="screen-in flex h-full" data-bump={bump}>
       {sidebar}
 
       {fullWidth ? (
@@ -643,7 +643,7 @@ function ItemDetail({ item, onEdit, onDelete, onToggleFavorite }: {
               编辑
             </button>
           )}
-          <button onClick={onDelete} className="btn btn-ghost gap-1.5 hover:!text-[var(--risk)]">
+          <button onClick={onDelete} className="btn btn-ghost gap-1.5 hover:text-[var(--risk)]">
             <IconTrash size={13} />
             删除
           </button>
@@ -742,7 +742,7 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
   const urgent = remaining <= 3;
   const near = remaining <= 7;
   const tone = urgent ? 'var(--risk)' : near ? 'var(--caution)' : 'var(--accent)';
-  const R = 11;
+  const R = 11.5;
   const C = 2 * Math.PI * R;
 
   return (
@@ -757,23 +757,28 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
       </span>
 
       <span className="flex shrink-0 items-center gap-2.5">
+        {/*
+          环里写秒数 —— 用户不用去数弧长。数字用中性色、环用彩色：
+          两个都上色的话（试过）数字会糊在环里读不清，
+          而颜色要传达的信息本来就只有环在承担。
+        */}
         <span
-          className="relative grid h-7 w-7 place-items-center"
+          className="relative grid h-[30px] w-[30px] place-items-center"
           title={`${remaining} 秒后失效`}
           role="timer"
           aria-label={`验证码剩余 ${remaining} 秒`}
         >
-          <svg viewBox="0 0 28 28" className="absolute inset-0 h-7 w-7 -rotate-90">
-            <circle cx="14" cy="14" r={R} fill="none" stroke="var(--border-subtle)" strokeWidth="2.5" />
+          <svg viewBox="0 0 30 30" className="absolute inset-0 h-[30px] w-[30px] -rotate-90">
+            <circle cx="15" cy="15" r={R} fill="none" stroke="var(--border-subtle)" strokeWidth="2" />
             <circle
-              cx="14" cy="14" r={R} fill="none"
-              stroke={tone} strokeWidth="2.5" strokeLinecap="round"
+              cx="15" cy="15" r={R} fill="none"
+              stroke={tone} strokeWidth="2" strokeLinecap="round"
               strokeDasharray={C}
               strokeDashoffset={C * (1 - pct)}
               style={{ transition: 'stroke-dashoffset 1s linear, stroke 300ms linear' }}
             />
           </svg>
-          <span className="text-[var(--text-2xs)] font-medium tabular-nums" style={{ color: tone }}>
+          <span className="text-[10px] font-medium tabular-nums leading-none text-[var(--ink-secondary)]">
             {remaining}
           </span>
         </span>

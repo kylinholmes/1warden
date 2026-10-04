@@ -1,14 +1,18 @@
 @import 'tailwindcss';
 
 /*
- * Coffer 设计系统。
+ * Coffer 设计系统 —— 扩展弹窗版。
  *
- * 比例参照本机 1Password 的实测值（4px 间距基准、三档圆角、分层表面色），
- * 但**值全部是我们自己的**：深青蓝强调色、6/10/16 圆角、3 档动效、
- * 描边为主 + 极轻阴影。详见 docs/reference/design-system.md。
+ * ⚠️ 这个文件和 apps/desktop/src/styles.css 是**同一套令牌的拷贝**。
+ * 两个 app 之间没有共享包（packages/ 里都是领域逻辑，不该塞样式），
+ * 所以只能各存一份。改令牌时**两边都要改** —— 否则桌面端和扩展会慢慢长歪，
+ * 而用户眼里这是同一个产品。
  *
- * 用 oklch 而非 hex：亮暗主题可以用同一色相与色度、只调亮度，
- * 换主题时不会出现色相偏移。
+ * 内容与桌面端一致：四级表面、分层文字色、同一套圆角/字号/动效、
+ * 同一批组件基元。这里少的是桌面端专用的布局常量
+ * （--rail-w / --list-w / --band-h / --detail-w）—— 弹窗只有一栏，用不上。
+ *
+ * 详见 docs/reference/design-system.md。
  */
 @theme {
   /*
@@ -18,10 +22,6 @@
    * `max-w-sm` 就会被解析成 `max-width: var(--spacing-sm)` 而不是 24rem。
    * 曾因此把值设成 12px，导致整个连接表单宽度只有 12 像素 ——
    * 每个汉字换一行，界面完全不可用。
-   *
-   * 而且这些 token 本来也没被用到：组件里用的都是 Tailwind 的数字档位
-   * （`p-3`、`gap-2`、`mb-4`），它们走的是 `--spacing` 基准值。
-   * 需要自定义间距时用 Tailwind 的任意值语法 `p-[13px]`，不要动 `--spacing-*`。
    */
 
   /* 圆角 —— 6/10/16，比 1Password 的 4/8/12 更柔和一点，是我们的手感 */
@@ -29,90 +29,117 @@
   --radius-md: 10px;
   --radius-lg: 16px;
 
-  /* 字号 */
+  /* 字号阶梯 —— 相邻两档至少差 1.15 倍，每档配行高 */
+  --text-2xs: 11px;
+  --text-2xs--line-height: 1.45;
   --text-xs: 12px;
+  --text-xs--line-height: 1.55;
   --text-sm: 13px;
+  --text-sm--line-height: 1.6;
   --text-md: 14px;
-  --text-lg: 17px;
-  --text-xl: 22px;
-  --text-2xl: 30px;
+  --text-md--line-height: 1.6;
+  --text-lg: 16px;
+  --text-lg--line-height: 1.5;
+  --text-xl: 20px;
+  --text-xl--line-height: 1.35;
+  --text-2xl: 26px;
+  --text-2xl--line-height: 1.2;
+
+  --lh-tight: 1.25;
+  --lh-snug: 1.45;
+  --lh-prose: 1.8;
 
   /* 动效 —— 收敛到 3 档，够用即可 */
-  --dur-fast: 150ms;
+  --dur-fast: 140ms;
   --dur-base: 220ms;
-  --dur-slow: 320ms;
+  --dur-slow: 340ms;
+  --ease-enter: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-move: cubic-bezier(0.65, 0, 0.35, 1);
 
-  /* 字体 —— CJK 不能直接用 Inter，字形会不匹配 */
-  --font-ui: Inter, -apple-system, BlinkMacSystemFont, 'PingFang SC',
-    'Noto Sans SC', 'Microsoft YaHei', sans-serif;
-  --font-secret: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+  /* 字体 —— 不内嵌字体文件，走系统栈（见桌面端同处的说明） */
+  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
+    'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei',
+    Inter, sans-serif;
+  --font-secret: ui-monospace, SFMono-Regular, 'SF Mono', 'JetBrains Mono',
+    Menlo, Consolas, monospace;
 }
 
 /*
- * 分层配色。组件只引用层级，换主题时只改层级的值 ——
- * 这是从 1Password 的颜色组织方式里学到的结构。
+ * 分层配色。组件只引用层级，换主题时只改层级的值。
+ *
+ * 弹窗比桌面窗口小得多，四级表面在这里会显得碎 —— 所以只用
+ * canvas（弹窗底）+ paper（卡片）+ well（输入框/凹槽）+ overlay（浮层）。
+ * 令牌名保持一致，值是同一套，换主题的行为和桌面端完全一样。
  */
 :root {
-  --surface-base: oklch(0.99 0.002 240);
-  --surface-raised: oklch(1 0 0);
-  --surface-sunken: oklch(0.97 0.003 240);
+  --surface-canvas: oklch(0.975 0.003 250);
+  --surface-chrome: oklch(0.955 0.004 250);
+  --surface-content: oklch(0.985 0.002 250);
+  --surface-paper: oklch(1 0 0);
+  --surface-well: oklch(0.962 0.005 250);
+  --surface-hover: oklch(0.945 0.006 250);
   --surface-overlay: oklch(1 0 0);
-  --surface-hover: oklch(0.96 0.004 240);
-  --surface-selected: oklch(0.95 0.02 220);
+  --surface-selected: oklch(0.945 0.03 220);
 
-  --ink-primary: oklch(0.25 0.01 240);
-  --ink-secondary: oklch(0.48 0.012 240);
-  --ink-tertiary: oklch(0.62 0.01 240);
-  --ink-inverse: oklch(0.99 0.002 240);
+  --ink-primary: oklch(0.24 0.01 250);
+  --ink-secondary: oklch(0.46 0.012 250);
+  --ink-tertiary: oklch(0.525 0.012 250);
+  --ink-inverse: oklch(0.99 0.002 250);
 
-  --border-subtle: oklch(0.91 0.004 240);
-  --border-strong: oklch(0.84 0.006 240);
+  --border-subtle: oklch(0.9 0.005 250);
+  --border-strong: oklch(0.83 0.007 250);
 
   /* 强调色：深青蓝，刻意区别于 1Password 的品牌蓝 */
-  --accent: oklch(0.52 0.09 220);
-  --accent-hover: oklch(0.46 0.1 220);
-  --accent-tint: oklch(0.95 0.02 220);
+  --accent: oklch(0.5 0.105 220);
+  --accent-hover: oklch(0.44 0.11 220);
+  --accent-tint: oklch(0.945 0.03 220);
   --accent-ring: oklch(0.62 0.1 220);
-  --accent-ink: oklch(0.98 0.01 220);
+  --accent-ink: oklch(0.99 0.01 220);
 
   /* 语义色 —— 只用于安全状态，不做装饰 */
-  --safe: oklch(0.62 0.13 150);
-  --caution: oklch(0.72 0.14 75);
-  --risk: oklch(0.58 0.18 25);
+  --safe: oklch(0.515 0.125 150);
+  --caution: oklch(0.545 0.115 72);
+  --risk: oklch(0.53 0.19 25);
 
-  /* 层级 —— 比 1Password 克制：描边为主 + 极轻阴影，安全工具不该浮夸 */
-  --elev-1: 0 0 0 1px var(--border-subtle), 0 1px 2px oklch(0 0 0 / 0.04);
-  --elev-2: 0 0 0 1px var(--border-subtle), 0 4px 12px oklch(0 0 0 / 0.06);
-  --elev-3: 0 0 0 1px var(--border-subtle), 0 8px 28px oklch(0 0 0 / 0.1);
+  --edge-top: 0 0 0 0 transparent;
+  --elev-raise: var(--edge-top), 0 1px 2px oklch(0 0 0 / 0.05);
+  --elev-pop: var(--edge-top), 0 4px 16px oklch(0 0 0 / 0.1), 0 1px 3px oklch(0 0 0 / 0.06);
+  --elev-modal: var(--edge-top), 0 16px 48px oklch(0 0 0 / 0.22), 0 2px 8px oklch(0 0 0 / 0.1);
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --surface-base: oklch(0.19 0.008 240);
-    --surface-raised: oklch(0.23 0.008 240);
-    --surface-sunken: oklch(0.16 0.008 240);
-    --surface-overlay: oklch(0.25 0.008 240);
-    --surface-hover: oklch(0.27 0.01 240);
-    --surface-selected: oklch(0.31 0.03 220);
+    --surface-canvas: oklch(0.186 0.006 250);
+    --surface-chrome: oklch(0.208 0.007 250);
+    --surface-content: oklch(0.233 0.007 250);
+    --surface-paper: oklch(0.262 0.007 250);
+    --surface-well: oklch(0.205 0.007 250);
+    --surface-hover: oklch(0.3 0.009 250);
+    --surface-overlay: oklch(0.29 0.009 250);
+    --surface-selected: oklch(0.335 0.04 220);
 
-    --ink-primary: oklch(0.95 0.005 240);
-    --ink-secondary: oklch(0.74 0.008 240);
-    --ink-tertiary: oklch(0.6 0.008 240);
-    --ink-inverse: oklch(0.19 0.008 240);
+    --ink-primary: oklch(0.955 0.004 250);
+    --ink-secondary: oklch(0.775 0.008 250);
+    --ink-tertiary: oklch(0.652 0.01 250);
+    --ink-inverse: oklch(0.19 0.01 250);
 
-    --border-subtle: oklch(0.3 0.008 240);
-    --border-strong: oklch(0.4 0.01 240);
+    --border-subtle: oklch(0.295 0.008 250);
+    --border-strong: oklch(0.38 0.01 250);
 
-    /* 暗色下同一色相与色度、只提亮度 —— 这就是用 oklch 的意义 */
-    --accent: oklch(0.68 0.1 220);
-    --accent-hover: oklch(0.74 0.1 220);
-    --accent-tint: oklch(0.31 0.03 220);
+    --accent: oklch(0.745 0.105 220);
+    --accent-hover: oklch(0.8 0.1 220);
+    --accent-tint: oklch(0.335 0.04 220);
     --accent-ring: oklch(0.7 0.1 220);
-    --accent-ink: oklch(0.18 0.02 220);
+    --accent-ink: oklch(0.2 0.03 220);
 
-    --elev-1: 0 0 0 1px var(--border-subtle), 0 1px 2px oklch(0 0 0 / 0.3);
-    --elev-2: 0 0 0 1px var(--border-subtle), 0 4px 12px oklch(0 0 0 / 0.4);
-    --elev-3: 0 0 0 1px var(--border-subtle), 0 8px 28px oklch(0 0 0 / 0.5);
+    --safe: oklch(0.755 0.14 150);
+    --caution: oklch(0.805 0.13 78);
+    --risk: oklch(0.715 0.16 25);
+
+    --edge-top: inset 0 1px 0 oklch(1 0 0 / 0.06);
+    --elev-raise: var(--edge-top), 0 1px 2px oklch(0 0 0 / 0.3);
+    --elev-pop: var(--edge-top), 0 4px 16px oklch(0 0 0 / 0.45), 0 1px 3px oklch(0 0 0 / 0.3);
+    --elev-modal: var(--edge-top), 0 16px 48px oklch(0 0 0 / 0.6), 0 2px 8px oklch(0 0 0 / 0.4);
   }
 }
 
@@ -120,6 +147,7 @@
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
   }
 }
@@ -133,12 +161,12 @@ html, body, #root {
 
 body {
   width: 360px;
-  background: var(--surface-base);
+  background: var(--surface-canvas);
   color: var(--ink-primary);
   font-family: var(--font-ui);
   font-size: var(--text-md);
+  line-height: 1.6;
   -webkit-font-smoothing: antialiased;
-  /* 桌面应用不该有文本选中的意外拖拽感 —— 只在需要的地方开启 */
   user-select: none;
 }
 
@@ -149,6 +177,8 @@ body {
   user-select: text;
 }
 
+.tnum { font-variant-numeric: tabular-nums; }
+
 /* 焦点可见 —— 键盘可达是硬要求，不是可选项 */
 :focus-visible {
   outline: 2px solid var(--accent-ring);
@@ -156,7 +186,7 @@ body {
   border-radius: var(--radius-sm);
 }
 
-::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar { width: 11px; height: 11px; }
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
   border-radius: 999px;
@@ -164,3 +194,143 @@ body {
   background-clip: content-box;
 }
 ::-webkit-scrollbar-track { background: transparent; }
+
+input[type='search']::-webkit-search-cancel-button { -webkit-appearance: none; }
+
+/*
+ * 原生控件的默认蓝和我们的青蓝不在一个色系里，摆在一起像两个产品。
+ * 一行 accent-color 统一，同时保留系统控件的键盘与无障碍行为。
+ */
+input[type='checkbox'],
+input[type='radio'],
+input[type='range'] {
+  accent-color: var(--accent);
+}
+
+/* ── 组件基元（与桌面端同源） ─────────────────────────── */
+
+@layer components {
+  .band {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 52px;
+    padding-inline: 14px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+
+  .card {
+    border-radius: var(--radius-md);
+    background: var(--surface-paper);
+    border: 1px solid var(--border-subtle);
+    overflow: hidden;
+  }
+
+  .card-well {
+    border-radius: var(--radius-md);
+    background: var(--surface-well);
+    border: 1px solid var(--border-subtle);
+  }
+
+  .btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    border-radius: var(--radius-sm);
+    font-size: var(--text-sm);
+    font-weight: 500;
+    line-height: 1;
+    white-space: nowrap;
+    cursor: default;
+    transition: background-color var(--dur-fast) var(--ease-enter),
+      color var(--dur-fast) var(--ease-enter),
+      border-color var(--dur-fast) var(--ease-enter),
+      opacity var(--dur-fast) var(--ease-enter);
+  }
+  .btn:disabled { opacity: 0.45; }
+
+  .btn-primary {
+    padding: 8px 14px;
+    background: var(--accent);
+    color: var(--accent-ink);
+  }
+  .btn-primary:hover:not(:disabled) { background: var(--accent-hover); }
+
+  .btn-quiet {
+    padding: 7px 12px;
+    background: var(--surface-paper);
+    border: 1px solid var(--border-subtle);
+    color: var(--ink-secondary);
+  }
+  .btn-quiet:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--ink-primary);
+    border-color: var(--border-strong);
+  }
+
+  .btn-ghost {
+    padding: 5px 8px;
+    border-radius: var(--radius-sm);
+    color: var(--ink-tertiary);
+    font-size: var(--text-xs);
+    font-weight: 400;
+  }
+  .btn-ghost:hover:not(:disabled) {
+    background: var(--surface-hover);
+    color: var(--ink-primary);
+  }
+
+  .field {
+    width: 100%;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-strong);
+    background: var(--surface-paper);
+    color: var(--ink-primary);
+    padding: 8px 11px;
+    font-size: var(--text-md);
+    line-height: 1.4;
+    outline: none;
+    transition: border-color var(--dur-fast) var(--ease-enter),
+      box-shadow var(--dur-fast) var(--ease-enter);
+  }
+  .field::placeholder { color: var(--ink-tertiary); }
+  .field:focus {
+    border-color: var(--accent);
+    box-shadow: 0 0 0 3px color-mix(in oklab, var(--accent) 18%, transparent);
+  }
+  .field:disabled { opacity: 0.5; }
+
+  .tile {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: var(--surface-hover);
+    color: var(--ink-secondary);
+  }
+  .tile[data-type='login'] { background: color-mix(in oklab, var(--accent) 12%, var(--surface-paper)); color: var(--accent); }
+  .tile[data-type='card'] { background: color-mix(in oklab, var(--caution) 15%, var(--surface-paper)); color: var(--caution); }
+  .tile[data-type='identity'] { background: color-mix(in oklab, var(--safe) 13%, var(--surface-paper)); color: var(--safe); }
+  .tile[data-type='secureNote'] { background: color-mix(in oklab, var(--ink-tertiary) 12%, var(--surface-paper)); color: var(--ink-secondary); }
+  .tile[data-type='sshKey'] { background: color-mix(in oklab, var(--risk) 11%, var(--surface-paper)); color: var(--risk); }
+}
+
+/* ── 动效 ─────────────────────────────────────────────── */
+
+@keyframes coffer-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.fade-in { animation: coffer-fade-in var(--dur-fast) var(--ease-enter) both; }
+
+@keyframes coffer-screen-in {
+  from { opacity: 0; transform: translateY(5px); }
+  to { opacity: 1; transform: none; }
+}
+.screen-in { animation: coffer-screen-in var(--dur-base) var(--ease-enter) both; }
+
+@keyframes coffer-spin { to { transform: rotate(360deg); } }
+.spin { animation: coffer-spin 700ms linear infinite; }

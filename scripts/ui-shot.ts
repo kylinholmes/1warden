@@ -124,6 +124,21 @@ try {
   await send('Emulation.setDeviceMetricsOverride', {
     width, height, deviceScaleFactor: 2, mobile: false,
   });
+
+  /*
+   * 强制配色方案。
+   *
+   * 无头浏览器跟随系统外观，而开发机常年是暗色 —— 于是亮色主题**永远
+   * 截不到**，两套颜色里有一套没人看过。用 COFFER_SHOT_SCHEME=light 抓一遍，
+   * 「亮色下对比度不够」这类问题才可能被发现。
+   */
+  const scheme = process.env.COFFER_SHOT_SCHEME;
+  if (scheme === 'light' || scheme === 'dark') {
+    await send('Emulation.setEmulatedMedia', {
+      features: [{ name: 'prefers-color-scheme', value: scheme }],
+    });
+  }
+
   await send('Page.navigate', { url: pageUrl });
 
   // 等字体与布局稳定。用固定延时而不是 networkidle —— 静态页没有网络活动可等。

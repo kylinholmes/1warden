@@ -97,7 +97,21 @@ function DetailPane({ children }: { children: React.ReactNode }) {
   );
 }
 
-const which = new URLSearchParams(location.search).get('screen') ?? 'messy';
+const params = new URLSearchParams(location.search);
+const which = params.get('screen') ?? 'messy';
+
+/*
+ * 「记住的账户」是存在 localStorage 里的，而无头浏览器每次都是全新 profile ——
+ * 不种进去的话，连接屏永远只截得到空白表单那一态，看不到账户选择。
+ * 这里种的是**假数据**，和这个文件里其他假数据一样，只为把界面撑到有代表性的状态。
+ */
+if (params.has('accounts')) {
+  localStorage.setItem('coffer.accounts', JSON.stringify([
+    { serverUrl: 'https://vault.example.com', email: 'me@example.com' },
+    { serverUrl: 'https://vault.acme-corp.internal', email: 'zhang@acme.example' },
+    { serverUrl: 'http://192.168.1.10:8080', email: 'admin@home.lan' },
+  ]));
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
