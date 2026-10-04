@@ -11,8 +11,9 @@
     "typecheck": "tsc --build --force"
   },
   "devDependencies": {
+    "@bitwarden/cli": "2025.2.0",
+    "@types/node": "24.9.2",
     "typescript": "5.9.3",
-    "vitest": "5.0.3",
-    "@types/node": "24.9.2"
+    "vitest": "5.0.3"
   }
 }

@@ -2,14 +2,29 @@
 set -euo pipefail
 source "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/dev-env.sh"
 
-is_up() { curl -fsS --max-time 3 "$VW_URL/api/config" >/dev/null 2>&1; }
+# -k：本地自签证书，跳过校验（仅限本地开发）
+is_up() { curl -fsSk --max-time 3 "$VW_URL/api/config" >/dev/null 2>&1; }
 
 # 端口通了不代表是我们启动的那个 —— 可能是别的 vaultwarden 实例占着。
 # 光看端口会把「外来进程」误判成「已在运行」，之后所有测试都打在错误的服务器上。
 is_ours() { [[ -f "$VW_PIDFILE" ]] && kill -0 "$(cat "$VW_PIDFILE")" 2>/dev/null; }
 
+ensure_tls() {
+  [[ -f "$VW_TLS_DIR/cert.pem" && -f "$VW_TLS_DIR/key.pem" ]] && return 0
+  echo "→ 生成本地自签证书（官方 CLI 拒绝明文 HTTP，所以本地也走 HTTPS）..."
+  mkdir -p "$VW_TLS_DIR"
+  local openssl_bin
+  openssl_bin="$(brew --prefix openssl@3 2>/dev/null)/bin/openssl"
+  [[ -x "$openssl_bin" ]] || openssl_bin=/usr/bin/openssl
+  "$openssl_bin" req -x509 -newkey rsa:2048 \
+    -keyout "$VW_TLS_DIR/key.pem" -out "$VW_TLS_DIR/cert.pem" \
+    -days 3650 -nodes -subj "/CN=localhost" \
+    -addext "subjectAltName=DNS:localhost,IP:127.0.0.1" 2>/dev/null
+}
+
 start() {
   [[ -x "$VW_BIN" ]] || { echo "✗ 未找到 $VW_BIN，请先运行 scripts/build-vaultwarden.sh" >&2; exit 1; }
+  ensure_tls
   if is_up; then
     if is_ours; then echo "✓ 已在运行: $VW_URL"; return 0; fi
     echo "✗ 端口 $VW_PORT 已被**其他**进程占用（不是本脚本启动的）：" >&2

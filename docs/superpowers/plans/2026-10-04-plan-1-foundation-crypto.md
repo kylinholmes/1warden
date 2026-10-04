@@ -315,6 +315,7 @@ git commit -m "chore: add native Vaultwarden dev server scripts (cargo build, no
   - `toBase64Url(bytes: Uint8Array): string` / `fromBase64Url(s: string): Uint8Array`
   - `utf8Encode(s: string): Uint8Array` / `utf8Decode(b: Uint8Array): string`
   - `randomBytes(n: number): Uint8Array`
+  - `sha256(data: Uint8Array): Promise<Uint8Array>`
   - `constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean`
   - `zeroize(b: Uint8Array): void`
   - `concatBytes(...parts: Uint8Array[]): Uint8Array`
@@ -400,6 +401,17 @@ describe('concatBytes', () => {
   });
 });
 
+describe('sha256', () => {
+  it('matches the NIST vector for "abc"', async () => {
+    expect(toBase64(await sha256(utf8Encode('abc'))))
+      .toBe('ungWv48Bz+pBQUDeXa4iI7ADYaOWF3qctBD/YfIAFa0=');
+  });
+
+  it('produces 32 bytes', async () => {
+    expect(await sha256(new Uint8Array(0))).toHaveLength(32);
+  });
+});
+
 describe('zeroize', () => {
   it('overwrites every byte with zero', () => {
     const b = new Uint8Array([1, 2, 3]);
@@ -465,6 +477,10 @@ export function randomBytes(n: number): Uint8Array {
   return b;
 }
 
+export async function sha256(data: Uint8Array): Promise<Uint8Array> {
+  return new Uint8Array(await globalThis.crypto.subtle.digest('SHA-256', data as BufferSource));
+}
+
 export function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean {
   if (a.length !== b.length) return false;
   let diff = 0;
@@ -519,8 +535,9 @@ git commit -m "feat(crypto): add byte, base64 and utf8 primitives"
 
 ```ts
 import { describe, it, expect } from 'vitest';
+import { argon2id } from 'hash-wasm';
 import { deriveMasterKey, hashMasterPassword, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID } from './kdf';
-import { toBase64, utf8Encode } from './bytes';
+import { toBase64, utf8Encode, sha256 } from './bytes';
 
 describe('deriveMasterKey / PBKDF2', () => {
   it('matches a known-answer vector', async () => {
@@ -569,6 +586,31 @@ describe('deriveMasterKey / Argon2id', () => {
     const b = await deriveMasterKey('pw', 'u@e.com', cfg);
     expect(a).toEqual(b);
   }, 60_000);
+
+  // ⚠️ 最关键的一个断言：Argon2id 的盐是 SHA-256(邮箱)，不是邮箱原文。
+  // 用同一个 argon2id 库独立复算两条路径，断言实现走的是「盐先哈希」那条。
+  // 若有人把 sha256() 去掉，这里会立刻变红。
+  it('salts with SHA-256(email), not the raw email', async () => {
+    const email = 'user@example.com';
+    const emailSalt = utf8Encode(email);
+    const shared = {
+      password: utf8Encode('pw'),
+      parallelism: 4, iterations: 3,
+      memorySize: 64 * 1024,          // 64 MiB → KiB
+      hashLength: 32, outputType: 'binary',
+    } as const;
+
+    const withHashedSalt = await argon2id({ ...shared, salt: await sha256(emailSalt) });
+    const withRawSalt = await argon2id({ ...shared, salt: emailSalt });
+
+    // 先确认两条路径确实不同 —— 否则这个测试证明不了任何事
+    expect(withHashedSalt).not.toEqual(withRawSalt);
+
+    const actual = await deriveMasterKey('pw', email, {
+      kdf: KDF_TYPE_ARGON2ID, iterations: 3, memory: 64, parallelism: 4,
+    });
+    expect(actual).toEqual(withHashedSalt);
+  }, 60_000);
 });
 
 describe('hashMasterPassword', () => {
@@ -594,7 +636,7 @@ Expected: FAIL —— 无法解析模块 `./kdf`
 
 ```ts
 import { argon2id, pbkdf2 } from 'hash-wasm';
-import { toBase64, utf8Encode } from './bytes';
+import { toBase64, utf8Encode, sha256 } from './bytes';
 
 export const KDF_TYPE_PBKDF2 = 0;
 export const KDF_TYPE_ARGON2ID = 1;
@@ -604,29 +646,40 @@ export type KdfConfig =
   | { kdf: typeof KDF_TYPE_ARGON2ID; iterations: number; memory: number; parallelism: number };
 
 /**
- * Bitwarden 服务端返回的 KdfMemory 单位与 Argon2 库期望的单位之间的换算。
- * —— 这是全代码库中唯一假设单位的地方。若 Argon2 账户登录失败而 PBKDF2 正常，
- *    改这一个值即可。Task 10 的互操作测试会给出确定答案。
+ * Bitwarden 服务端返回的 KdfMemory 单位（MiB）→ hash-wasm 期望的 KiB。
+ * 已由 bitwarden/sdk-internal 源码确认：`let memory = memory.get() * 1024; // Convert MiB to KiB`
  */
-const ARGON2_MEMORY_UNIT_MULTIPLIER = 1024; // 服务端单位 × 此值 = hash-wasm 期望的 KiB
+const ARGON2_MEMORY_UNIT_MULTIPLIER = 1024;
 
-/** masterKey = KDF(password, salt = lowercase(trim(email))) */
+/**
+ * masterKey = KDF(password, salt)
+ *
+ * ⚠️ **两种 KDF 的盐不同，这是最容易踩且最难排查的坑：**
+ *   - PBKDF2   → 盐 = lowercase(trim(email)) 原文
+ *   - Argon2id → 盐 = **SHA-256(lowercase(trim(email)))**，即先把邮箱哈希一次
+ *
+ * 官方实现（`bitwarden-crypto/src/keys/kdf.rs`）对 Argon2 分支显式做了
+ * `Sha256::new().chain_update(salt).finalize()`。搞错的话：PBKDF2 账户一切正常，
+ * Argon2id 账户永远提示「密码错误」，且没有任何线索指向盐。
+ */
 export async function deriveMasterKey(
   password: string,
   email: string,
   kdf: KdfConfig,
 ): Promise<Uint8Array> {
-  const salt = utf8Encode(email.trim().toLowerCase());
+  const emailSalt = utf8Encode(email.trim().toLowerCase());
   const pw = utf8Encode(password);
 
   switch (kdf.kdf) {
     case KDF_TYPE_PBKDF2:
-      return pbkdf2({ password: pw, salt, iterations: kdf.iterations, hashLength: 32, hashFunction: 'sha256' });
+      return pbkdf2({
+        password: pw, salt: emailSalt, iterations: kdf.iterations, hashLength: 32, hashFunction: 'sha256',
+      });
 
     case KDF_TYPE_ARGON2ID:
       return argon2id({
         password: pw,
-        salt,
+        salt: await sha256(emailSalt),   // ← 注意：盐先被 SHA-256 了一次
         parallelism: kdf.parallelism,
         iterations: kdf.iterations,
         memorySize: kdf.memory * ARGON2_MEMORY_UNIT_MULTIPLIER,
@@ -820,7 +873,7 @@ Expected: FAIL —— 无法解析模块 `./encstring`
 - [ ] **Step 3: 实现 `packages/crypto/src/encstring.ts`**
 
 ```ts
-import { fromBase64, toBase64, concatBytes, constantTimeEqual, randomBytes } from './bytes';
+import { fromBase64, toBase64 } from './bytes';
 
 export const EncryptionType = {
   AesCbc256_B64: 0,
@@ -869,7 +922,9 @@ export function parseEncString(s: EncString): ParsedEncString {
   }
   const shape = SHAPE[type]!;
   const body = s.slice(dot + 1);
-  const expectedSegments = shape.iv > 0 ? 3 : shape.mac > 0 ? 2 : 1;
+  // 段数 = (有 IV ? 1 : 0) + 1(数据段) + (有 MAC ? 1 : 0)
+  // 注意 type 0 是 iv|data 两段（无 MAC），不是三段
+  const expectedSegments = (shape.iv > 0 ? 1 : 0) + 1 + (shape.mac > 0 ? 1 : 0);
   const segments = body.split('|');
   if (segments.length !== expectedSegments) {
     throw new DecryptError('malformed', `类型 ${type} 期望 ${expectedSegments} 段，实际 ${segments.length} 段`);
@@ -942,9 +997,10 @@ export async function hmacSha256(key: Uint8Array, data: Uint8Array): Promise<Uin
   const k = await importHmacKey(key);
   return new Uint8Array(await globalThis.crypto.subtle.sign('HMAC', k, data as BufferSource));
 }
-
-export { randomBytes };
 ```
+
+> **不要在这里转出 `bytes.ts` 的符号**：`index.ts` 用 `export *` 聚合所有模块，
+> 两个模块导出同名符号会造成歧义导出（TS 报错），且这些符号在 `keys.ts` 里才用到。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -1018,7 +1074,26 @@ describe('stretchMasterKey', () => {
     const expected = new Uint8Array(await crypto.subtle.sign('HMAC', hmacKey, info));
     expect((await stretchMasterKey(mk)).encKey).toEqual(expected);
   });
+
+  // 🔑 官方测试向量 —— 唯一的「外部权威答案」。
+  // 来源：bitwarden/sdk-internal, crates/bitwarden-crypto/src/keys/utils.rs::test_stretch_kdf_key
+  // 这一条能同时抓住：HMAC 用错、info 串写错、enc/mac 顺序颠倒、
+  // 以及最阴险的「误用 WebCrypto 的 extract+expand HKDF」（那样两个值都会不同）。
+  it('matches the official stretch_key test vector', async () => {
+    const masterKey = fromHex('1f4f68e29647b15ac250acd1118184518aa745a7fe95021b27c5402a16c3564b');
+    const k = await stretchMasterKey(masterKey);
+    expect(toHex(k.encKey)).toBe('6f1fb22dee9825728fd77c5387adc3178e8678f93d84a3b671c5bdccbc15ed60');
+    expect(toHex(k.macKey)).toBe('dd7fceea651bca265634221c4e1cb910303d7fa6d1f7c257e81a3055c1f9b39b');
+  });
 });
+
+// 测试辅助
+function fromHex(s: string): Uint8Array {
+  return new Uint8Array(s.match(/../g)!.map((b) => parseInt(b, 16)));
+}
+function toHex(b: Uint8Array): string {
+  return [...b].map((x) => x.toString(16).padStart(2, '0')).join('');
+}
 
 describe('makeUserKey', () => {
   it('produces 32-byte keys and is random per call', () => {
@@ -1282,7 +1357,6 @@ Expected: FAIL —— 无法解析模块 `./rsa`
 
 ```ts
 import { DecryptError, parseEncString, serializeEncString, EncryptionType } from './encstring';
-import { toBase64 } from './bytes';
 
 async function importPrivateKey(der: Uint8Array, hash: 'SHA-1' | 'SHA-256'): Promise<CryptoKey> {
   try {
@@ -1331,8 +1405,6 @@ export async function encryptWithPublicKey(data: Uint8Array, publicKeyDer: Uint8
   const ct = new Uint8Array(await globalThis.crypto.subtle.encrypt({ name: 'RSA-OAEP' }, key, data as BufferSource));
   return serializeEncString(EncryptionType.Rsa2048_OaepSha1_B64, undefined, ct);
 }
-
-export { toBase64 };
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -1365,12 +1437,16 @@ git commit -m "feat(crypto): add RSA-2048 OAEP key wrapping"
 - Consumes: `bytes.ts`、`encstring.ts` 的 `hmacSha256`
 - Produces:
   - `interface TotpOptions { digits?: number; period?: number; algorithm?: 'SHA-1' | 'SHA-256' | 'SHA-512' }`
-  - `generateTotp(secret: string, at?: number, opts?: TotpOptions): Promise<{ code: string; period: number; remaining: number }>`
-  - `parseOtpauthUri(uri: string): { secret: string; digits: number; period: number; algorithm: string; issuer?: string; account?: string; isSteam: boolean }`
+  - `type TotpAlgorithm = 'SHA-1' | 'SHA-256' | 'SHA-512'`
+  - `generateTotp(secretOrUri: string, at?: number, opts?: TotpOptions): Promise<{ code: string; period: number; remaining: number }>` —— 接受裸 base32 / `otpauth://` / `steam://` 三种形态
+  - `parseOtpauthUri(uri: string): { secret: string; digits: number; period: number; algorithm: TotpAlgorithm; issuer: string | undefined; account: string | undefined; isSteam: boolean }`
   - `base32Decode(s: string): Uint8Array`
 
-> **用途**：`login.totp` 字段存的是加密的 `otpauth://` URI。用户从 GitHub 等处拿到的是这个 URI。
-> **Steam 特例**：`otpauth://totp/Steam:user?secret=X&encoder=steam`，用自定义字母表 `23456789BCDFGHJKMNPQRTVWXY`、5 位、30 秒。这是真实用户一定会遇到的。
+> **用途**：`login.totp` 字段存的是加密的 URI。用户从 GitHub 等处拿到的是 `otpauth://` 形式。
+> **Steam 特例**：字面量 `steam://<base32>` 前缀 → 自定义字母表 `23456789BCDFGHJKMNPQRTVWXY`、5 位、30 秒。
+> 官方实现**只**认这个前缀；`otpauth://totp/Steam:...` 会被当成普通 TOTP。我们跟随官方，
+> 否则同一条目我们算出 5 位、官方客户端算出 6 位。
+> **base32 不是标准实现**：非法字符被丢弃而非报错，见实现处的说明。
 
 - [ ] **Step 1: 写失败的测试 `packages/crypto/src/totp.test.ts`**
 
@@ -1386,12 +1462,23 @@ describe('base32Decode', () => {
   it('decodes the RFC 6238 secret to ASCII digits', () => {
     expect(new TextDecoder().decode(base32Decode(RFC_SECRET))).toBe('12345678901234567890');
   });
-  it('ignores padding and whitespace, accepts lowercase', () => {
+
+  // 官方单元测试向量 —— 来源：bitwarden-vault/src/totp.rs
+  it('matches the official decode vectors', () => {
+    expect([...base32Decode('ABCD123')]).toEqual([0, 68, 61]);
+    expect([...base32Decode('WQIQ25BRKZYCJVYP')])
+      .toEqual([180, 17, 13, 116, 49, 86, 112, 36, 215, 15]);
+  });
+
+  it('silently drops characters outside the alphabet', () => {
+    // '1'、'!'、'=' 都不在字母表里，会被丢掉 —— 官方行为就是如此，不是 bug
+    expect(base32Decode('PIUD1IS!EQYA=')).toEqual(base32Decode('PIUDISEQYA'));
     expect(base32Decode('gezd gnbv gy3t qojq gezd gnbv gy3t qojq=='))
       .toEqual(base32Decode(RFC_SECRET));
   });
-  it('throws on invalid characters', () => {
-    expect(() => base32Decode('0189')).toThrow(/base32/i);
+
+  it('is case-insensitive', () => {
+    expect(base32Decode('wqiq25brkzycjvyp')).toEqual(base32Decode('WQIQ25BRKZYCJVYP'));
   });
 });
 
@@ -1439,6 +1526,28 @@ describe('generateTotp — SHA-256 / SHA-512 (RFC 6238 向量)', () => {
   });
 });
 
+// 🔑 官方 Bitwarden 测试向量 —— 覆盖裸 base32 / 小写 / 含非法字符 / steam:// / 前导零补齐
+// 来源：bitwarden-vault/src/totp.rs 的单元测试
+describe('generateTotp — 官方 Bitwarden 测试向量', () => {
+  const T = Date.UTC(2023, 0, 1); // 2023-01-01T00:00:00.000Z
+
+  const cases: Array<[string, string]> = [
+    ['WQIQ25BRKZYCJVYP', '194506'],
+    ['wqiq25brkzycjvyp', '194506'],
+    ['PIUDISEQYA', '829846'],
+    ['PIUD1IS!EQYA=', '829846'],
+    ['steam://HXDMVJECJJWSRB3HWIZR4IFUGFTMXBOZ', '7W6CJ'],
+    ['steam://ABCD123', 'N26DF'],
+    ['HJSGFJHDFDJDJKSDFD', '000034'],
+  ];
+
+  for (const [input, expected] of cases) {
+    it(`${input} → ${expected}`, async () => {
+      expect((await generateTotp(input, T)).code).toBe(expected);
+    });
+  }
+});
+
 describe('parseOtpauthUri', () => {
   it('parses a standard TOTP URI', () => {
     const u = parseOtpauthUri('otpauth://totp/GitHub:kylin?secret=ABCDEFGH&issuer=GitHub&digits=6&period=30');
@@ -1457,9 +1566,28 @@ describe('parseOtpauthUri', () => {
     expect(u.algorithm).toBe('SHA-1');
   });
 
-  it('detects Steam', () => {
+  it('does NOT infer Steam from an otpauth URI (matches official behaviour)', () => {
+    // 官方只用字面量 `steam://` 前缀识别 Steam。跟随官方，
+    // 否则同一条目我们算 5 位、官方客户端算 6 位，产生分歧。
     const u = parseOtpauthUri('otpauth://totp/Steam:kylin?secret=ABCDEFGH&encoder=steam');
-    expect(u.isSteam).toBe(true);
+    expect(u.isSteam).toBe(false);
+  });
+
+  it('lowercases the whole URI, so parameter names are case-insensitive', () => {
+    const u = parseOtpauthUri('otpauth://totp/x?SECRET=ABCDEFGH&DIGITS=8&PERIOD=60');
+    expect(u.secret).toBe('abcdefgh');
+    expect(u.digits).toBe(8);
+    expect(u.period).toBe(60);
+  });
+
+  it('clamps out-of-range digits and period', () => {
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&digits=999').digits).toBe(10);
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&digits=-5').digits).toBe(0);
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&period=0').period).toBe(1);
+  });
+
+  it('falls back to SHA-1 for an unknown algorithm', () => {
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&algorithm=md5').algorithm).toBe('SHA-1');
   });
 
   it('rejects a non-totp URI', () => {
@@ -1493,23 +1621,32 @@ Expected: FAIL —— 无法解析模块 `./totp`
 
 ```ts
 import { hmacSha256 } from './encstring';
-import { concatBytes, utf8Encode } from './bytes';
 
 const BASE32_ALPHABET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
 const STEAM_ALPHABET = '23456789BCDFGHJKMNPQRTVWXY';
 
+/**
+ * ⚠️ Bitwarden 的 base32 解码器**刻意不是标准实现** —— 见 `bitwarden-vault/src/totp.rs`
+ * 中 `decode_b32` 的注释原文：「not technically a correct base32 decoder since we
+ * filter out various characters, and use exact chunking」。它的实际行为是：
+ *   1. 整个字符串转大写
+ *   2. **字母表外的字符被静默丢弃**（而不是报错）—— `=`、`-`、空格、`0/1/8/9` 都会被丢掉
+ *   3. 每个保留字符出 5 bit
+ *   4. 末尾不足 8 位的残余 bit **被丢弃**
+ *
+ * 结果：`"PIUD1IS!EQYA="` 与 `"PIUDISEQYA"` 必须解出完全相同的值。
+ * 如果照抄标准 base32（遇到非法字符就抛错），一部分用户的验证码会直接算不出来。
+ */
 export function base32Decode(input: string): Uint8Array {
-  const clean = input.replace(/[\s=-]/g, '').toUpperCase();
-  if (clean.length === 0) throw new Error('base32: 输入为空');
-  const out = new Uint8Array(Math.floor((clean.length * 5) / 8));
+  const kept = input.toUpperCase().split('').filter((c) => BASE32_ALPHABET.includes(c));
+  const out = new Uint8Array(Math.floor((kept.length * 5) / 8));
   let acc = 0, bits = 0, o = 0;
-  for (const ch of clean) {
-    const v = BASE32_ALPHABET.indexOf(ch);
-    if (v === -1) throw new Error(`base32: 非法字符 ${JSON.stringify(ch)}`);
-    acc = (acc << 5) | v; bits += 5;
-    if (bits >= 8) { bits -= 8; out[o++] = (acc >> bits) & 0xff; }
+  for (const ch of kept) {
+    acc = (acc << 5) | BASE32_ALPHABET.indexOf(ch);
+    bits += 5;
+    if (bits >= 8) { bits -= 8; out[o++] = (acc >>> bits) & 0xff; }
   }
-  return out.subarray(0, o);
+  return out.subarray(0, o); // 末尾残余 bit 自然被丢弃
 }
 
 export interface TotpOptions {
@@ -1524,95 +1661,143 @@ export interface TotpResult {
   remaining: number;
 }
 
-/** RFC 6238 TOTP。`at` 为毫秒时间戳，默认取当前时间。 */
+export type TotpAlgorithm = 'SHA-1' | 'SHA-256' | 'SHA-512';
+
+/**
+ * 生成 TOTP 验证码。`secretOrUri` 支持官方实现的三种输入形态：
+ *   - `steam://<base32>`            → Steam Guard（5 位、自定义字母表、强制 SHA-1）
+ *   - `otpauth://totp/...?secret=`  → 按 URI 里的参数
+ *   - 裸 base32                     → 按 `opts`（默认 6 位 / 30 秒 / SHA-1）
+ */
 export async function generateTotp(
-  secret: string,
+  secretOrUri: string,
   at: number = Date.now(),
   opts: TotpOptions = {},
 ): Promise<TotpResult> {
-  const period = opts.period ?? 30;
-  const digits = opts.digits ?? 6;
-  const algorithm = opts.algorithm ?? 'SHA-1';
+  const lower = secretOrUri.toLowerCase(); // 官方实现先把整个字符串小写再判断前缀
+
+  if (lower.startsWith('steam://')) {
+    return computeCode(secretOrUri.slice('steam://'.length), at, {
+      digits: 5, period: 30, algorithm: 'SHA-1', steam: true,
+    });
+  }
+
+  if (lower.startsWith('otpauth://')) {
+    const p = parseOtpauthUri(secretOrUri);
+    return computeCode(p.secret, at, {
+      digits: p.digits, period: p.period, algorithm: p.algorithm, steam: p.isSteam,
+    });
+  }
+
+  return computeCode(secretOrUri, at, {
+    digits: opts.digits ?? 6,
+    period: opts.period ?? 30,
+    algorithm: opts.algorithm ?? 'SHA-1',
+    steam: false,
+  });
+}
+
+async function computeCode(
+  secret: string,
+  at: number,
+  o: { digits: number; period: number; algorithm: TotpAlgorithm; steam: boolean },
+): Promise<TotpResult> {
   const key = base32Decode(secret);
+  const counter = Math.floor(at / 1000 / o.period);
 
-  const counter = Math.floor(at / 1000 / period);
-  const counterBytes = new Uint8Array(8);
-  // 64 位大端计数（JS 位运算只有 32 位，故手工拆分高低位）
-  const hi = Math.floor(counter / 2 ** 32);
-  const lo = counter >>> 0;
-  new DataView(counterBytes.buffer).setUint32(0, hi);
-  new DataView(counterBytes.buffer).setUint32(4, lo);
+  // 64 位大端计数（JS 位运算只有 32 位，拆成高低位写入）
+  const cb = new Uint8Array(8);
+  const dv = new DataView(cb.buffer);
+  dv.setUint32(0, Math.floor(counter / 2 ** 32));
+  dv.setUint32(4, counter >>> 0);
 
-  const mac = algorithm === 'SHA-1' ? await hmacSha256(key, counterBytes) : await hmacWith(algorithm, key, counterBytes);
+  // Steam Guard 强制 SHA-1，忽略 URI 里的 algorithm
+  const mac = await hmacWith(o.steam ? 'SHA-1' : o.algorithm, key, cb);
 
   // 动态截断（RFC 4226 §5.3）
   const offset = mac[mac.length - 1]! & 0x0f;
-  const binary = ((mac[offset]! & 0x7f) << 24) | (mac[offset + 1]! << 16) | (mac[offset + 2]! << 8) | mac[offset + 3]!;
+  const binary =
+    ((mac[offset]! & 0x7f) << 24) | (mac[offset + 1]! << 16) | (mac[offset + 2]! << 8) | mac[offset + 3]!;
 
-  const code = String(binary % 10 ** digits).padStart(digits, '0');
-  return { code, period, remaining: period - (Math.floor(at / 1000) % period) };
+  const code = o.steam
+    ? steamCode(binary, o.digits)
+    : String(binary % 10 ** o.digits).padStart(o.digits, '0');
+
+  return { code, period: o.period, remaining: o.period - (Math.floor(at / 1000) % o.period) };
 }
 
-async function hmacWith(alg: 'SHA-256' | 'SHA-512', key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
-  const k = await globalThis.crypto.subtle.importKey('raw', key as BufferSource, { name: 'HMAC', hash: alg }, false, ['sign']);
+/** Steam Guard 字母表：从最低位开始取，逐位整除 */
+function steamCode(binary: number, digits: number): string {
+  let full = binary & 0x7fffffff;
+  let out = '';
+  for (let i = 0; i < digits; i++) {
+    out += STEAM_ALPHABET[full % STEAM_ALPHABET.length]!;
+    full = Math.floor(full / STEAM_ALPHABET.length);
+  }
+  return out;
+}
+
+async function hmacWith(alg: TotpAlgorithm, key: Uint8Array, data: Uint8Array): Promise<Uint8Array> {
+  const k = await globalThis.crypto.subtle.importKey(
+    'raw', key as BufferSource, { name: 'HMAC', hash: alg }, false, ['sign'],
+  );
   return new Uint8Array(await globalThis.crypto.subtle.sign('HMAC', k, data as BufferSource));
-}
-
-/** Steam Guard：5 位、自定义字母表 */
-export async function generateSteamTotp(secret: string, at: number = Date.now()): Promise<TotpResult> {
-  const period = 30;
-  const key = base32Decode(secret);
-  const counter = Math.floor(at / 1000 / period);
-  const counterBytes = new Uint8Array(8);
-  new DataView(counterBytes.buffer).setUint32(0, Math.floor(counter / 2 ** 32));
-  new DataView(counterBytes.buffer).setUint32(4, counter >>> 0);
-  const mac = await hmacSha256(key, counterBytes);
-  const offset = mac[mac.length - 1]! & 0x0f;
-  let binary = ((mac[offset]! & 0x7f) << 24) | (mac[offset + 1]! << 16) | (mac[offset + 2]! << 8) | mac[offset + 3]!;
-  let code = '';
-  for (let i = 0; i < 5; i++) { code += STEAM_ALPHABET[binary % STEAM_ALPHABET.length]; binary = Math.floor(binary / STEAM_ALPHABET.length); }
-  return { code, period, remaining: period - (Math.floor(at / 1000) % period) };
 }
 
 export interface ParsedOtpauth {
   secret: string;
   digits: number;
   period: number;
-  algorithm: string;
-  issuer?: string;
-  account?: string;
+  algorithm: TotpAlgorithm;
+  issuer: string | undefined;
+  account: string | undefined;
   isSteam: boolean;
 }
 
-export function parseOtpauthUri(uri: string): ParsedOtpauth {
+function normaliseAlgorithm(raw: string | null): TotpAlgorithm {
+  switch ((raw ?? 'SHA1').toUpperCase()) {
+    case 'SHA256': return 'SHA-256';
+    case 'SHA512': return 'SHA-512';
+    default: return 'SHA-1'; // 未知值回退到 SHA-1（与官方一致）
+  }
+}
+
+export function parseOtpauthUri(input: string): ParsedOtpauth {
+  // 官方实现先把整个字符串小写再解析，因此 `Secret=` 等同于 `secret=`
+  const uri = input.toLowerCase();
+
   let url: URL;
   try { url = new URL(uri); }
-  catch { throw new Error(`无法解析 otpauth URI: ${uri.slice(0, 40)}`); }
+  catch { throw new Error(`无法解析 otpauth URI: ${input.slice(0, 40)}`); }
 
-  if (url.protocol.toLowerCase() !== 'otpauth:') throw new Error('不是 otpauth:// URI');
-  if (url.host.toLowerCase() !== 'totp') throw new Error(`仅支持 totp，收到 ${url.host}`);
+  if (url.protocol !== 'otpauth:') throw new Error('不是 otpauth:// URI');
+  if (url.host !== 'totp') throw new Error(`仅支持 totp，收到 ${url.host}`);
 
   const secret = url.searchParams.get('secret');
   if (!secret) throw new Error('otpauth URI 缺少 secret 参数');
 
   const label = decodeURIComponent(url.pathname.replace(/^\//, ''));
-  const [labelIssuer, labelAccount] = label.includes(':')
-    ? [label.slice(0, label.indexOf(':')), label.slice(label.indexOf(':') + 1)]
-    : [undefined, label];
+  const sep = label.indexOf(':');
+  const labelIssuer = sep >= 0 ? label.slice(0, sep) : undefined;
+  const labelAccount = sep >= 0 ? label.slice(sep + 1) : label;
 
-  const algorithm = (url.searchParams.get('algorithm') ?? 'SHA1').toUpperCase().replace('SHA', 'SHA-');
+  // digits 钳制到 0..10（10**10 会溢出 32 位），period 至少 1
+  const digits = Math.min(10, Math.max(0, Number(url.searchParams.get('digits') ?? 6) || 6));
+  const period = Math.max(1, Number(url.searchParams.get('period') ?? 30) || 30);
+
   return {
     secret,
-    digits: Number(url.searchParams.get('digits') ?? 6),
-    period: Number(url.searchParams.get('period') ?? 30),
-    algorithm: algorithm === 'SHA-' ? 'SHA-1' : algorithm,
-    issuer: url.searchParams.get('issuer') ?? labelIssuer ?? undefined,
+    digits,
+    period,
+    algorithm: normaliseAlgorithm(url.searchParams.get('algorithm')),
+    issuer: url.searchParams.get('issuer') ?? labelIssuer,
     account: labelAccount || undefined,
-    isSteam: url.searchParams.get('encoder') === 'steam' || /^steam/i.test(labelIssuer ?? ''),
+    // ⚠️ 官方实现**只**通过字面量 `steam://` 前缀识别 Steam，
+    // 不会从 `otpauth://totp/Steam:...` 或 `encoder=steam` 推断。
+    // 这里保持一致 —— 否则同一条目我们算出 5 位、官方客户端算出 6 位，产生分歧。
+    isSteam: false,
   };
 }
-
-export { concatBytes, utf8Encode };
 ```
 
 - [ ] **Step 4: 运行测试确认通过**
@@ -2000,14 +2185,36 @@ function check(name: string, ok: boolean, detail = ''): void {
   if (!ok) failures++;
 }
 
-async function prelogin(email: string) {
+/**
+ * ⚠️ prelogin 的字段大小写**在服务端之间不一致**，同一个服务器上前后也不一致：
+ *   - prelogin        → Vaultwarden 返回 **camelCase**：`{kdf, kdfIterations, ...}`
+ *                       官方服务端返回 PascalCase
+ *   - token 端点      → 两者都返回 **PascalCase**：`{Key, PrivateKey, Kdf, ...}`
+ *
+ * 已对运行中的 Vaultwarden 1.37.3 实测确认。只认一种大小写会直接读不到值，
+ * 且表现为「KDF 参数为 undefined → 派生出的密钥全错 → 密码错误」，极难排查。
+ */
+async function prelogin(): Promise<{ kdf: number; iterations: number; memory?: number; parallelism?: number }> {
   const r = await fetch(`${BASE}/identity/accounts/prelogin`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ email }),
+    body: JSON.stringify({ email: EMAIL }),
   });
   if (!r.ok) throw new Error(`prelogin 失败: ${r.status} ${await r.text()}`);
-  return r.json() as Promise<{ Kdf: number; KdfIterations: number; KdfMemory?: number; KdfParallelism?: number }>;
+  const raw = (await r.json()) as Record<string, unknown>;
+  const pick = <T>(a: string, b: string): T | undefined => (raw[a] ?? raw[b]) as T | undefined;
+
+  const kdf = pick<number>('kdf', 'Kdf');
+  const iterations = pick<number>('kdfIterations', 'KdfIterations');
+  if (kdf === undefined || iterations === undefined) {
+    throw new Error(`prelogin 响应缺少 KDF 字段（大小写不匹配？）：${JSON.stringify(raw)}`);
+  }
+  return {
+    kdf,
+    iterations,
+    memory: pick<number>('kdfMemory', 'KdfMemory'),
+    parallelism: pick<number>('kdfParallelism', 'KdfParallelism'),
+  };
 }
 
 async function token(email: string, masterPasswordHash: string) {
@@ -2036,11 +2243,14 @@ async function main() {
   // ── 方向 A：用官方 CLI 注册账户，我们用纯 crypto 复现其密钥派生 ──
   console.log('方向 A：官方 CLI 建号 → 我们的 crypto 解出用户密钥');
 
-  const kdf = await prelogin(EMAIL);
+  const kdf = await prelogin();
   console.log(`  服务器 KDF 参数: ${JSON.stringify(kdf)}`);
+  if (kdf.kdf !== KDF_TYPE_PBKDF2) {
+    throw new Error(`本测试假定 PBKDF2 账户，实际 KDF 类型为 ${kdf.kdf}。请用 bw 以 PBKDF2 注册测试账号。`);
+  }
 
   const masterKey = await deriveMasterKey(PASSWORD, EMAIL, {
-    kdf: KDF_TYPE_PBKDF2, iterations: kdf.KdfIterations,
+    kdf: KDF_TYPE_PBKDF2, iterations: kdf.iterations,
   });
   const mpHash = await hashMasterPassword(masterKey, PASSWORD);
 
@@ -2068,37 +2278,116 @@ async function main() {
   // ── 方向 B：我们自己加密 → 官方 CLI 解密 ──
   console.log('\n方向 B：我们的 crypto 加密 → 官方 CLI 解密');
 
-  if (userKey) {
-    const secret = `interop-${Date.now()}-中文🔐`;
-    const encName = await encryptString(secret, userKey);
-    check('我们的加密输出符合 type-2 EncString 格式', /^2\.[A-Za-z0-9+/=]+\|[A-Za-z0-9+/=]+\|[A-Za-z0-9+/=]+$/.test(encName));
-    check('往返解密一致', (await decryptString(encName, userKey)) === secret);
+  if (!userKey) { console.log('\n❌ 未解出用户密钥，后续方向无法进行\n'); process.exit(1); }
 
-    // 通过官方 CLI 的 API 写入，再由 CLI 自己读回并解密
+  const secret = `interop-${Date.now()}-中文🔐`;
+  const encName = await encryptString(secret, userKey);
+  check('我们的加密输出符合 type-2 EncString 格式',
+    /^2\.[A-Za-z0-9+/=]+\|[A-Za-z0-9+/=]+\|[A-Za-z0-9+/=]+$/.test(encName));
+  check('往返解密一致', (await decryptString(encName, userKey)) === secret);
+  check('同一明文两次加密得到不同密文（IV 随机）',
+    (await encryptString(secret, userKey)) !== encName);
+
+  // 我们用 REST 直接写入，再让官方 CLI 读回并解密 —— 证明官方实现能解开我们的密文
+  let writtenId = '';
+  try {
+    const res = await fetch(`${BASE}/api/ciphers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tok.access_token}` },
+      body: JSON.stringify({
+        // ⚠️ encryptedFor 是必填字段，缺失会导致反序列化失败（不是校验错误）
+        encryptedFor: jwtSub(tok.access_token),
+        type: 1, name: encName, notes: null,
+        favorite: false, reprompt: 0,
+        folderId: null, organizationId: null,
+        login: { username: null, password: null, totp: null, uris: [] },
+        fields: null, passwordHistory: null,
+      }),
+    });
+    if (!res.ok) throw new Error(`创建条目失败 ${res.status}: ${await res.text()}`);
+    writtenId = ((await res.json()) as { id: string }).id;
+    check('通过 REST 写入一条自加密条目', !!writtenId);
+  } catch (e) {
+    check('通过 REST 写入一条自加密条目', false, String(e));
+  }
+
+  if (writtenId) {
     try {
-      const itemId = createCipherViaApi(tok.access_token, encName);
-      const decoded = bwGetItem(itemId);
-      check('官方 CLI 能解出我们加密的条目名', decoded === secret, `CLI 解出: ${JSON.stringify(decoded)}`);
+      bw(['sync', '--force']);
+      const name = bwGetItemName(writtenId);
+      check('🔑 官方 CLI 能解出我们加密的条目名', name === secret, `CLI 解出: ${JSON.stringify(name)}`);
     } catch (e) {
-      check('官方 CLI 能解出我们加密的条目名', false, String(e));
+      check('🔑 官方 CLI 能解出我们加密的条目名', false, String(e));
     }
+  }
+
+  // ── 方向 B：官方 CLI 加密 → 我们解密 ──
+  console.log('\n方向 B：官方 CLI 加密 → 我们的 crypto 解密');
+
+  const bwSecret = `from-cli-${Date.now()}-中文🔐`;
+  try {
+    const item = {
+      type: 1,
+      name: bwSecret,
+      notes: null,
+      favorite: false,
+      login: { username: 'someone@example.com', password: 'pw-from-cli', totp: null, uris: [] },
+    };
+    // bw create item 从 stdin 读 JSON（没有位置参数的条目名）
+    const out = execFileSync('bw', ['create', 'item', '--raw'], {
+      input: JSON.stringify(item),
+      env: { ...process.env },
+      encoding: 'utf8',
+    });
+    const cliId = (JSON.parse(out) as { id: string }).id;
+
+    const sync = (await apiGet('/api/sync', tok.access_token)) as {
+      ciphers: Array<{ id: string; name: string; login?: { username?: string; password?: string } }>;
+    };
+    const found = sync.ciphers.find((c) => c.id === cliId);
+    check('在我们拉取的 sync 里找到 CLI 写入的条目', !!found);
+
+    if (found) {
+      const decName = await decryptString(found.name, userKey);
+      check('🔑 我们能解出官方 CLI 加密的条目名', decName === bwSecret, `我们解出: ${JSON.stringify(decName)}`);
+      if (found.login?.username && found.login?.password) {
+        check('我们能解出 CLI 加密的用户名/密码',
+          (await decryptString(found.login.username, userKey)) === 'someone@example.com'
+          && (await decryptString(found.login.password, userKey)) === 'pw-from-cli');
+      }
+    }
+  } catch (e) {
+    check('方向 B 全流程', false, String(e));
   }
 
   console.log(failures === 0 ? '\n✅ 互操作测试全部通过\n' : `\n❌ ${failures} 项失败\n`);
   process.exit(failures === 0 ? 0 : 1);
 }
 
-function createCipherViaApi(token: string, encName: string): string {
-  const out = execFileSync('bw', ['create', 'item', 'login', encName, '--raw'], {
-    env: { ...process.env, BW_SESSION: process.env.BW_SESSION ?? '' },
-    encoding: 'utf8',
-  });
-  return (JSON.parse(out) as { id: string }).id;
+// ── 辅助 ──
+
+/** 跑官方 CLI，自动带上 BW_SESSION（`bw get item` 等命令需要它） */
+function bw(args: string[]): string {
+  const session = process.env.BW_SESSION;
+  if (!session) throw new Error('缺少 BW_SESSION —— 请先运行 `bun run seed` 并 export 它');
+  return execFileSync('bw', [...args, '--session', session], { encoding: 'utf8' });
 }
 
-function bwGetItem(id: string): string {
-  const out = execFileSync('bw', ['get', 'item', id, '--raw'], { encoding: 'utf8' });
-  return (JSON.parse(out) as { name: string }).name;
+function bwGetItemName(id: string): string {
+  return (JSON.parse(bw(['get', 'item', id, '--raw'])) as { name: string }).name;
+}
+
+/** 从 access token 的 JWT 载荷取用户 uuid —— 写入 cipher 时 encryptedFor 必填 */
+function jwtSub(token: string): string {
+  const payload = token.split('.')[1];
+  if (!payload) throw new Error('access token 不是合法 JWT');
+  return (JSON.parse(Buffer.from(payload, 'base64url').toString('utf8')) as { sub: string }).sub;
+}
+
+async function apiGet(path: string, token: string): Promise<unknown> {
+  const r = await fetch(`${BASE}${path}`, { headers: { Authorization: `Bearer ${token}` } });
+  if (!r.ok) throw new Error(`GET ${path} 失败 ${r.status}: ${await r.text()}`);
+  return r.json();
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -1,0 +1,117 @@
+#!/usr/bin/env bun
+/**
+ * 用**我们自己的** @coffer/crypto 在本地 Vaultwarden 上注册测试账户（幂等）。
+ *
+ * 为什么不用官方 CLI 注册：CLI 2026.9.1 **没有 register 命令**。
+ * 而且用自己的代码注册反而更有价值 —— 注册本身就顺带跑通了整条密钥层级
+ * （KDF → masterPasswordHash → HKDF 拉伸 → 生成并包装用户密钥 → 生成并包装 RSA 私钥），
+ * 随后只要官方 CLI 能用同一个主密码登录并解开保险库，就证明我们这套是对的。
+ */
+import { execFileSync } from 'node:child_process';
+import { writeFile } from 'node:fs/promises';
+import {
+  deriveMasterKey, hashMasterPassword, stretchMasterKey, makeUserKey,
+  encryptBytes, KDF_TYPE_PBKDF2,
+} from '../packages/crypto/src/index';
+import { toBase64, concatBytes } from '../packages/crypto/src/bytes';
+
+// 默认与 scripts/dev-env.sh 保持一致（HTTPS + 自签证书：官方 CLI 拒绝明文 HTTP）
+const BASE = process.env.VW_URL ?? 'https://localhost:8443';
+const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
+const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const ITERATIONS = 600_000;
+
+async function main() {
+  console.log(`→ 目标服务器: ${BASE}`);
+  console.log(`→ 测试账户:   ${EMAIL}`);
+
+  // 1. 派生密钥
+  const masterKey = await deriveMasterKey(PASSWORD, EMAIL, { kdf: KDF_TYPE_PBKDF2, iterations: ITERATIONS });
+  const masterPasswordHash = await hashMasterPassword(masterKey, PASSWORD);
+  const stretched = await stretchMasterKey(masterKey);
+  console.log('✓ 密钥派生完成（PBKDF2 600k → masterKey → masterPasswordHash + 拉伸主密钥）');
+
+  // 2. 生成用户对称密钥（64 字节 = 32 enc + 32 mac），用拉伸主密钥包起来
+  const userKey = makeUserKey();
+  const protectedKey = await encryptBytes(concatBytes(userKey.encKey, userKey.macKey), stretched);
+  console.log('✓ 用户对称密钥已生成并包装');
+
+  // 3. 生成 RSA-2048 密钥对，私钥用用户密钥包起来
+  const kp = await crypto.subtle.generateKey(
+    {
+      name: 'RSA-OAEP', modulusLength: 2048,
+      publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-1',
+    },
+    true, ['encrypt', 'decrypt'],
+  ) as CryptoKeyPair;
+  const privateKeyDer = new Uint8Array(await crypto.subtle.exportKey('pkcs8', kp.privateKey));
+  const publicKeyDer = new Uint8Array(await crypto.subtle.exportKey('spki', kp.publicKey));
+  const encryptedPrivateKey = await encryptBytes(privateKeyDer, userKey);
+  console.log('✓ RSA-2048 密钥对已生成并包装');
+
+  // 4. 注册
+  const res = await fetch(`${BASE}/identity/accounts/register`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      email: EMAIL,
+      name: 'Coffer Interop',
+      masterPasswordHash,
+      masterPasswordHint: null,
+      key: protectedKey,
+      keys: { publicKey: toBase64(publicKeyDer), encryptedPrivateKey },
+      kdfType: KDF_TYPE_PBKDF2,
+      kdfIterations: ITERATIONS,
+      kdfMemory: null,
+      kdfParallelism: null,
+      emailVerificationToken: null,
+      organizationUserId: null,
+      orgInviteToken: null,
+      acceptEmergencyAccessId: null,
+      acceptEmergencyAccessInviteToken: null,
+    }),
+  });
+
+  const text = await res.text();
+  if (res.ok) {
+    console.log('✓ 注册成功');
+  } else if (res.status === 400 && /already exists/i.test(text)) {
+    console.log('· 账户已存在，跳过注册（若要重来：./scripts/dev-server.sh reset）');
+  } else {
+    console.error(`✗ 注册失败 ${res.status}: ${text}`);
+    process.exit(1);
+  }
+
+  // 5. 让官方 CLI 登录 —— 这是第一道互操作证明
+  console.log('\n→ 用官方 Bitwarden CLI 登录同一个账户…');
+  // 三个流都 pipe：execFileSync 才会把 stdout 作为返回值交出来。
+  // 若把 stdout 设为 inherit，返回值是空的，看起来像「命令没输出」，极难排查。
+  const bwRun = (args: string[]): string =>
+    execFileSync('bw', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+
+  bwRun(['config', 'server', BASE]);
+  // 先登出：已登录状态下 `bw login` 会直接报错，让脚本变成不可重复运行
+  try { bwRun(['logout']); } catch { /* 本来就没登录 */ }
+
+  let session: string;
+  try {
+    session = bwRun(['login', EMAIL, PASSWORD, '--raw']);
+  } catch (e) {
+    console.error('✗ 官方 CLI 登录失败 —— 说明我们的密钥派生与官方不一致');
+    console.error(String(e));
+    process.exit(1);
+  }
+  console.log('✓ 官方 CLI 用同一个主密码登录成功（= 我们的 KDF 与 masterPasswordHash 正确）');
+
+  // unlock 会真正解开 Key 字段，这一步验证 HKDF 拉伸与 EncString 加密
+  const unlocked = bwRun(['unlock', PASSWORD, '--raw']);
+  console.log('✓ 官方 CLI 解锁成功（= 我们的 HKDF 拉伸与 EncString 加密正确）');
+
+  // 写进文件，免得在 shell 里做字符串搬运（也避免 bw 因缺 session 转成交互式提示）
+  const sessionFile = `${process.env.ROOT ?? process.cwd()}/.dev/bw-session`;
+  await writeFile(sessionFile, unlocked || session, { mode: 0o600 });
+  console.log(`✓ 会话已写入 ${sessionFile}`);
+  console.log('\n下一步： bun run test:interop');
+}
+
+main().catch((e) => { console.error(e); process.exit(1); });
