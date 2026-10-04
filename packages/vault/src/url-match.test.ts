@@ -7,7 +7,7 @@ function item(id: string, uris: (string | LoginUri)[]): VaultItem {
   return {
     id, type: 'login', rawType: 1, name: `item-${id}`, nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: 'x', updatedAt: 'x', deletedAt: null, archivedAt: null, hasItemKey: false,
+    createdAt: 'x', updatedAt: 'x', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: {
       ...emptyLogin(),
       username: 'u', password: 'p',

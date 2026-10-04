@@ -123,8 +123,19 @@ export interface VaultItem {
   updatedAt: string;
   deletedAt: string | null;
   archivedAt: string | null;
-  /** 该条目是否带独立密钥（存在时**所有**字段都用它解密） */
-  hasItemKey: boolean;
+  /**
+   * 该条目**包装后的**独立密钥（EncString）；null = 用用户密钥。
+   *
+   * ⚠️ 这里存的是**密文本身**，不是一个「有没有」的布尔标记。
+   *
+   * 早先只有一个 `hasItemKey: boolean`，于是保存时拿不到那把密钥 ——
+   * `saveItem` 只能用用户密钥重新加密，而服务端的 `key` 字段还声明着
+   * 「这条用独立密钥」：任何客户端按声明去解都会失败，**条目就废了**。
+   * 而且保存和同步都「成功」，用户下次打开才发现里面是空的。
+   *
+   * 取附件时的密钥解包也卡在同一个地方。
+   */
+  wrappedKey: string | null;
 
   login: LoginFields | null;
   card: CardFields | null;

@@ -36,7 +36,7 @@ function blankImportItem(): VaultItem {
   return {
     id: '', type: 'login', rawType: 1, name: '', nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
+    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: emptyLogin(),
     card: emptyCard(),
     identity: emptyIdentity(),
@@ -281,10 +281,7 @@ export class VaultClient {
    * 2. **密钥不对**：附件的密钥被用户密钥（或条目密钥）包装，
    *    用错的表现是解出来一堆乱码 —— 而文件确实下载到了。
    *
-   * ⚠️ **已知限制**：带独立密钥的条目（`hasItemKey`，多见于组织共享的条目）
-   * 取不了附件 —— 那条独立密钥的密文没有存在会话里。
-   * 这种情况**明确报错**，而不是拿用户密钥去试（那样只会得到乱码，
-   * 而用户会把一个坏文件存下来并以为它是好的）。
+   * 带独立密钥的条目也支持 —— 包装后的密钥现在留在会话里（`wrappedKey`）。
    */
   async downloadAttachment(
     itemId: string, attachmentId: string,
@@ -294,9 +291,8 @@ export class VaultClient {
     if (!item) throw new Error('找不到这条条目');
     const attachment = item.attachments.find((a) => a.id === attachmentId);
     if (!attachment) throw new Error('这条条目上没有这个附件');
-    if (item.hasItemKey) {
-      throw new Error('这条条目带独立密钥，暂时取不了它的附件');
-    }
+    // 附件密钥可能是被**条目密钥**包装的 —— 用和保存同一处的解析
+    const wrappingKey = await this.keyFor(item);
 
     // 先要一个新的下载地址；拿不到就回退到存下来的那个
     let url = attachment.url;
@@ -307,10 +303,32 @@ export class VaultClient {
     }
 
     const bytes = await downloadAttachment(this.http, url);
-    const attKey = await unwrapAttachmentKey(attachment.key, key);
+    const attKey = await unwrapAttachmentKey(attachment.key, wrappingKey);
     if (attKey === null) throw new Error('这个附件的密钥读不出来，无法解密');
 
     return { fileName: attachment.fileName, bytes: await decryptAttachmentContent(bytes, attKey) };
+  }
+
+  /**
+   * 这条条目该用哪把密钥 —— 有独立密钥就解包出来，否则用用户密钥。
+   *
+   * ⚠️ **只有这一处**做这个判断。保存和取附件都要用同一把，
+   * 两处各判断一次的话，改了一处忘了另一处，症状是「保存后条目打不开」
+   * 或者「附件解出来是乱码」—— 都很难联想到是这里。
+   */
+  private async keyFor(item: VaultItem): Promise<SymmetricKey> {
+    if (item.wrappedKey === null) return this.requireKey();
+
+    const userKey = this.requireKey();
+    // 条目密钥的包装方式与附件密钥一致：按**字节**加密的 64 字节
+    let raw: Uint8Array;
+    try {
+      raw = await decryptBytes(item.wrappedKey, userKey);
+    } catch {
+      throw new Error('这条条目的独立密钥解不开，为避免写坏数据已中止');
+    }
+    if (raw.length !== 64) throw new Error('这条条目的独立密钥长度不对，为避免写坏数据已中止');
+    return { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
   }
 
   /** 重新同步（用户手动刷新、或收到服务器变更通知时调用） */
@@ -398,7 +416,16 @@ export class VaultClient {
     const opts: Parameters<typeof encryptCipher>[2] = isNew
       ? {}
       : { lastKnownRevisionDate: item.updatedAt };
-    const body = await encryptCipher(item, key, opts);
+
+    /*
+     * ⚠️ **带独立密钥的条目必须用自己的密钥加密。**
+     *
+     * 服务端的 `key` 字段声明着「这条用独立密钥」，而字段本身若是用用户密钥
+     * 加密的，任何客户端按声明去解都会失败 —— **条目就废了**。
+     * 更糟的是它不会报错：保存成功、同步成功，用户下次打开才发现里面是空的。
+     */
+    const itemKey = await this.keyFor(item);
+    const body = await encryptCipher(item, key, { ...opts, itemKey });
 
     const dto = isNew
       ? await createCipher(this.http, userId, body)

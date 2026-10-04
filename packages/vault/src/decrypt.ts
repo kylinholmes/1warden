@@ -224,7 +224,7 @@ async function decryptAttachments(raw: CipherDto['attachments'], key: SymmetricK
  * 这条路径**永不抛错**（除非条目密钥本身坏了）—— 单个字段失败会降级并标记。
  */
 export async function decryptCipher(dto: CipherDto, userKey: SymmetricKey): Promise<VaultItem> {
-  const { key, hasItemKey } = await resolveItemKey(dto, userKey);
+  const { key } = await resolveItemKey(dto, userKey);
 
   const name = await tryDecrypt(dto.name, key);
   const notes = await tryDecrypt(dto.notes, key);
@@ -244,7 +244,7 @@ export async function decryptCipher(dto: CipherDto, userKey: SymmetricKey): Prom
     updatedAt: dto.revisionDate,
     deletedAt: dto.deletedDate ?? null,
     archivedAt: dto.archivedDate ?? null,
-    hasItemKey,
+    wrappedKey: dto.key ?? null,
 
     login: dto.login ? await decryptLogin(dto.login, key) : null,
     card: dto.card ? await decryptCard(dto.card, key) : null,

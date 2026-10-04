@@ -10,7 +10,7 @@ function login(id: string, password: string | null, uri?: string, extra: Partial
   return {
     id, type: 'login', rawType: 1, name: `item-${id}`, nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: 'x', updatedAt: 'x', deletedAt: null, archivedAt: null, hasItemKey: false,
+    createdAt: 'x', updatedAt: 'x', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: { ...emptyLogin(), password, uris: uri ? [{ uri, match: null }] : [] },
     card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],

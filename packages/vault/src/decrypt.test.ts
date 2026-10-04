@@ -170,14 +170,14 @@ describe('decryptCipher — 每条目独立密钥', () => {
       login: { username: await encryptString('u', itemKey), password: await encryptString('p', itemKey) },
     };
     const item = await decryptCipher(dto, key);
-    expect(item.hasItemKey).toBe(true);
+    expect(item.wrappedKey).not.toBeNull();
     expect(item.name).toBe('ItemKeyed');
     expect(item.login?.username).toBe('u');
     expect(item.login?.password).toBe('p');
   });
 
   it('falls back to the user key when cipher.key is null', async () => {
-    expect((await decryptCipher(await fullLoginDto(), key)).hasItemKey).toBe(false);
+    expect((await decryptCipher(await fullLoginDto(), key)).wrappedKey).toBeNull();
   });
 });
 

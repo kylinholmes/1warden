@@ -17,7 +17,7 @@ function item(id: string, creds: StoredPasskey[], over: Partial<VaultItem> = {})
   return {
     id, type: 'login', rawType: 1, name: `条目 ${id}`, nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
+    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: { ...emptyLogin(), fido2Credentials: creds },
     card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],

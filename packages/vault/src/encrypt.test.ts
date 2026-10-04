@@ -16,7 +16,7 @@ function item(over: Partial<VaultItem> = {}): VaultItem {
     notes: '工作账号', notesFailed: false,
     folderId: 'f1', favorite: true, reprompt: 0,
     createdAt: '2026-01-01T00:00:00.000000Z', updatedAt: '2026-01-02T00:00:00.000000Z',
-    deletedAt: null, archivedAt: null, hasItemKey: false,
+    deletedAt: null, archivedAt: null, wrappedKey: null,
     login: { ...emptyLogin(), username: 'kylin', password: 'pw', totp: 'WQIQ25BRKZYCJVYP', uris: [{ uri: 'https://github.com', match: 0 }] },
     card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [{ name: 'PIN', value: '1234', type: 1, linkedId: null }],

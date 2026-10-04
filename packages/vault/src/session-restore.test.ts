@@ -12,7 +12,7 @@ function item(id: string): VaultItem {
   return {
     id, type: 'login', rawType: 1, name: `item-${id}`, nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
+    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: emptyLogin(), card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };

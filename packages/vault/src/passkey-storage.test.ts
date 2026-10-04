@@ -30,7 +30,7 @@ function loginItem(over: Partial<VaultItem> = {}): VaultItem {
     id: 'c1', type: 'login', rawType: 1, name: 'GitHub', nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: '2026-01-01T00:00:00.000000Z', updatedAt: '2026-01-01T00:00:00.000000Z',
-    deletedAt: null, archivedAt: null, hasItemKey: false,
+    deletedAt: null, archivedAt: null, wrappedKey: null,
     login: { ...emptyLogin(), fido2Credentials: [PASSKEY] },
     card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],

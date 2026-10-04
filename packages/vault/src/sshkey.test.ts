@@ -18,7 +18,7 @@ function sshItem(over: Partial<VaultItem> = {}): VaultItem {
   return {
     id: 's1', type: 'sshKey', rawType: 5, name: '部署密钥', nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
+    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: null, card: null, identity: null, secureNote: null,
     sshKey: { privateKey: PRIVATE_KEY, publicKey: PUBLIC_KEY, fingerprint: FINGERPRINT },
     customFields: [], passwordHistory: [], attachments: [],
