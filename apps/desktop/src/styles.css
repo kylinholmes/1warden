@@ -1,0 +1,160 @@
+@import 'tailwindcss';
+
+/*
+ * Coffer 设计系统。
+ *
+ * 比例参照本机 1Password 的实测值（4px 间距基准、三档圆角、分层表面色），
+ * 但**值全部是我们自己的**：深青蓝强调色、6/10/16 圆角、3 档动效、
+ * 描边为主 + 极轻阴影。详见 docs/reference/design-system.md。
+ *
+ * 用 oklch 而非 hex：亮暗主题可以用同一色相与色度、只调亮度，
+ * 换主题时不会出现色相偏移。
+ */
+@theme {
+  /* 间距 —— 4px 基准 */
+  --spacing-hairline: 1px;
+  --spacing-2xs: 4px;
+  --spacing-xs: 8px;
+  --spacing-sm: 12px;
+  --spacing-md: 16px;
+  --spacing-lg: 24px;
+  --spacing-xl: 32px;
+  --spacing-2xl: 48px;
+
+  /* 圆角 —— 6/10/16，比 1Password 的 4/8/12 更柔和一点，是我们的手感 */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 16px;
+
+  /* 字号 */
+  --text-xs: 12px;
+  --text-sm: 13px;
+  --text-md: 14px;
+  --text-lg: 17px;
+  --text-xl: 22px;
+  --text-2xl: 30px;
+
+  /* 动效 —— 收敛到 3 档，够用即可 */
+  --dur-fast: 150ms;
+  --dur-base: 220ms;
+  --dur-slow: 320ms;
+
+  /* 字体 —— CJK 不能直接用 Inter，字形会不匹配 */
+  --font-ui: Inter, -apple-system, BlinkMacSystemFont, 'PingFang SC',
+    'Noto Sans SC', 'Microsoft YaHei', sans-serif;
+  --font-secret: 'JetBrains Mono', ui-monospace, 'SF Mono', Menlo, monospace;
+}
+
+/*
+ * 分层配色。组件只引用层级，换主题时只改层级的值 ——
+ * 这是从 1Password 的颜色组织方式里学到的结构。
+ */
+:root {
+  --surface-base: oklch(0.99 0.002 240);
+  --surface-raised: oklch(1 0 0);
+  --surface-sunken: oklch(0.97 0.003 240);
+  --surface-overlay: oklch(1 0 0);
+  --surface-hover: oklch(0.96 0.004 240);
+  --surface-selected: oklch(0.95 0.02 220);
+
+  --ink-primary: oklch(0.25 0.01 240);
+  --ink-secondary: oklch(0.48 0.012 240);
+  --ink-tertiary: oklch(0.62 0.01 240);
+  --ink-inverse: oklch(0.99 0.002 240);
+
+  --border-subtle: oklch(0.91 0.004 240);
+  --border-strong: oklch(0.84 0.006 240);
+
+  /* 强调色：深青蓝，刻意区别于 1Password 的品牌蓝 */
+  --accent: oklch(0.52 0.09 220);
+  --accent-hover: oklch(0.46 0.1 220);
+  --accent-tint: oklch(0.95 0.02 220);
+  --accent-ring: oklch(0.62 0.1 220);
+  --accent-ink: oklch(0.98 0.01 220);
+
+  /* 语义色 —— 只用于安全状态，不做装饰 */
+  --safe: oklch(0.62 0.13 150);
+  --caution: oklch(0.72 0.14 75);
+  --risk: oklch(0.58 0.18 25);
+
+  /* 层级 —— 比 1Password 克制：描边为主 + 极轻阴影，安全工具不该浮夸 */
+  --elev-1: 0 0 0 1px var(--border-subtle), 0 1px 2px oklch(0 0 0 / 0.04);
+  --elev-2: 0 0 0 1px var(--border-subtle), 0 4px 12px oklch(0 0 0 / 0.06);
+  --elev-3: 0 0 0 1px var(--border-subtle), 0 8px 28px oklch(0 0 0 / 0.1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --surface-base: oklch(0.19 0.008 240);
+    --surface-raised: oklch(0.23 0.008 240);
+    --surface-sunken: oklch(0.16 0.008 240);
+    --surface-overlay: oklch(0.25 0.008 240);
+    --surface-hover: oklch(0.27 0.01 240);
+    --surface-selected: oklch(0.31 0.03 220);
+
+    --ink-primary: oklch(0.95 0.005 240);
+    --ink-secondary: oklch(0.74 0.008 240);
+    --ink-tertiary: oklch(0.6 0.008 240);
+    --ink-inverse: oklch(0.19 0.008 240);
+
+    --border-subtle: oklch(0.3 0.008 240);
+    --border-strong: oklch(0.4 0.01 240);
+
+    /* 暗色下同一色相与色度、只提亮度 —— 这就是用 oklch 的意义 */
+    --accent: oklch(0.68 0.1 220);
+    --accent-hover: oklch(0.74 0.1 220);
+    --accent-tint: oklch(0.31 0.03 220);
+    --accent-ring: oklch(0.7 0.1 220);
+    --accent-ink: oklch(0.18 0.02 220);
+
+    --elev-1: 0 0 0 1px var(--border-subtle), 0 1px 2px oklch(0 0 0 / 0.3);
+    --elev-2: 0 0 0 1px var(--border-subtle), 0 4px 12px oklch(0 0 0 / 0.4);
+    --elev-3: 0 0 0 1px var(--border-subtle), 0 8px 28px oklch(0 0 0 / 0.5);
+  }
+}
+
+/* 尊重用户的动效偏好 —— 全部降为 0 */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+html, body, #root {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  background: var(--surface-base);
+  color: var(--ink-primary);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+  -webkit-font-smoothing: antialiased;
+  /* 桌面应用不该有文本选中的意外拖拽感 —— 只在需要的地方开启 */
+  user-select: none;
+}
+
+/* 密码与验证码用等宽：让用户能核对字符，也避免 l/1、O/0 混淆 */
+.secret {
+  font-family: var(--font-secret);
+  font-variant-numeric: tabular-nums;
+  user-select: text;
+}
+
+/* 焦点可见 —— 键盘可达是硬要求，不是可选项 */
+:focus-visible {
+  outline: 2px solid var(--accent-ring);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 999px;
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+::-webkit-scrollbar-track { background: transparent; }

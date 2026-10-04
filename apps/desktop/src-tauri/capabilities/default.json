@@ -1,0 +1,9 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Coffer 桌面端的默认权限。刻意保持最小 —— 每多一项能力就多一份攻击面。",
+  "windows": ["main"],
+  "permissions": [
+    "core:default"
+  ]
+}

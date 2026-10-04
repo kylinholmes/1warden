@@ -1,0 +1,28 @@
+{
+  "name": "@coffer/desktop",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@coffer/api": "workspace:*",
+    "@coffer/crypto": "workspace:*",
+    "@coffer/vault": "workspace:*",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.12.1",
+    "@types/react": "19.2.2",
+    "@types/react-dom": "19.2.1",
+    "@vitejs/plugin-react": "5.1.0",
+    "tailwindcss": "4.1.14",
+    "@tailwindcss/vite": "4.1.14",
+    "vite": "8.3.2"
+  }
+}

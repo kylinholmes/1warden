@@ -2,14 +2,21 @@
   "name": "coffer",
   "private": true,
   "type": "module",
-  "workspaces": ["packages/*", "apps/*"],
+  "workspaces": [
+    "packages/*",
+    "apps/*"
+  ],
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
     "test:contract": "vitest run --config vitest.contract.config.ts",
     "test:interop": "bun scripts/interop-test.ts",
     "seed": "bun scripts/seed-account.ts",
-    "typecheck": "tsc --build --force"
+    "typecheck": "tsc --build --force",
+    "dev:proxy": "bun run scripts/dev-proxy.ts",
+    "e2e": "bun run scripts/e2e-desktop.ts",
+    "dev:desktop": "cd apps/desktop && bun run tauri dev",
+    "build:desktop": "cd apps/desktop && bun run tauri build"
   },
   "devDependencies": {
     "@bitwarden/cli": "2025.2.0",
