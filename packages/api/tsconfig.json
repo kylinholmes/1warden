@@ -1,5 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": { "rootDir": "src", "outDir": "dist" },
+  // 契约测试需要真的派生一次 masterPasswordHash 才能登录真实服务器，
+  // 所以测试文件依赖 @coffer/crypto。这是**测试专用**依赖 ——
+  // src 下的生产代码不得导入它（由一条 grep 检查把关）。
+  // 用 project reference 而非相对路径，否则 crypto 的源文件会被拽进本包的 rootDir。
+  "references": [{ "path": "../crypto" }],
   "include": ["src/**/*.ts"]
 }

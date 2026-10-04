@@ -6,6 +6,7 @@
   "scripts": {
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:contract": "vitest run --config vitest.contract.config.ts",
     "test:interop": "bun scripts/interop-test.ts",
     "seed": "bun scripts/seed-account.ts",
     "typecheck": "tsc --build --force"

@@ -1,0 +1,11 @@
+export declare const toBase64: (b: Uint8Array) => string;
+export declare const fromBase64: (s: string) => Uint8Array;
+export declare const toBase64Url: (b: Uint8Array) => string;
+export declare const fromBase64Url: (s: string) => Uint8Array;
+export declare const utf8Encode: (s: string) => Uint8Array;
+export declare const utf8Decode: (b: Uint8Array) => string;
+export declare function randomBytes(n: number): Uint8Array;
+export declare function sha256(data: Uint8Array): Promise<Uint8Array>;
+export declare function constantTimeEqual(a: Uint8Array, b: Uint8Array): boolean;
+export declare function zeroize(b: Uint8Array): void;
+export declare function concatBytes(...parts: Uint8Array[]): Uint8Array;
