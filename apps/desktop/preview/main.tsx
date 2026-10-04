@@ -9,9 +9,12 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SecurityReportView } from '../src/screens/SecurityReport';
-import { VaultView } from '../src/screens/VaultView';
+import { VaultView, ItemDetail, EmptyDetail } from '../src/screens/VaultView';
 import { QuickAccess } from '../src/screens/QuickAccess';
 import { ImportScreen } from '../src/screens/Import';
+import { ItemEditor } from '../src/screens/ItemEditor';
+import { Connect } from '../src/screens/Connect';
+import { Unlock } from '../src/screens/Unlock';
 import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
 import './preview.css';
 
@@ -68,12 +71,52 @@ const fakeClient = {
   }),
 } as unknown as VaultClient;
 
+/** 详情栏要看的是一条**内容齐全**的记录：用户名、密码、验证码、网址、备注都有 */
+const DETAIL: VaultItem = item({
+  id: 'd1', name: 'GitHub',
+  login: {
+    ...emptyLogin(),
+    username: 'me@example.com',
+    password: 'kJ8#mPq2$vXn9!wZt4&bR',
+    totp: 'otpauth://totp/GitHub:me@example.com?secret=JBSWY3DPEHPK3PXP&issuer=GitHub',
+    uris: [{ uri: 'https://github.com', match: null }, { uri: 'https://gist.github.com', match: null }],
+  },
+  notes: '公司账号与个人账号是分开的两个。这个只用来登录公司组织，\n恢复代码放在保险柜里。',
+  customFields: [{ name: '组织', value: 'acme', type: 0 }],
+  passwordHistory: [{ password: 'old-pass-123', lastUsedDate: '2025-06-01T00:00:00Z' }],
+});
+
+/** 详情栏外面套一个和真实三栏一致的壳 —— 否则截图里的宽度是假的 */
+function DetailPane({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="flex h-full">
+      <div className="w-[var(--rail-w)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-chrome)]" />
+      <div className="w-[var(--list-w)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-content)]" />
+      <div className="min-w-0 flex-1 overflow-y-auto bg-[var(--surface-paper)]">{children}</div>
+    </div>
+  );
+}
+
 const which = new URLSearchParams(location.search).get('screen') ?? 'messy';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     {which === 'import' ? (
       <ImportScreen client={fakeClient} onImported={() => {}} />
+    ) : which === 'detail' ? (
+      <DetailPane>
+        <ItemDetail item={DETAIL} onEdit={() => {}} onDelete={() => {}} onToggleFavorite={() => {}} />
+      </DetailPane>
+    ) : which === 'detail-empty' ? (
+      <DetailPane><EmptyDetail hasItems /></DetailPane>
+    ) : which === 'form' ? (
+      <ItemEditor client={fakeClient} item={null} onCancel={() => {}} onDone={() => {}} />
+    ) : which === 'form-edit' ? (
+      <ItemEditor client={fakeClient} item={DETAIL} onCancel={() => {}} onDone={() => {}} />
+    ) : which === 'connect' ? (
+      <Connect client={fakeClient} onConnected={() => {}} />
+    ) : which === 'unlock' ? (
+      <Unlock client={fakeClient} onUnlocked={() => {}} onDisconnect={() => {}} />
     ) : which === 'quick' ? (
       <div style={{ width: 620, height: 400 }}>
         <QuickAccess

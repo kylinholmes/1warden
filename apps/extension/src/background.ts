@@ -38,6 +38,10 @@ const sessionArea: StorageArea = {
 
 const sessions = new SessionStore(sessionArea);
 
+/** 本次模块求值的随机标识 —— 排查用。见 `coffer:webauthn` 的幂等说明 */
+const INSTANCE = Math.random().toString(36).slice(2, 6);
+console.debug('[coffer] SW 实例 ' + INSTANCE + ' 启动');
+
 /**
  * 再上一道锁：让 content script 读不到会话区。
  *
@@ -216,11 +220,47 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
 });
 
 /**
- * 同一请求 id 的**执行中结果**。见 `coffer:webauthn` 里的说明 ——
- * 重发本身是对的（转发脚本可能还没注入），但接收方必须幂等，
- * 否则第二次会拿着过期快照把第一次的结果覆盖掉。
+ * 已完成的 passkey 请求结果，按「标签页 + 帧 + 请求 id」索引。
+ *
+ * ## ⚠️ 为什么必须落在 `chrome.storage.session` 而不是模块变量里
+ *
+ * MV3 的 service worker 会被杀又被唤醒，每次唤醒都**重新求值一次这个模块**。
+ * 模块级的 `Map` 那时是空的 —— 于是同一个请求会被再处理一遍。
+ *
+ * 实测到的现象：一次 create 被执行了两次，两遍的模块级序号**都是 #1**
+ * （计数器被重置），各自建了一把密钥；后一遍从存储恢复出来的会话是
+ * **第一遍落盘之前**的快照，于是它整条写回去，把第一遍的凭据覆盖掉了。
+ *
+ * 症状极具迷惑性：页面拿到的是第一遍的 credentialId（它先返回），
+ * 库里躺着第二遍的 —— 之后用 allowCredentials 登录报「没有可用的 passkey」，
+ * 看起来像匹配逻辑坏了，而匹配逻辑完全正确。
+ *
+ * `storage.session` 是内存存储（不落盘）、只对受信任上下文可见，
+ * 但**跨 SW 重启存活** —— 正是这里需要的那一档。存进去的都是要给页面的东西
+ * （credentialId / clientDataJSON / 签名），本来就不是秘密。
  */
-const webauthnDone = new Map<number, Promise<Record<string, unknown>>>();
+const WA_DONE_KEY = 'coffer.webauthnDone';
+
+/** ⚠️ 请求 id 只是页面内的自增计数 —— 不带标签页会跨标签页串号 */
+function waKey(sender: chrome.runtime.MessageSender, id: number): string {
+  return `${sender.tab?.id ?? -1}:${sender.frameId ?? 0}:${id}`;
+}
+
+async function readDone(key: string): Promise<Record<string, unknown> | null> {
+  const got = await chrome.storage.session.get(WA_DONE_KEY);
+  const map = (got[WA_DONE_KEY] ?? {}) as Record<string, Record<string, unknown>>;
+  return map[key] ?? null;
+}
+
+async function writeDone(key: string, reply: Record<string, unknown>): Promise<void> {
+  const got = await chrome.storage.session.get(WA_DONE_KEY);
+  const map = (got[WA_DONE_KEY] ?? {}) as Record<string, Record<string, unknown>>;
+  map[key] = reply;
+  // 只留最近几十条 —— 页面开一整天的话这个表不该无限长下去
+  const keys = Object.keys(map);
+  for (const k of keys.slice(0, Math.max(0, keys.length - 32))) delete map[k];
+  await chrome.storage.session.set({ [WA_DONE_KEY]: map });
+}
 
 async function runWebauthn(payload: unknown, senderOrigin: string | undefined): Promise<Record<string, unknown>> {
   // ⚠️ 只认客户端这一份状态。
@@ -419,18 +459,17 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
        * 用户看到的是「注册好像成功了」，直到下次登录才被告知没有可用的 passkey。
        */
       const reqId = (req.payload as { id?: number } | null)?.id;
-      if (typeof reqId === 'number') {
-        const prev = webauthnDone.get(reqId);
-        if (prev) return await prev;
-      }
+      if (typeof reqId !== 'number') return await runWebauthn(req.payload, sender.origin);
 
-      const run = runWebauthn(req.payload, sender.origin);
-      if (typeof reqId === 'number') {
-        webauthnDone.set(reqId, run);
-        // 只留最近几十条 —— 页面开一整天的话这个表不该无限长下去
-        if (webauthnDone.size > 64) webauthnDone.delete(webauthnDone.keys().next().value as number);
-      }
-      return await run;
+      const key = waKey(sender, reqId);
+      const done = await readDone(key);
+      if (done) return done;
+
+      const result = await runWebauthn(req.payload, sender.origin);
+      // ⚠️ 失败**不**记缓存：让页面能重试。成功的才记 ——
+      // 而成功的结果不记的话，SW 重启后同一个请求会再跑一遍并覆盖。
+      if (result['ok'] === true) await writeDone(key, result);
+      return result;
     }
 
     case 'coffer:reveal': {
