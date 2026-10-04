@@ -748,6 +748,30 @@ function ItemDetail({ item, onEdit, onDelete, onToggleFavorite }: {
           </Section>
         )}
 
+        {/*
+          ⚠️ SSH 密钥此前**一个字段都没渲染** —— 类型列表里有它、列表图标有 🔧、
+          标签写着「SSH 密钥」，但详情页是空的。用户从 Bitwarden 导入一条 SSH 密钥，
+          看到的是一个只有标题的页面，像是数据丢了。
+
+          私钥按**隐藏字段**处理：它是这几个里头唯一真正敏感的东西，
+          公钥和指纹本来就是给人看的。
+        */}
+        {item.sshKey && (
+          <Section title="SSH 密钥">
+            {item.sshKey.publicKey && <SecretField label="公钥" value={item.sshKey.publicKey} />}
+            {item.sshKey.fingerprint && <SecretField label="指纹" value={item.sshKey.fingerprint} />}
+            {item.sshKey.privateKey && <SecretField label="私钥" value={item.sshKey.privateKey} masked />}
+          </Section>
+        )}
+
+        {item.attachments.length > 0 && (
+          <Section title="附件">
+            {item.attachments.map((a) => (
+              <AttachmentRow key={a.id} attachment={a} />
+            ))}
+          </Section>
+        )}
+
         {item.customFields.length > 0 && (
           <Section title="自定义字段">
             {item.customFields.map((f, i) => (
@@ -854,6 +878,30 @@ const IDENTITY_LABEL: Record<string, string> = {
   email: '邮箱', phone: '电话', ssn: '身份证号', username: '用户名',
   passportNumber: '护照号', licenseNumber: '驾照号',
 };
+
+/**
+ * 一条附件。
+ *
+ * ⚠️ **这里只列出，不提供「取回」按钮 —— 因为按下它做不到。**
+ *
+ * 取回字节的那条链路（要新地址 → 下载 → 解包附件密钥 → 解密）在
+ * `VaultClient.downloadAttachment` 里是通的、也有测试，但**拿到字节之后要有地方放** ——
+ * 存到磁盘需要一个 Rust 侧的保存命令（文件对话框 + 写文件），那个还没写。
+ *
+ * 摆一个按下去只会失败的按钮，比不摆更糟：用户会一直点，而没有任何反馈能告诉他
+ * 是「功能没做」还是「文件坏了」。所以先只显示名字和大小 ——
+ * 至少让用户知道「这里有东西」，而不是像之前那样**连存在都看不出来**。
+ */
+function AttachmentRow({ attachment }: { attachment: Attachment }) {
+  return (
+    <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-0">
+      <span className="min-w-0 flex-1 truncate text-[var(--text-sm)]" title={attachment.fileName}>
+        {attachment.fileName || '（没有文件名）'}
+      </span>
+      <span className="shrink-0 text-[var(--text-xs)] text-[var(--ink-tertiary)]">{attachment.sizeName}</span>
+    </div>
+  );
+}
 
 function Section({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
