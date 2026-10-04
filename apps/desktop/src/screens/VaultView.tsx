@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { searchItems, totpCode, hasTotp, type VaultItem, type VaultFolder } from '@coffer/vault';
+import { searchItems, totpCode, hasTotp, type VaultItem, type VaultFolder, type Attachment } from '@coffer/vault';
 import type { VaultClient } from '@coffer/vault';
+import { saveFile } from '../save';
 import { SecretField } from '../components/SecretField';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';
@@ -232,6 +233,7 @@ export function VaultView({ client, onLock }: Props) {
             {selected ? (
               <ItemDetail
                 key={selected.id}
+                client={client}
                 item={selected}
                 onEdit={() => setMode({ kind: 'edit', item: selected })}
                 onDelete={() => setConfirmDelete(selected)}
@@ -642,7 +644,8 @@ function EmptyDetail({ hasItems }: { hasItems: boolean }) {
   );
 }
 
-function ItemDetail({ item, onEdit, onDelete, onToggleFavorite }: {
+function ItemDetail({ client, item, onEdit, onDelete, onToggleFavorite }: {
+  client: VaultClient;
   item: VaultItem;
   onEdit: () => void;
   onDelete: () => void;
@@ -767,7 +770,7 @@ function ItemDetail({ item, onEdit, onDelete, onToggleFavorite }: {
         {item.attachments.length > 0 && (
           <Section title="附件">
             {item.attachments.map((a) => (
-              <AttachmentRow key={a.id} attachment={a} />
+              <AttachmentRow key={a.id} client={client} item={item} attachment={a} />
             ))}
           </Section>
         )}
@@ -882,23 +885,69 @@ const IDENTITY_LABEL: Record<string, string> = {
 /**
  * 一条附件。
  *
- * ⚠️ **这里只列出，不提供「取回」按钮 —— 因为按下它做不到。**
+ * ⚠️ **取回是显式动作，不自动下载。** 用户打开一条条目多半只是想看密码，
+ * 为了看一眼列表就把几十兆拉下来是错的。
  *
- * 取回字节的那条链路（要新地址 → 下载 → 解包附件密钥 → 解密）在
- * `VaultClient.downloadAttachment` 里是通的、也有测试，但**拿到字节之后要有地方放** ——
- * 存到磁盘需要一个 Rust 侧的保存命令（文件对话框 + 写文件），那个还没写。
- *
- * 摆一个按下去只会失败的按钮，比不摆更糟：用户会一直点，而没有任何反馈能告诉他
- * 是「功能没做」还是「文件坏了」。所以先只显示名字和大小 ——
- * 至少让用户知道「这里有东西」，而不是像之前那样**连存在都看不出来**。
+ * 三种「没有结果」必须分得开，否则用户只能反复点：
+ *   - 用户取消       → 什么都不说（那不是失败）
+ *   - 保存成功       → 告诉他存到哪了
+ *   - 取不回来       → 说清楚为什么（地址过期 / 密钥不对 / 服务端上没了）
  */
-function AttachmentRow({ attachment }: { attachment: Attachment }) {
+function AttachmentRow({ client, item, attachment }: {
+  client: VaultClient;
+  item: VaultItem;
+  attachment: Attachment;
+}) {
+  const [state, setState] = useState<'idle' | 'busy' | 'saved' | 'failed'>('idle');
+  const [note, setNote] = useState('');
+
+  async function fetchIt(): Promise<void> {
+    setState('busy');
+    setNote('');
+    try {
+      const got = await client.downloadAttachment(item.id, attachment.id);
+      const saved = await saveFile(got.fileName || attachment.fileName || 'attachment', got.bytes);
+      if (saved.path === null) {
+        // 用户取消 —— 回到可以再点的状态，不说任何话
+        setState('idle');
+        return;
+      }
+      setState('saved');
+      // 说清楚**存到哪了** —— 「已保存」而不说位置，用户还得自己去找
+      setNote(saved.path);
+    } catch (e) {
+      setState('failed');
+      setNote(e instanceof Error ? e.message : '取不回来');
+    }
+  }
+
   return (
-    <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-0">
+    <div className="flex flex-wrap items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-0">
       <span className="min-w-0 flex-1 truncate text-[var(--text-sm)]" title={attachment.fileName}>
         {attachment.fileName || '（没有文件名）'}
       </span>
-      <span className="shrink-0 text-[var(--text-xs)] text-[var(--ink-tertiary)]">{attachment.sizeName}</span>
+      {attachment.sizeName && (
+        <span className="shrink-0 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+          {attachment.sizeName}
+        </span>
+      )}
+
+      {state === 'failed' && (
+        <span className="shrink-0 text-[var(--text-xs)] text-[var(--risk)]" title={note}>取不回来</span>
+      )}
+      {state === 'saved' && (
+        <span className="min-w-0 shrink truncate text-[var(--text-xs)] text-[var(--safe)]" title={note}>
+          已保存 · {note.split('/').pop()}
+        </span>
+      )}
+
+      <button
+        onClick={() => { void fetchIt(); }}
+        disabled={state === 'busy'}
+        className="btn btn-quiet shrink-0"
+      >
+        {state === 'busy' ? '取回中…' : state === 'saved' ? '再取一次' : '取回'}
+      </button>
     </div>
   );
 }

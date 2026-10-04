@@ -57,7 +57,7 @@ describe('bodyOf', () => {
  */
 describe('toNativeRequest —— 二进制体', () => {
   const bytes = new Uint8Array([0x00, 0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00]);
-  const b64 = Buffer.from(bytes).toString('base64');
+  const b64 = btoa(String.fromCharCode(...bytes));
 
   it('base64-encodes an ArrayBuffer instead of mangling it', async () => {
     const req = await toNativeRequest('https://a.test', { method: 'POST', body: bytes.buffer.slice(0) as ArrayBuffer });

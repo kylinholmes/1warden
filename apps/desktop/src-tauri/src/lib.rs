@@ -22,6 +22,7 @@
 
 mod http;
 mod autotype;
+mod save;
 mod hotkey;
 mod tray;
 
@@ -85,6 +86,7 @@ pub fn run() {
             main_minimize,
             quick_hide,
             quick_open_main,
+            save::save_file,
         ])
         .setup(|app| {
             // 证书指纹固定存在应用数据目录里 —— 它属于「这台机器信任了什么」，

@@ -14,7 +14,14 @@
  */
 import type { SVGProps } from 'react';
 
-interface IconProps extends Omit<SVGProps<SVGSVGElement>, 'children'> {
+/**
+ * ⚠️ **不要 `Omit<..., 'children'>`。**
+ *
+ * 每个图标都是 `<Svg><path/></Svg>` 这样写的 —— 把 `children` 从类型里去掉，
+ * 那些子元素就都成了类型错误。要表达「图标不接受任意子元素」应该靠
+ * 只导出封装好的图标组件，而不是把 `children` 从 props 类型里删掉。
+ */
+interface IconProps extends SVGProps<SVGSVGElement> {
   /** 视觉尺寸（px）。默认 16 —— 和 --text-md 的正文配着用 */
   size?: number;
 }

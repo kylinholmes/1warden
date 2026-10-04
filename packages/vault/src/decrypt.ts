@@ -209,6 +209,7 @@ async function decryptAttachments(raw: CipherDto['attachments'], key: SymmetricK
       id: a.id,
       fileName: fileName.value ?? '',
       size: a.size,
+      sizeName: typeof a.sizeName === 'string' ? a.sizeName : '',
       url: a.url,
       // 附件密钥保持**密文** —— 解密它需要单独的路径（附件的 64 字节密钥）
       key: a.key ?? null,

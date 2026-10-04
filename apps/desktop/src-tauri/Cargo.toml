@@ -23,6 +23,11 @@ serde_json = "1"
 # 附件上传走这条：直接传字节会被 UTF-8 解码静默改掉
 base64 = "0.22"
 
+# 系统保存对话框 —— 附件的「取回」要用。
+# 直接引 crate 而不是 Tauri 的 dialog 插件：插件要额外的权限声明与
+# 打包配置，而我们需要的只是「问用户存哪」这一件事。
+rfd = "0.15"
+
 # ── 网络 ──
 # 网络请求必须在 Rust 侧发出：WebView 的 origin 是 tauri://localhost，
 # 跨源请求会被 CORS 拦掉（Vaultwarden 只对配置的 DOMAIN 回 ACAO）。

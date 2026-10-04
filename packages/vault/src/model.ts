@@ -99,6 +99,8 @@ export interface Attachment {
   fileName: string;
   /** ⚠️ 是字符串，不是数字 */
   size: string;
+  /** 人可读的大小（"1.43 KB"）。服务端已经算好了，界面别再格式化一遍 */
+  sizeName: string;
   url: string;
   /** 附件的独立 64 字节密钥（仍是密文）。用它解密附件内容 */
   key: string | null;

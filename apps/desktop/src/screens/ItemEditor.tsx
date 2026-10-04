@@ -96,7 +96,9 @@ export function ItemEditor({ client, item, onDone, onCancel }: Props) {
             </p>
           )}
 
-          <Group title={isNew ? '类型' : undefined}>
+          {/* ⚠️ 不能传 `title={undefined}` —— exactOptionalPropertyTypes 下那是类型错误，
+                而且意图也不同：这里要的是「不显示标题」而不是「标题是 undefined」 */}
+          <Group {...(isNew ? { title: '类型' } : {})}>
             {isNew ? (
               <div className="grid grid-cols-4 gap-2 py-3">
                 {([
@@ -400,7 +402,12 @@ function CustomFields({ fields, onChange }: { fields: CustomField[]; onChange: (
 // ── 空白模板 ──
 
 function blankLogin() {
-  return { username: null, password: null, totp: null, uris: [], passwordRevisionDate: null };
+  // ⚠️ `fido2Credentials` 不能省 —— 它是必填的，而且漏了的话
+  // 新建的条目会在保存时丢掉该条目上已有的 passkey
+  return {
+    username: null, password: null, totp: null, uris: [],
+    passwordRevisionDate: null, fido2Credentials: [],
+  };
 }
 function blankCard() {
   return { cardholderName: null, brand: null, number: null, expMonth: null, expYear: null, code: null };
@@ -418,8 +425,8 @@ function blankItem(): VaultItem {
   return {
     id: '', type: 'login', rawType: 1, name: '', nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
-    login: blankLogin(), card: null, identity: null, secureNote: null,
+    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
+    login: blankLogin(), card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }
@@ -432,6 +439,9 @@ function setType(patch: (p: Partial<VaultItem>) => void, type: ItemType) {
     card: type === 'card' ? blankCard() : null,
     identity: type === 'identity' ? blankIdentity() : null,
     secureNote: type === 'secureNote' ? { type: 0 } : null,
+    // 换类型时另外几组必须显式置空 —— 留着上一组的数据会写出一条
+    // 「类型是卡片、却带着用户名密码」的条目
+    sshKey: type === 'sshKey' ? { privateKey: null, publicKey: null, fingerprint: null } : null,
   });
 }
 
