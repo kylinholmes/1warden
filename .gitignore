@@ -1,0 +1,10 @@
+node_modules/
+dist/
+*.tsbuildinfo
+.dev/
+vendor/
+.DS_Store
+coverage/
+playwright-report/
+test-results/
+.superpowers/
