@@ -842,13 +842,25 @@ async function main(): Promise<void> {
       // 另一个实例的 console 输出根本收不到，会得出
       // 「这个请求像是没被处理过」这种误导性的结论。
       // 追踪写在 chrome.storage.session 里，任意扩展上下文都能读到。
-      const tr = await ext?.eval<string[]>(
-        `chrome.storage.session.get('coffer.trace').then((g) => g['coffer.trace'] ?? [])`,
-      ).catch(() => []);
-      if (tr && tr.length > 0) {
-        console.log('\n── passkey 追踪（跨 SW 实例）──');
-        for (const line of tr) console.log(`  ${line}`);
-      }
+      // ⚠️ 必须带超时。失败之后 popup 那个上下文的状态可能不干净，
+      // `chrome.storage` 的 promise 会一直不 settle —— 上一版就是这么把
+      // 整个 E2E 卡住的（CDP 20 秒超时，诊断代码自己变成了新的故障点）。
+      const readTrace = async (c: Cdp | undefined): Promise<string[]> => {
+        if (!c) return [];
+        try {
+          return await Promise.race([
+            c.eval<string[]>(`chrome.storage.session.get('coffer.trace')`
+              + `.then((g) => JSON.parse(JSON.stringify(g['coffer.trace'] ?? [])))`),
+            new Promise<string[]>((r) => setTimeout(() => r([]), 3000)),
+          ]);
+        } catch {
+          return [];
+        }
+      };
+      const tr = [...await readTrace(ext), ...await readTrace(sw)];
+      console.log('\n── passkey 追踪（跨 SW 实例）──');
+      if (tr.length === 0) console.log('  （缓冲为空 —— 追踪本身没写进去，或读不出来）');
+      for (const line of [...new Set(tr)]) console.log(`  ${line}`);
       for (const [name, c] of [['页面', page], ['扩展页', ext], ['service worker', sw]] as const) {
         if (!c) { console.log(`\n── ${name}：没有连接 ──`); continue; }
         console.log(`\n── ${name}的日志（${c.logs.length} 条）──`);

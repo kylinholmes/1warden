@@ -61,10 +61,18 @@ async function trace(line: string): Promise<void> {
     const arr = Array.isArray(got[TRACE_KEY]) ? (got[TRACE_KEY] as string[]) : [];
     arr.push(`[${INSTANCE}] ${line}`);
     await chrome.storage.session.set({ [TRACE_KEY]: arr.slice(-120) });
-  } catch {
-    // 追踪本身绝不能影响功能
+  } catch (e) {
+    // 追踪本身绝不能影响功能 —— 但**也不能完全静默**：
+    // 早先这里是空 catch，于是「缓冲是空的」既可能是没写、也可能是写失败，
+    // 排查时分不出来。只报第一次。
+    if (!traceBroken) {
+      traceBroken = true;
+      console.warn('[coffer] 追踪写入失败（之后不再报）：', e);
+    }
   }
 }
+
+let traceBroken = false;
 
 /**
  * 再上一道锁：让 content script 读不到会话区。
