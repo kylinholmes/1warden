@@ -114,9 +114,14 @@
  *   paper    详情栏 —— 最亮，密码真正被读到的那张「纸」
  *   well     输入框、内嵌的凹槽
  *   overlay  对话框、菜单、浮层
+ *   glass    侧栏 —— 唯一一处玻璃，压在系统材质上（见 --surface-glass）
  *
  * 每个文字层级对每一级表面的对比度都实测过（见下方注释），
  * 全部 ≥ 4.5:1，正文层 ≥ 7:1。
+ *
+ * ⚠️ 玻璃那一级是**例外，得单独算**：它背后不是我们的令牌，
+ * 是桌面壁纸经过系统材质之后的样子，谁也保证不了它是亮是暗。
+ * 所以它有自己的 α 和一组自己的规矩，见 --surface-glass。
  *
  * ⚠️ 亮色这一套**不是从暗色推出来的**，是单独排的一遍。
  * 两处只对亮色成立的事实：
@@ -131,6 +136,14 @@
  *      不是相等。
  */
 :root {
+  /*
+   * 原生控件的配色（复选框、下拉箭头、滚动条）跟着走。
+   * 它和下面那两组令牌是**同一件事的两半**：令牌管我们自己画的部分，
+   * `color-scheme` 管浏览器画的部分 —— 少了它，暗色下那几个复选框
+   * 还是白底，一眼就是「没做完」。
+   */
+  color-scheme: light;
+
   --surface-canvas: oklch(0.966 0.003 250);
   --surface-chrome: oklch(0.955 0.004 250);
   --surface-content: oklch(0.972 0.0025 250);
@@ -139,6 +152,40 @@
   --surface-hover: oklch(0.945 0.006 250);
   --surface-overlay: oklch(1 0 0);
   --surface-selected: oklch(0.945 0.03 220);
+
+  /*
+   * 侧栏的玻璃 —— chrome 那一档颜色，86% 不透明。
+   *
+   * ## 为什么是「自己的颜色 + 高 α」而不是调低 α 追求通透
+   *
+   * 窗口材质（macOS 的 Liquid Glass / Windows 的 mica）作用在**整个窗口**上，
+   * 没法只让左栏玻璃。做法只能反过来：窗口整体透明 + 材质，右两块用不透明的
+   * 表面盖住它，剩下左栏这一条露出材质。于是左栏的文字压在**壁纸**上 ——
+   * 而壁纸是亮是暗我们说了不算。
+   *
+   * α 是算出来的，不是调出来的。实测（sRGB 合成后算 WCAG，底色取纯黑/深灰/
+   * 中灰/浅灰/纯白五档，两套主题各一遍）：
+   *
+   *   α=0.72  亮色压在深色壁纸上：次级文字 3.38:1  ✗
+   *   α=0.80  亮色/深灰 4.07:1 ✗，暗色/浅灰 5.43:1 ✓
+   *   α=0.86  两套主题 × 五档壁纸，**次级文字最低 4.51:1** ✓
+   *   α=0.90  4.96:1，但它和实心面已经看不出区别了
+   *
+   * 取 0.86 是因为它正好落在「次级文字在**任何**壁纸上都 ≥ 4.5:1」的边界上。
+   * 再低就开始破线，再高就看不出玻璃。
+   *
+   * ⚠️ 随之而来的两条规矩（侧栏里改文字层级前先读这段）：
+   *   1. **侧栏里的小字用次级墨，不用三级。** 三级墨压在实心 chrome 上
+   *      本来就只有 4.94:1（几乎没有余量），任何透明度都会把它推破线 ——
+   *      α=0.86 时它掉到 3.58:1。所以侧栏的计数、账户邮箱、快捷键提示
+   *      都上移一档（见 VaultView 的 Sidebar）。
+   *   2. **图标可以用三级墨**：图形元件按 WCAG 1.4.11 是 3:1，3.58 够了。
+   *
+   * ⚠️ 真正上机之后，材质自己还会再压一道 —— macOS 的 Liquid Glass 与
+   * mica 都会把壁纸的明暗往中间拉（不然任何系统的侧栏都没法读）。
+   * 所以上面这些是**没有材质时的最坏值**，真机上只会更好。
+   */
+  --surface-glass: oklch(0.955 0.004 250 / 0.86);
 
   --ink-primary: oklch(0.24 0.01 250); /* 16.4:1 on paper */
   --ink-secondary: oklch(0.46 0.012 250); /* 7.1:1 */
@@ -207,8 +254,27 @@
   --elev-modal: var(--edge-top), 0 12px 40px oklch(0 0 0 / 0.16), 0 2px 8px oklch(0 0 0 / 0.085);
 }
 
+/*
+ * ── 暗色
+ *
+ * 同一组值**写了两份**，这是刻意的：主题有三个状态（跟随系统 / 亮色 / 暗色），
+ * 而「跟随系统」与「手选暗色」是两个不同的入口，CSS 里没有一处选择器
+ * 能同时表示它们。
+ *
+ *   a. 下面第一段：系统是暗色、且用户**没有**显式选亮色 → 生效。
+ *      `:not([data-theme='light'])` 就是「显式选择压过系统偏好」那一半。
+ *   b. 第二段：用户显式选了暗色 → 生效。系统是亮色时它也必须赢，
+ *      所以这段**不能**放进媒体查询里。
+ *
+ * ⚠️ 两份的值必须一字不差。改一处忘另一处的症状是「手选的暗色和系统的
+ * 暗色长得不太一样」—— 不会报错，只会慢慢分叉。
+ * （能用 `light-dark()` 的话一份就够，但它要 Safari 17.5 / macOS 14.5，
+ * 而我们的下限是 macOS 13。）
+ */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme='light']) {
+    color-scheme: dark;
+
     /*
      * 暗色不是把亮色翻转 —— 是重新排一遍亮度。
      * 四级表面整体比上一版抬高了一档（上一版最低到 0.16，接近纯黑，
@@ -222,6 +288,9 @@
     --surface-hover: oklch(0.3 0.009 250);
     --surface-overlay: oklch(0.29 0.009 250);
     --surface-selected: oklch(0.335 0.04 220);
+
+    /* 侧栏玻璃 —— α 与理由见亮色那一段的注释 */
+    --surface-glass: oklch(0.208 0.007 250 / 0.86);
 
     --ink-primary: oklch(0.955 0.004 250); /* 13.5:1 on paper */
     --ink-secondary: oklch(0.775 0.008 250); /* 7.6:1 */
@@ -263,6 +332,46 @@
   }
 }
 
+/* 与上面那一段完全相同的一组值 —— 一个是「系统是暗色」，一个是「用户选了暗色」 */
+:root[data-theme='dark'] {
+  color-scheme: dark;
+
+  --surface-canvas: oklch(0.186 0.006 250);
+  --surface-chrome: oklch(0.208 0.007 250);
+  --surface-content: oklch(0.233 0.007 250);
+  --surface-paper: oklch(0.262 0.007 250);
+  --surface-well: oklch(0.205 0.007 250);
+  --surface-hover: oklch(0.3 0.009 250);
+  --surface-overlay: oklch(0.29 0.009 250);
+  --surface-selected: oklch(0.335 0.04 220);
+
+  --surface-glass: oklch(0.208 0.007 250 / 0.86);
+
+  --ink-primary: oklch(0.955 0.004 250);
+  --ink-secondary: oklch(0.775 0.008 250);
+  --ink-tertiary: oklch(0.675 0.01 250);
+  --ink-inverse: oklch(0.19 0.01 250);
+
+  --border-subtle: oklch(0.318 0.009 250);
+  --border-overlay: oklch(0.4 0.01 250);
+  --border-strong: oklch(0.42 0.011 250);
+
+  --accent: oklch(0.745 0.105 220);
+  --accent-hover: oklch(0.8 0.1 220);
+  --accent-tint: oklch(0.335 0.04 220);
+  --accent-ring: oklch(0.7 0.1 220);
+  --accent-ink: oklch(0.2 0.03 220);
+
+  --safe: oklch(0.755 0.14 150);
+  --caution: oklch(0.805 0.13 78);
+  --risk: oklch(0.715 0.16 25);
+
+  --edge-top: inset 0 1px 0 oklch(1 0 0 / 0.06);
+  --elev-raise: var(--edge-top), 0 1px 2px oklch(0 0 0 / 0.3);
+  --elev-pop: var(--edge-top), 0 4px 16px oklch(0 0 0 / 0.45), 0 1px 3px oklch(0 0 0 / 0.3);
+  --elev-modal: var(--edge-top), 0 16px 48px oklch(0 0 0 / 0.6), 0 2px 8px oklch(0 0 0 / 0.4);
+}
+
 /* 尊重用户的动效偏好 —— 全部降为 0 */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
@@ -272,13 +381,48 @@
   }
 }
 
+/*
+ * ── 自绘标题栏
+ *
+ * 窗口用的是 `titleBarStyle: "Overlay"`（macOS），内容铺满整个窗口，
+ * 系统只把红绿灯留在左上角。所以左侧栏顶部要让出它们占的那一段 ——
+ * 否则「Coffer」和设置按钮会被三个圆点压住。
+ *
+ * 红绿灯只有 macOS 有；Windows 那边是 `decorations: false` + 自己画的
+ * 窗口按钮，左上角没有东西要躲，内边距就是普通的那 14px。
+ * `data-os` 由渲染层在启动时写（见 main.tsx）—— 这是界面自己的事，
+ * 不该让每个用到它的组件各自去问一遍平台。
+ *
+ * 数值 80px：红绿灯三个圆点从 x=14 排到 x=66（系统定的，改不了），
+ * 80 是后面再留一点喘息的余量。
+ *
+ * ⚠️ 高度没有令牌：标题栏就是三栏顶部那条 `--band-h`（54px）的带子，
+ * 红绿灯落在它的上半部分。系统标题栏本身是 28px，红绿灯在里面居中 ——
+ * 也就是说它们**不会**跟着 54px 的带子垂直居中，这是正常的：
+ * macOS 上所有高头部的窗口都长这样（备忘录、音乐）。
+ */
+:root {
+  --traffic-inset: 14px;
+}
+:root[data-os='mac'] {
+  --traffic-inset: 80px;
+}
+
 html, body, #root {
   height: 100%;
   margin: 0;
 }
 
+/*
+ * ⚠️ body **不画背景**，这是玻璃能生效的前提。
+ *
+ * 窗口材质在 WebView 后面；只要这里铺一层不透明的 canvas，它就被整个盖住了，
+ * 左栏会变成一块普通的灰。背景的责任下放给每一屏自己：
+ *   - 保险库：左栏玻璃 + 右侧两块不透明（材质只从左栏透出来）
+ *   - 连接屏 / 解锁屏 / 出错屏：整屏 canvas（实心，刻意不透）
+ * 预览页自己会补一层底（见 preview/preview.css）。
+ */
 body {
-  background: var(--surface-canvas);
   color: var(--ink-primary);
   font-family: var(--font-ui);
   font-size: var(--text-md);

@@ -14,20 +14,33 @@ import { QuickAccess } from '../src/screens/QuickAccess';
 import { Settings, type SectionId } from '../src/screens/Settings';
 import { ImportScreen } from '../src/screens/Import';
 import { ItemEditor } from '../src/screens/ItemEditor';
+import { Generator } from '../src/screens/Generator';
 import { Connect } from '../src/screens/Connect';
 import { Unlock } from '../src/screens/Unlock';
 import { ToastProvider, useToast, type ToastInput } from '../src/components/Toast';
+import { initPlatform } from '../src/platform';
+import { initTheme, setThemeMode, type ThemeMode } from '../src/theme';
 import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
 import './preview.css';
+
+/*
+ * 和两个真实入口一样：主题与平台标记都要先落到根元素上，再渲染。
+ *
+ * ⚠️ 少了 initTheme，「切了主题下次还记不记得住」在预览里永远测不出来；
+ * 少了 initPlatform，左栏**看不出**要给红绿灯让位（--traffic-inset）——
+ * 两个都是「截图上看着正常、真机上不对」的那种漏。
+ */
+initPlatform();
+initTheme();
 
 function item(over: Partial<VaultItem> & { id: string; name: string }): VaultItem {
   return {
     type: 'login', rawType: 1, nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
-    deletedAt: null, archivedAt: null, hasItemKey: false,
+    deletedAt: null, archivedAt: null, wrappedKey: null,
     login: { ...emptyLogin(), password: 'kJ8#mPq2$vXn9!wZt4&bR' },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
     ...over,
   };
@@ -84,7 +97,7 @@ const DETAIL: VaultItem = item({
     uris: [{ uri: 'https://github.com', match: null }, { uri: 'https://gist.github.com', match: null }],
   },
   notes: '公司账号与个人账号是分开的两个。这个只用来登录公司组织，\n恢复代码放在保险柜里。',
-  customFields: [{ name: '组织', value: 'acme', type: 0 }],
+  customFields: [{ name: '组织', value: 'acme', type: 0, linkedId: null }],
   passwordHistory: [{ password: 'old-pass-123', lastUsedDate: '2025-06-01T00:00:00Z' }],
 });
 
@@ -92,7 +105,7 @@ const DETAIL: VaultItem = item({
 function DetailPane({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full">
-      <div className="w-[var(--rail-w)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-chrome)]" />
+      <div className="w-[var(--rail-w)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-glass)]" />
       <div className="w-[var(--list-w)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-content)]" />
       <div className="min-w-0 flex-1 overflow-y-auto bg-[var(--surface-paper)]">{children}</div>
     </div>
@@ -114,6 +127,26 @@ if (params.has('accounts')) {
     { serverUrl: 'http://192.168.1.10:8080', email: 'admin@home.lan' },
   ]));
 }
+
+/*
+ * 主题与壁纸。
+ *
+ * `?theme=dark` 走的是**真实路径**（theme.ts → 根元素上写 data-theme），
+ * 所以它同时验证了「显式选择压过系统偏好」那条规则 —— 而不是截图工具
+ * 伪造一个颜色方案骗自己。
+ *
+ * `?wallpaper=light|dark` 只在预览里存在：铺一张壁纸在应用底下，
+ * 好让左栏的玻璃有东西可透（见 preview.css）。
+ */
+const themeParam = params.get('theme');
+if (themeParam === 'light' || themeParam === 'dark' || themeParam === 'system') {
+  setThemeMode(themeParam as ThemeMode);
+}
+const wallpaper = params.get('wallpaper');
+if (wallpaper !== null) document.documentElement.dataset['wallpaper'] = wallpaper;
+
+// 摆三个假红绿灯（见 preview.css）—— 自绘标题栏要躲的就是它们
+if (params.has('traffic')) document.documentElement.dataset['traffic'] = '1';
 
 /*
  * ── 动效的定格 ──────────────────────────────────────────────
@@ -283,6 +316,49 @@ function ToastPreview({ variant }: { variant: string }) {
 }
 
 /*
+ * ── 浮层的预览壳
+ *
+ * 浮层要能真的开合，才能验证 Esc / 点遮罩 / 重开是不是对的 ——
+ * 写死 `open` 的话，组件永远关不掉，截图看着一样，交互却没法测。
+ * 关掉之后留一个「重新打开」的按钮：既是给手点，也是给 CDP 驱动的脚本点。
+ */
+function EditorPreview({ item }: { item: VaultItem | null }) {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <VaultView client={fakeClient} onLock={() => {}} />
+      <ItemEditor
+        client={fakeClient}
+        item={item}
+        open={open}
+        onCancel={() => setOpen(false)}
+        onDone={() => setOpen(false)}
+      />
+      {!open && <Reopen onClick={() => setOpen(true)} />}
+    </>
+  );
+}
+
+function GeneratorPreview() {
+  const [open, setOpen] = useState(true);
+  return (
+    <>
+      <VaultView client={fakeClient} onLock={() => {}} />
+      <Generator open={open} onClose={() => setOpen(false)} />
+      {!open && <Reopen onClick={() => setOpen(true)} />}
+    </>
+  );
+}
+
+function Reopen({ onClick }: { onClick: () => void }) {
+  return (
+    <button onClick={onClick} className="btn btn-primary fixed bottom-5 left-5 z-[60]">
+      重新打开
+    </button>
+  );
+}
+
+/*
  * 整棵树都包在 ToastProvider 里：VaultView 会用 useToast()（保存、删除、
  * 收藏失败都要发提示条），没有 Provider 它会直接抛错 —— 抛出来的结果是
  * 一张全白的截图，而截图本身是「成功」的。
@@ -299,14 +375,16 @@ createRoot(document.getElementById('root')!).render(
       <ImportScreen client={fakeClient} onImported={() => {}} />
     ) : which === 'detail' ? (
       <DetailPane>
-        <ItemDetail item={DETAIL} onEdit={() => {}} onDelete={() => {}} onToggleFavorite={() => {}} />
+        <ItemDetail client={fakeClient} item={DETAIL} onEdit={() => {}} onDelete={() => {}} onToggleFavorite={() => {}} />
       </DetailPane>
     ) : which === 'detail-empty' ? (
       <DetailPane><EmptyDetail hasItems /></DetailPane>
     ) : which === 'form' ? (
-      <ItemEditor client={fakeClient} item={null} onCancel={() => {}} onDone={() => {}} />
+      <EditorPreview item={null} />
     ) : which === 'form-edit' ? (
-      <ItemEditor client={fakeClient} item={DETAIL} onCancel={() => {}} onDone={() => {}} />
+      <EditorPreview item={DETAIL} />
+    ) : which === 'generator' ? (
+      <GeneratorPreview />
     ) : which === 'connect' ? (
       <Connect client={fakeClient} onConnected={() => {}} />
     ) : which === 'unlock' ? (

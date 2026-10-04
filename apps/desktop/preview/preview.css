@@ -10,6 +10,69 @@
 @source '../src';
 
 /*
+ * ── 预览专用的底
+ *
+ * 应用本体不再给 body 画背景（那会把窗口材质整个盖住，见 styles.css），
+ * 背景的责任下放给每一屏。预览页里没有窗口材质，所以这里补一层 ——
+ * 不然截图背后是浏览器自己的白，左栏的 α 合成结果就没意义了。
+ */
+body {
+  background: var(--surface-canvas);
+}
+
+/*
+ * ── 模拟「窗口背后是桌面」
+ *
+ * `?wallpaper=light|dark` 时，页面底下铺一张壁纸，body 让开，
+ * 于是只剩左栏是半透明的 —— 这正是真机上材质透出来的那部分。
+ * 右两栏是不透明的，壁纸不会从它们那儿漏出来（这一点正是要看的）。
+ *
+ * ⚠️ 这里**不模拟系统的模糊**。真机上材质会把壁纸糊掉再压暗/压亮
+ * （macOS 的 Liquid Glass 还会按可读性调整），预览里是原始的壁纸 ——
+ * 也就是说这里看到的是**最坏情况**，截图里的对比度只低不高。
+ */
+html[data-wallpaper] body {
+  background: transparent;
+}
+
+html[data-wallpaper='light'] {
+  background:
+    radial-gradient(120% 90% at 12% 8%, oklch(0.92 0.06 250) 0%, transparent 55%),
+    radial-gradient(110% 80% at 88% 92%, oklch(0.9 0.07 40) 0%, transparent 60%),
+    linear-gradient(160deg, oklch(0.86 0.05 220), oklch(0.78 0.07 280));
+}
+
+html[data-wallpaper='dark'] {
+  background:
+    radial-gradient(120% 90% at 12% 8%, oklch(0.42 0.09 265) 0%, transparent 55%),
+    radial-gradient(110% 80% at 88% 92%, oklch(0.36 0.08 320) 0%, transparent 60%),
+    linear-gradient(160deg, oklch(0.24 0.04 265), oklch(0.12 0.03 280));
+}
+
+/*
+ * ── 三个假红绿灯（`?traffic=1`）
+ *
+ * 真机上这三颗圆点是**系统画在 WebView 上面**的，网页里既抓不到也测不了。
+ * 预览里按系统实测位置摆一份（圆心 x = 20 / 40 / 60，y = 14，直径 12），
+ * 好让「左栏顶部让出的那段距离对不对」这件事**能在一张图里看出来** ——
+ * 否则截图里只是左边多了一块空白，谁也说不清它为什么在那儿。
+ */
+html[data-traffic] body::before {
+  content: '';
+  position: fixed;
+  left: 20px;
+  top: 14px;
+  width: 52px;
+  height: 12px;
+  z-index: 100;
+  pointer-events: none;
+  background:
+    radial-gradient(circle 6px at 6px 6px, #ff5f57 99%, transparent),
+    radial-gradient(circle 6px at 26px 6px, #febc2e 99%, transparent),
+    radial-gradient(circle 6px at 46px 6px, #28c840 99%, transparent);
+}
+
+/*
  * ── 退场关键帧的定格（预览专用）
  *
  * `?flow=exit&at=<毫秒>` 走这条路，它**不走组件的开合状态机**。

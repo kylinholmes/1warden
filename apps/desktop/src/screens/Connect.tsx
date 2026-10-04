@@ -201,7 +201,17 @@ export function Connect({ client, onConnected }: Props) {
   const inFlow = cert !== null || challenge !== null;
 
   return (
-    <div className="flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8">
+    /*
+      这一屏没有顶部带子（内容居中），所以整块背景就是可拖的区域 ——
+      自绘标题栏之后没有原生标题栏可以抓，窗口必须能从某处拖走。
+
+      `="deep"` 是「这一层里任何地方都能拖」，而按钮、输入框、链接
+      这些**可交互元素自动豁免**（Tauri 的 drag.js 里那张表），
+      所以表单该点点、该打字打字，只有空白和文字处能拖着窗口走。
+      不带值的写法只在**正好按在那张元素本身**时才拖 —— 而这一屏的
+      背景几乎都被卡片盖着，那样等于哪儿都拖不动。
+    */
+    <div className="flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
       <div className="screen-in w-full max-w-[380px]">
         <div className="mb-7 flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-[var(--accent-ink)]">
