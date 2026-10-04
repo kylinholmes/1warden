@@ -1,9 +1,10 @@
 import { useMemo, useReducer, useCallback, Component, type ErrorInfo } from 'react';
-import { VaultClient } from './vault-client';
+import { VaultClient, type SessionStatus } from '@coffer/vault';
 import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
 import { screenFor } from './screens/screen-for';
+import { tauriFetch } from './transport';
 
 export function App() {
   // 会话状态就是界面的状态。让 session 的变化驱动重渲染 ——
@@ -12,6 +13,8 @@ export function App() {
 
   // 自动锁定：空闲 15 分钟。外壳层还应监听系统休眠/锁屏 —— 那是 Tauri 侧的事。
   const client = useMemo(() => new VaultClient({
+    // 桌面端的所有 HTTP 都走 Rust 侧 —— WebView 的 fetch 会被 CORS 拦掉
+    fetchImpl: tauriFetch,
     autoLockMs: 15 * 60 * 1000,
     onLock: () => forceRender(),
     onStatus: () => forceRender(),

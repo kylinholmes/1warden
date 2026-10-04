@@ -1,6 +1,6 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { VaultClient } from './vault-client';
-import { createFakeServer, fakeJwt } from './fake-server';
+import { describe, it, expect } from 'vitest';
+import { VaultClient } from './client';
+import { createFakeServer, fakeJwt } from './testing/fake-server';
 import {
   deriveMasterKey, stretchMasterKey, makeUserKey, KDF_TYPE_PBKDF2,
   type SymmetricKey, type KdfConfig,
@@ -15,15 +15,15 @@ const ITERATIONS = 1000;
  * 这些测试跑在 node 环境里，没有 localStorage。
  * 设备标识要持久化，于是给它一个内存版即可 —— 顺带让测试互不影响。
  */
-beforeEach(() => {
-  const store = new Map<string, string>();
-  vi.stubGlobal('localStorage', {
-    getItem: (k: string) => store.get(k) ?? null,
-    setItem: (k: string, v: string) => void store.set(k, v),
-    removeItem: (k: string) => void store.delete(k),
-    clear: () => store.clear(),
-  });
-});
+/** 内存版设备标识存储 —— 服务 worker 里没有 localStorage，测试也一样 */
+function memoryDeviceStore() {
+  let id: string | null = null;
+  return {
+    get: () => id,
+    set: (v: string) => { id = v; },
+    clear: () => { id = null; },
+  };
+}
 
 const KDF: KdfConfig = { kdf: KDF_TYPE_PBKDF2, iterations: ITERATIONS };
 
@@ -35,7 +35,7 @@ async function serverWithAccount(userKey: SymmetricKey = makeUserKey()) {
 }
 
 function clientFor(server: ReturnType<typeof createFakeServer>) {
-  return new VaultClient({ fetchImpl: server.fetchImpl });
+  return new VaultClient({ fetchImpl: server.fetchImpl, deviceStore: memoryDeviceStore() });
 }
 
 describe('VaultClient.connect —— 完整编排', () => {
@@ -95,6 +95,7 @@ describe('VaultClient.connect —— 完整编排', () => {
     });
     // 只关心请求体，直接拦下 token 端点
     const client = new VaultClient({
+      deviceStore: memoryDeviceStore(),
       fetchImpl: async (input, init) => {
         if (String(input).includes('/identity/connect/token')) tokenBody = String(init?.body ?? '');
         return wrapped.fetchImpl(input, init);
@@ -130,6 +131,7 @@ describe('VaultClient.connect —— 完整编排', () => {
 
   it('surfaces a cert error from the transport without flattening it', async () => {
     const client = new VaultClient({
+      deviceStore: memoryDeviceStore(),
       fetchImpl: async () => {
         throw Object.assign(new Error('vault.test 的证书无法验证'), {
           kind: 'certUntrusted', fingerprint: 'AB:CD',

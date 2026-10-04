@@ -1,5 +1,5 @@
 import { useState, useEffect, type FormEvent } from 'react';
-import type { VaultClient } from '../vault-client';
+import type { VaultClient } from '@coffer/vault';
 
 interface Props {
   client: VaultClient;

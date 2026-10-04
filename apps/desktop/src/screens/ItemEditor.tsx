@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react';
 import { generatePassword, passwordStrength } from '@coffer/crypto';
 import { writeTotpSecret } from '@coffer/vault';
 import type { VaultItem, ItemType, CustomField } from '@coffer/vault';
-import type { VaultClient } from '../vault-client';
+import type { VaultClient } from '@coffer/vault';
 
 interface Props {
   client: VaultClient;

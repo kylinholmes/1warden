@@ -1,6 +1,6 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { searchItems, totpCode, hasTotp, type VaultItem, type VaultFolder } from '@coffer/vault';
-import type { VaultClient } from '../vault-client';
+import type { VaultClient } from '@coffer/vault';
 import { SecretField } from '../components/SecretField';
 import { ItemEditor } from './ItemEditor';
 

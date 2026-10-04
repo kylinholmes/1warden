@@ -1,5 +1,5 @@
 import { useState, type FormEvent } from 'react';
-import type { VaultClient, TwoFactorChallenge } from '../vault-client';
+import type { VaultClient, TwoFactorChallenge } from '@coffer/vault';
 import { probeCertificate, trustCertificate, type CertInfo } from '../trust';
 
 interface Props {

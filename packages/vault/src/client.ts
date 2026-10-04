@@ -15,11 +15,10 @@ import {
   KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
-import {
-  VaultSession, SyncEngine, decryptCipher, decryptFolder,
-  type AccountInfo, type SessionStatus,
-} from '@coffer/vault';
-import { tauriFetch } from './transport';
+import { VaultSession } from './session';
+import { SyncEngine } from './sync-engine';
+import { decryptCipher, decryptFolder } from './decrypt';
+import type { AccountInfo, SessionStatus } from './session';
 
 export interface ConnectParams {
   serverUrl: string;
@@ -43,26 +42,33 @@ export class VaultClient {
   private masterKey: Uint8Array | null = null;
   private pendingConnect: ConnectParams | null = null;
 
-  /** 传输层。默认走 Rust 侧；测试里可以换成假的服务器。 */
+  /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
   private readonly fetchImpl: typeof fetch;
+  private readonly deviceStore: DeviceIdStore;
+  /** 设备标识要读存储，所以第一次用的时候才异步取 */
+  private deviceId: Promise<string> | null = null;
 
   constructor(opts: {
     autoLockMs?: number;
     onLock?: () => void;
     onStatus?: (s: SessionStatus) => void;
     /**
-     * 仅供测试注入。
+     * 传输层。**必须由调用方注入** —— 没有通用默认值可用：
+     *   - 桌面端：走 Rust 侧原生请求（WebView 的 fetch 会被 CORS 拦掉）
+     *   - 浏览器扩展：直接 fetch（扩展有 host permission，不受 CORS 限制）
      *
-     * ⚠️ 生产环境**不要**传 —— 不传时走 `tauriFetch`（Rust 侧原生请求）。
-     * 换成浏览器 fetch 会被 CORS 拦掉，见 transport.ts。
+     * 给一个「默认用全局 fetch」的兜底只会让桌面端在运行时才炸。
      */
-    fetchImpl?: typeof fetch;
-  } = {}) {
-    this.fetchImpl = opts.fetchImpl ?? tauriFetch;
+    fetchImpl: typeof fetch;
+    /** 设备标识的持久化。桌面端用 localStorage，扩展用 chrome.storage。 */
+    deviceStore?: DeviceIdStore;
+  }) {
+    this.fetchImpl = opts.fetchImpl;
+    this.deviceStore = opts.deviceStore ?? localStorageDeviceStore;
     this.device = {
       // 用桌面端的值而不是 CLI —— 服务端日志里能看出这是我们的应用
       type: DEVICE_TYPE.macOSDesktop,
-      identifier: getDeviceIdentifier(),
+      identifier: '',
       name: 'Coffer',
     };
     this.http = this.makeHttp('https://localhost');
@@ -74,6 +80,12 @@ export class VaultClient {
   }
 
   getSession(): VaultSession { return this.session; }
+
+  /** 设备标识只读一次，之后缓存 —— 它要落存储，不该每次请求都读一遍 */
+  private deviceIdentity(): Promise<string> {
+    this.deviceId ??= getDeviceIdentifier(this.deviceStore);
+    return this.deviceId;
+  }
 
   /**
    * 所有 HTTP 都从这里出去。
@@ -132,7 +144,7 @@ export class VaultClient {
     const token = await loginWithPassword(bare, {
       email: params.email,
       masterPasswordHash,
-      device: this.device,
+      device: { ...this.device, identifier: await this.deviceIdentity() },
       ...(twoFactor ? { twoFactor } : {}),
     });
 
@@ -301,7 +313,8 @@ export class VaultClient {
     this.token = null;
     this.syncEngine = null;
     this.session.logout();
-    clearDeviceIdentifier();
+    void this.deviceStore.clear();
+    this.deviceId = null;
   }
 
   /** 手动锁定后重新解锁，不需要重新走完整登录 */
@@ -335,20 +348,33 @@ function jwtSub(token: string): string {
   return (JSON.parse(atob(payload.replace(/-/g, '+').replace(/_/g, '/'))).sub as string);
 }
 
-/** 设备标识持久化 —— 服务端靠它区分设备，每次启动都换新的会在设备列表里堆一堆 */
-const DEVICE_KEY = 'coffer.deviceId';
-
-function getDeviceIdentifier(): string {
-  let id = localStorage.getItem(DEVICE_KEY);
-  if (!id) {
-    id = crypto.randomUUID();
-    localStorage.setItem(DEVICE_KEY, id);
-  }
-  return id;
+/**
+ * 设备标识的持久化。
+ *
+ * 服务端靠它区分设备 —— 每次启动都换新的会在用户的设备列表里堆一堆。
+ * 桌面端用 localStorage，扩展的 service worker 里没有 localStorage，
+ * 得换成 chrome.storage。所以做成可注入的。
+ */
+export interface DeviceIdStore {
+  get(): Promise<string | null> | string | null;
+  set(id: string): Promise<void> | void;
+  clear(): Promise<void> | void;
 }
 
-function clearDeviceIdentifier(): void {
-  localStorage.removeItem(DEVICE_KEY);
+const DEVICE_KEY = 'coffer.deviceId';
+
+const localStorageDeviceStore: DeviceIdStore = {
+  get: () => localStorage.getItem(DEVICE_KEY),
+  set: (id) => localStorage.setItem(DEVICE_KEY, id),
+  clear: () => localStorage.removeItem(DEVICE_KEY),
+};
+
+async function getDeviceIdentifier(store: DeviceIdStore): Promise<string> {
+  const existing = await store.get();
+  if (existing) return existing;
+  const id = crypto.randomUUID();
+  await store.set(id);
+  return id;
 }
 
 // 这些薄封装让依赖注入与调用点的签名保持简单
