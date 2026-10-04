@@ -134,7 +134,9 @@ type Request =
   | { type: 'coffer:generate'; length?: number; digits?: boolean; symbols?: boolean }
   | { type: 'coffer:pending'; tabId?: number }
   | { type: 'coffer:save-capture'; tabId?: number }
-  | { type: 'coffer:dismiss-capture'; tabId?: number };
+  | { type: 'coffer:dismiss-capture'; tabId?: number }
+  | { type: 'coffer:reveal'; itemId: string; field: 'username' | 'password' | 'totp' }
+  | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' };
 
 chrome.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
   const req = msg as { type?: string };
@@ -321,6 +323,84 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       return { ok: true };
     }
 
+    /**
+     * 取出一个字段的明文，供弹窗复制。
+     *
+     * ⚠️ 这是**唯一**会把明文交给弹窗的接口，而且只在用户明确点了「复制」时调用。
+     * 列表接口刻意只回摘要 —— 弹窗平时没有任何理由看到密码。
+     *
+     * `totp` 是算出来的而不是存下来的：种子存在条目里，验证码每次现算。
+     */
+    case 'coffer:reveal': {
+      const session = await sessions.load();
+      if (!session) throw new Error('保险库未解锁');
+
+      const item = session.items.find((i) => i.id === req.itemId);
+      if (!item?.login) throw new Error('这条记录没有可复制的登录信息');
+
+      switch (req.field) {
+        case 'username':
+          if (item.login.username === null) throw new Error('这条记录没有用户名');
+          return { value: item.login.username };
+        case 'password':
+          if (item.login.password === null) throw new Error('这条记录没有密码');
+          return { value: item.login.password };
+        case 'totp': {
+          const code = await totpCode(item);
+          if (code === null) throw new Error('这条记录没有验证码，或密钥不合法');
+          return { value: code.code, remaining: code.remaining };
+        }
+        default:
+          throw new Error(`未知字段：${String(req.field)}`);
+      }
+    }
+
+    /**
+     * 复制到剪贴板。
+     *
+     * ⚠️ 明文**不经过弹窗**：这里取出来直接交给离屏文档，弹窗只拿到
+     * 「复制好了没有」。而且清理定时器跑在离屏文档里 ——
+     * 弹窗关掉之后它还在，这正是「复制完忘了」那种情况所需要的。
+     */
+    case 'coffer:copy': {
+      const session = await sessions.load();
+      if (!session) throw new Error('保险库未解锁');
+      const item = session.items.find((i) => i.id === req.itemId);
+      if (!item?.login) throw new Error('这条记录没有可复制的登录信息');
+
+      let value: string;
+      switch (req.field) {
+        case 'username':
+          if (item.login.username === null) throw new Error('这条记录没有用户名');
+          value = item.login.username;
+          break;
+        case 'password':
+          if (item.login.password === null) throw new Error('这条记录没有密码');
+          value = item.login.password;
+          break;
+        case 'totp': {
+          const code = await totpCode(item);
+          if (code === null) throw new Error('这条记录没有验证码，或密钥不合法');
+          value = code.code;
+          break;
+        }
+        default:
+          throw new Error(`未知字段：${String(req.field)}`);
+      }
+
+      // 让离屏文档把清理定时器挂上。**发完不管** —— 它的应答回不来
+      // （见 offscreen.ts 顶部）。清理失败不影响这次复制本身。
+      void ensureOffscreen()
+        .then(() => chrome.runtime.sendMessage({
+          type: 'coffer-internal:schedule-clear', value,
+        }))
+        .catch((e: unknown) => console.warn('[coffer] 剪贴板清理未能安排：', e));
+
+      // 值交回弹窗由它写剪贴板：弹窗有用户手势，而且写失败时它当场就知道，
+      // 可以如实告诉用户 —— 换成这里写就没人能报错了
+      return { value, clearAfterSeconds: 30 };
+    }
+
     case 'coffer:dismiss-capture': {
       const tabId = req.tabId ?? sender.tab?.id;
       if (tabId === undefined) return { ok: true };
@@ -351,6 +431,8 @@ function summarise(i: VaultItem) {
     name: i.nameFailed ? '无法解密' : i.name,
     username: i.login?.username ?? null,
     hasPassword: i.login?.password != null,
+    // 只报「有没有」，不报种子本身
+    hasTotp: i.login?.totp != null,
     uris: i.login?.uris.map((u) => u.uri) ?? [],
     favorite: i.favorite,
   };
@@ -509,6 +591,40 @@ function newLoginItem(url: string, username: string | null, password: string): V
     card: null, identity: null, secureNote: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
+}
+
+/**
+ * 确保离屏文档在跑。
+ *
+ * 用 `getContexts` 查而不是自己记一个布尔量：service worker 随时会被杀，
+ * 模块变量归零，但离屏文档**还活着** —— 靠记忆判断会创建出第二个，
+ * 而 `createDocument` 遇到已存在会直接抛错。
+ *
+ * 同时并发也要挡：两个复制动作挨着来会双双走到创建那一步。
+ */
+let offscreenReady: Promise<void> | null = null;
+
+function ensureOffscreen(): Promise<void> {
+  offscreenReady ??= (async () => {
+    const contexts = await chrome.runtime.getContexts({
+      contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
+    });
+    if (contexts.length === 0) {
+      await chrome.offscreen.createDocument({
+        url: 'offscreen.html',
+        reasons: ['CLIPBOARD' as chrome.offscreen.Reason],
+        justification: '复制密码后需要在弹窗关闭的情况下也能按时清空剪贴板',
+      });
+    }
+
+    // 不等它应答 —— 离屏文档的 sendResponse 到不了调用方（见 offscreen.ts 顶部）。
+    // 给一小段时间让它的脚本跑起来注册好监听器即可。
+    await new Promise((r) => setTimeout(r, 200));
+  })().catch((e: unknown) => {
+    offscreenReady = null;   // 失败就允许下次重试
+    throw e;
+  });
+  return offscreenReady;
 }
 
 // ── 角标 ──

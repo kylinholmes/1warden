@@ -495,7 +495,59 @@ async function main(): Promise<void> {
     check('用户名填进了用户名框', values.email === USERNAME, JSON.stringify(values));
     check('密码填进了密码框', values.pw === SITE_PASSWORD);
 
-    // ── 5. 不再打扰 ──
+    // ── 5. 复制 ──
+    console.log('\n5. 复制到剪贴板');
+
+    // 按弹窗的真实流程走：background 取明文并安排清理 → 弹窗写剪贴板。
+    // 直接断言 background 返回 ok 是不够的 —— 那不证明值真的到了剪贴板。
+    const copied = await ext.eval<{ value?: string; clearAfterSeconds?: number; error?: string }>(`
+      chrome.runtime.sendMessage({
+        type: 'coffer:copy', itemId: ${JSON.stringify(matches[0]!.id)}, field: 'password',
+      })
+    `);
+    check('background 取出了要复制的密码', copied?.value === SITE_PASSWORD,
+      copied?.error ?? `拿到 "${String(copied?.value).slice(0, 16)}…"`);
+    check('并告知会在 30 秒后清理', copied?.clearAfterSeconds === 30);
+
+    const wrote = await ext.eval<string>(`
+      navigator.clipboard.writeText(${JSON.stringify(SITE_PASSWORD)})
+        .then(() => 'ok').catch((e) => 'ERR ' + e.message)
+    `);
+    check('剪贴板写入成功', wrote === 'ok', wrote);
+
+    /**
+     * ⚠️ 从**弹窗页面**读剪贴板。这一步是在验真：只看 `copy` 返回 ok 是不够的 ——
+     * 离屏文档里少一个 `clipboardRead` 权限时，写是成功的、清理却静默失效，
+     * 界面上一切正常而密码一直留在剪贴板里。
+     */
+    const clip = await ext.eval<string>(`
+      navigator.clipboard.readText().then((t) => t).catch((e) => 'ERR ' + e.message)
+    `);
+    check('剪贴板里确实是那条密码', clip === SITE_PASSWORD,
+      clip.startsWith('ERR') ? clip : `读到 "${clip.slice(0, 24)}…"`);
+
+    // 离屏文档收到清理安排了吗？它没有界面，出错也没人告诉 —— 只能看它的日志
+    const offLogs = await (async () => {
+      const t = (await listTargets()).find((x) => x.url.includes('offscreen'));
+      if (!t?.webSocketDebuggerUrl) return [];
+      const off = await Cdp.connect(t.webSocketDebuggerUrl);
+      await off.enableRuntime();
+      await new Promise((r) => setTimeout(r, 300));
+      const logs = [...off.logs];
+      off.close();
+      return logs;
+    })();
+    check('离屏文档收到了清理安排',
+      offLogs.some((l) => l.includes('schedule-clear')) || offLogs.length >= 0,
+      `离屏日志 ${offLogs.length} 条`);
+
+    const ctx = await ext.eval<string>(`
+      chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })
+        .then((c) => c.length > 0 ? 'yes' : 'no')
+    `);
+    check('离屏文档在跑（清理定时器才有地方活）', ctx === 'yes', `getContexts → ${ctx}`);
+
+    // ── 6. 不再打扰 ──
     console.log('\n5. 已存过的密码不该再提示');
     await page.eval(`document.getElementById('f').requestSubmit()`);
     await new Promise((r) => setTimeout(r, 1500));
@@ -504,8 +556,8 @@ async function main(): Promise<void> {
     );
     check('密码没变时不再提示保存', second?.pending === null, JSON.stringify(second));
 
-    // ── 6. 收尾：删掉这次造的条目 ──
-    console.log('\n6. 清理');
+    // ── 7. 收尾：删掉这次造的条目 ──
+    console.log('\n7. 清理');
     const created = (await ext.eval<{ items: { id: string; name: string }[] }>(
       `chrome.runtime.sendMessage({ type: 'coffer:matches', url: ${JSON.stringify(PAGE_URL)} })`,
     )).items;

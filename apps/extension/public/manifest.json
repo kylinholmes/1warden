@@ -18,7 +18,10 @@
   "permissions": [
     "storage",
     "scripting",
-    "activeTab"
+    "activeTab",
+    "offscreen",
+    "clipboardWrite",
+    "clipboardRead"
   ],
   "host_permissions": [
     "http://*/*",

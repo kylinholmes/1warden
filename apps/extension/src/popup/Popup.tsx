@@ -14,6 +14,7 @@ interface ItemSummary {
   name: string;
   username: string | null;
   hasPassword: boolean;
+  hasTotp: boolean;
   uris: string[];
   favorite: boolean;
 }
@@ -216,24 +217,73 @@ function SiteLine({ url }: { url: string }) {
   );
 }
 
+/**
+ * 一条匹配到的记录。
+ *
+ * 主力动作是**填充**，但 1Password 扩展里用得最多的其实是**复制** ——
+ * 用户常常是「复制密码 → 去别处粘贴」，而不是在网页表单里填。
+ * 所以两者都得在，而且复制要够快（一次点击，不用展开菜单）。
+ */
 function ItemRow({ item, onFill }: { item: ItemSummary; onFill: () => void }) {
+  const [copied, setCopied] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+
+  async function copy(field: 'username' | 'password' | 'totp') {
+    setError(null);
+    try {
+      // background 取出明文并安排好「30 秒后清理」，值回到这里由我们写剪贴板。
+      // 写在这里而不是 background：弹窗有用户手势，而且写失败时能当场报错 ——
+      // 放到离屏文档里写就没人能告诉用户「这次没复制上」。
+      const { value } = await send<{ value: string }>({ type: 'coffer:copy', itemId: item.id, field });
+      await navigator.clipboard.writeText(value);
+      setCopied(field);
+      setTimeout(() => setCopied(null), 2000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '复制失败');
+    }
+  }
+
+  const fields: { key: 'username' | 'password' | 'totp'; label: string }[] = [];
+  if (item.username) fields.push({ key: 'username', label: '用户名' });
+  if (item.hasPassword) fields.push({ key: 'password', label: '密码' });
+  if (item.hasTotp) fields.push({ key: 'totp', label: '验证码' });
+
   return (
-    <button
-      onClick={onFill}
-      className="flex w-full items-center gap-2 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2 text-left transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)]"
-    >
-      <span className="shrink-0 text-[var(--text-lg)]" aria-hidden>{item.favorite ? '★' : '🔑'}</span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-[var(--text-md)]">{item.name}</span>
-        {item.username && (
-          <span className="block truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]">{item.username}</span>
+    <div className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] p-2.5">
+      <div className="flex items-center gap-2">
+        <span className="shrink-0 text-[var(--text-lg)]" aria-hidden>{item.favorite ? '★' : '🔑'}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[var(--text-md)]">{item.name}</span>
+          {item.username && (
+            <span className="block truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]">{item.username}</span>
+          )}
+        </span>
+        {item.hasPassword && (
+          <button onClick={onFill}
+            className="shrink-0 rounded-[var(--radius-sm)] bg-[var(--accent)] px-2.5 py-1 text-[var(--text-xs)] font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)]">
+            填充
+          </button>
         )}
-      </span>
-      {/* 没有密码的条目点进去也没得填，直接说明白，别让用户白点一次 */}
-      <span className="shrink-0 text-[var(--text-xs)] text-[var(--accent)]">
-        {item.hasPassword ? '填充' : '无密码'}
-      </span>
-    </button>
+      </div>
+
+      {fields.length > 0 && (
+        <div className="mt-2 flex flex-wrap items-center gap-1.5 border-t border-[var(--border-subtle)] pt-2">
+          {fields.map((f) => (
+            <button key={f.key} onClick={() => { void copy(f.key); }}
+              className="rounded-[var(--radius-sm)] px-2 py-0.5 text-[var(--text-xs)] text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)]">
+              {copied === f.key ? '已复制 ✓' : `复制${f.label}`}
+            </button>
+          ))}
+          {/* 复制后会清空剪贴板，把这件事说出来 —— 否则用户过一会儿粘贴不出来
+              会以为是坏了 */}
+          <span className="ml-auto text-[var(--text-xs)] text-[var(--ink-tertiary)]">30 秒后清空</span>
+        </div>
+      )}
+
+      {error && (
+        <p className="mt-1.5 text-[var(--text-xs)] text-[var(--risk)]">{error}</p>
+      )}
+    </div>
   );
 }
 
