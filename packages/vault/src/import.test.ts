@@ -57,11 +57,17 @@ describe('parseBitwardenCsv —— 表头的宽容', () => {
     expect(it.login?.username).toBeNull();
   });
 
-  /** 没有 name 列就无从下手 —— 要明确失败，不能默默导入一堆无名条目 */
-  it('reports an error when there is no name column', () => {
+  /**
+   * ⚠️ 没有 name 列**不再**视为错误。
+   *
+   * 早先这里直接拒绝（「表头里找不到 name 列」），但那份文件里的用户名和密码
+   * 都是好的 —— 因为标题列缺失就把整份导入挡回去，用户丢掉的是全部密码。
+   * 现在退而用用户名当名称：显示上不完美，但内容一条不少。
+   */
+  it('falls back to the username when there is no name column', () => {
     const r = parseBitwardenCsv(['login_password,login_username', row('p', 'u')].join('\n'));
-    expect(r.items).toEqual([]);
-    expect(r.skipped[0]?.reason).toContain('name');
+    expect(r.items).toHaveLength(1);
+    expect(r.items[0]).toMatchObject({ name: 'u', login: { username: 'u', password: 'p' } });
   });
 });
 
@@ -119,15 +125,33 @@ describe('parseBitwardenCsv —— 跳过的行', () => {
     expect(parseBitwardenCsv(csv).items).toHaveLength(1);
   });
 
-  /** ⚠️ 没名字的条目在列表里是一片空白，用户找不回来 —— 宁可报出来 */
-  it('skips rows with no name and says which row', () => {
+  /**
+   * ⚠️ 没有名称的行**不再跳过**，改成用用户名当名称。
+   *
+   * 早先的判断是「没名字的条目在列表里是一片空白，用户找不回来」。但对比一下
+   * 两种代价：名字不完美只是不好看，而**跳过等于用户丢了一条密码** ——
+   * 而且他不会知道。第一条规则（不丢内容）优先。
+   *
+   * 三者都没有（名称、用户名、网址全空）才跳过 —— 那行确实什么都给不出来。
+   */
+  it('falls back to the username for a row with no name', () => {
     const csv = [HEADER,
-      row('', '0', 'login', '', '', '', '0', '', '', 'p', ''),
+      row('', '0', 'login', '', '', '', '0', '', 'me', 'p', ''),
+      row('', '0', 'login', 'B', '', '', '0', '', '', 'p', ''),
+    ].join('\n');
+    const r = parseBitwardenCsv(csv);
+    expect(r.items.map((i) => i.name)).toEqual(['me', 'B']);
+    expect(r.skipped).toEqual([]);
+  });
+
+  it('skips a row that has no name, username or url at all', () => {
+    const csv = [HEADER,
+      row('', '0', 'login', '', '', '', '0', '', '', '', ''),
       row('', '0', 'login', 'B', '', '', '0', '', '', 'p', ''),
     ].join('\n');
     const r = parseBitwardenCsv(csv);
     expect(r.items.map((i) => i.name)).toEqual(['B']);
-    expect(r.skipped).toEqual([{ rowNumber: 2, reason: '没有名称' }]);
+    expect(r.skipped[0]).toMatchObject({ rowNumber: 2 });
   });
 
   it('skips a row that is shorter than the header', () => {
