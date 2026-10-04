@@ -8,6 +8,7 @@
  */
 import {
   HttpClient, prelogin, loginWithPassword, refreshToken, DEVICE_TYPE,
+  refreshAttachmentUrl, downloadAttachment,
   type DeviceInfo, type TokenResponse,
 } from '@coffer/api';
 import {
@@ -19,6 +20,7 @@ import {
 import { VaultSession, restoreSession } from './session';
 import { SyncEngine } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
+import { unwrapAttachmentKey, decryptAttachmentContent } from './attachments';
 import type { AccountInfo, SessionStatus, StoredSession } from './session';
 import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
@@ -267,6 +269,48 @@ export class VaultClient {
     if (state.token === null) return;
     this.token = state.token;
     this.http = this.makeHttp(state.account.serverUrl, this.authHeaders());
+  }
+
+  /**
+   * 下载并解密一个附件。
+   *
+   * ## 两次失败要分开处理
+   *
+   * 1. **地址过期**：存下来的 `url` 由请求的 Host 头推导、每次 sync 重新生成。
+   *    先要一个新的，失败再回退到存下来的那个（官方客户端也是这个顺序）。
+   * 2. **密钥不对**：附件的密钥被用户密钥（或条目密钥）包装，
+   *    用错的表现是解出来一堆乱码 —— 而文件确实下载到了。
+   *
+   * ⚠️ **已知限制**：带独立密钥的条目（`hasItemKey`，多见于组织共享的条目）
+   * 取不了附件 —— 那条独立密钥的密文没有存在会话里。
+   * 这种情况**明确报错**，而不是拿用户密钥去试（那样只会得到乱码，
+   * 而用户会把一个坏文件存下来并以为它是好的）。
+   */
+  async downloadAttachment(
+    itemId: string, attachmentId: string,
+  ): Promise<{ fileName: string; bytes: Uint8Array }> {
+    const key = this.requireKey();
+    const item = this.session.items.find((i) => i.id === itemId);
+    if (!item) throw new Error('找不到这条条目');
+    const attachment = item.attachments.find((a) => a.id === attachmentId);
+    if (!attachment) throw new Error('这条条目上没有这个附件');
+    if (item.hasItemKey) {
+      throw new Error('这条条目带独立密钥，暂时取不了它的附件');
+    }
+
+    // 先要一个新的下载地址；拿不到就回退到存下来的那个
+    let url = attachment.url;
+    try {
+      url = (await refreshAttachmentUrl(this.http, itemId, attachmentId)).url;
+    } catch {
+      // 存下来的地址可能还有效 —— 回退，而不是直接失败
+    }
+
+    const bytes = await downloadAttachment(this.http, url);
+    const attKey = await unwrapAttachmentKey(attachment.key, key);
+    if (attKey === null) throw new Error('这个附件的密钥读不出来，无法解密');
+
+    return { fileName: attachment.fileName, bytes: await decryptAttachmentContent(bytes, attKey) };
   }
 
   /** 重新同步（用户手动刷新、或收到服务器变更通知时调用） */

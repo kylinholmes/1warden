@@ -5,5 +5,6 @@ export * from './auth';
 export * from './types';
 export * from './sync';
 export * from './ciphers';
+export * from './attachments';
 export * from './folders';
 export * from './accounts';

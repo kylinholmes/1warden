@@ -57,6 +57,45 @@ export class HttpClient {
     }
   }
 
+  /**
+   * 发一个**绝对 URL** 的请求 —— 不拼 baseUrl。
+   *
+   * ⚠️ 附件的下载地址是服务端给的绝对 URL，而且挂在 **web 根路径**上
+   * （`{host}/attachments/{cipherId}/{attachmentId}?token={jwt}`），不在 `/api` 下。
+   * 用 `requestRaw` 会拼成 `{baseUrl}https://…` 这种废地址，
+   * 而报错是一句语焉不详的网络失败。
+   *
+   * token 在 URL 里，所以这条请求不需要 Authorization 头。
+   */
+  async requestAbsoluteRaw(url: string, opts: RequestOptions = {}): Promise<Response> {
+    const headers: Record<string, string> = {
+      // 附件是任意二进制，不能要 JSON
+      Accept: '*/*',
+      ...this.headerFn?.(),
+      ...opts.headers,
+    };
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    opts.signal?.addEventListener('abort', () => controller.abort(), { once: true });
+
+    try {
+      const res = await this.fetchImpl(url, { method: 'GET', headers, signal: controller.signal });
+      if (!res.ok) {
+        // ⚠️ 分类要**具体**，别一律 'server'：
+        // 403/404 多半是那个 URL 过期了（它由 Host 头推导、每次 sync 重新生成），
+        // 而 5xx 是服务端的问题 —— 两者的处置完全不同
+        const kind = res.status === 404 ? 'notFound'
+          : res.status === 401 || res.status === 403 ? 'auth'
+            : res.status === 429 ? 'rateLimited'
+              : 'server';
+        throw new ApiError(kind, `附件下载失败（HTTP ${res.status}）`, { status: res.status });
+      }
+      return res;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   /** 不解析响应体 —— 用于需要看原始状态码与 body 的场景 */
   async requestRaw(method: string, path: string, opts: RequestOptions = {}): Promise<Response> {
     const headers: Record<string, string> = {

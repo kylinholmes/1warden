@@ -1,5 +1,6 @@
 export * from './model';
 export * from './decrypt';
+export * from './attachments';
 export * from './encrypt';
 export * from './session';
 export * from './client';
