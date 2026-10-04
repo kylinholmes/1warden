@@ -107,7 +107,15 @@ try {
   let seq = 0;
   const waiting = new Map<number, (v: unknown) => void>();
   ws.onmessage = (ev) => {
-    const msg = JSON.parse(String(ev.data)) as { id?: number; result?: unknown };
+    const msg = JSON.parse(String(ev.data)) as { id?: number; result?: unknown; method?: string; params?: unknown };
+    /*
+     * 打开 COFFER_SHOT_VERBOSE=1 时把页面里的报错打出来。
+     * 截图工具最坑的一种失败是「截出一张全白」—— 页面在渲染时抛了异常，
+     * 而截图本身完全成功。没有这条，只能靠猜。
+     */
+    if (msg.method === 'Runtime.exceptionThrown' || msg.method === 'Log.entryAdded') {
+      console.error('[页面]', JSON.stringify(msg.params).slice(0, 800));
+    }
     if (msg.id === undefined) return;
     waiting.get(msg.id)?.(msg.result);
     waiting.delete(msg.id);
@@ -121,6 +129,10 @@ try {
   };
 
   await send('Page.enable');
+  if (process.env.COFFER_SHOT_VERBOSE) {
+    await send('Runtime.enable');
+    await send('Log.enable');
+  }
   await send('Emulation.setDeviceMetricsOverride', {
     width, height, deviceScaleFactor: 2, mobile: false,
   });
@@ -141,8 +153,15 @@ try {
 
   await send('Page.navigate', { url: pageUrl });
 
-  // 等字体与布局稳定。用固定延时而不是 networkidle —— 静态页没有网络活动可等。
-  await new Promise((r) => setTimeout(r, 1200));
+  /*
+   * 等字体与布局稳定。用固定延时而不是 networkidle —— 静态页没有网络活动可等。
+   *
+   * 延时可以用 COFFER_SHOT_DELAY 覆盖：动效的**中间帧**只有在那之前拍才拍得到。
+   * 预览页的 `?at=` 会把 CSS 动画定格在指定毫秒处（见 preview/main.tsx），
+   * 两者配合才能给出可复现的关键帧截图 —— 靠卡时间点拍动画是拍不准的。
+   */
+  const delay = Number(process.env.COFFER_SHOT_DELAY ?? 1200);
+  await new Promise((r) => setTimeout(r, delay));
 
   const shot = await send<{ data: string }>('Page.captureScreenshot', {
     format: 'png',

@@ -248,6 +248,33 @@ export const IconSpinner = ({ size = 16, ...p }: IconProps) => (
   </Svg>
 );
 
+export const IconGear = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="3" />
+    <path d="M19.4 14.5a1.7 1.7 0 0 0 .34 1.87l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.7 1.7 0 0 0-1.87-.34 1.7 1.7 0 0 0-1.03 1.56V21a2 2 0 1 1-4 0v-.09A1.7 1.7 0 0 0 8.9 19.3a1.7 1.7 0 0 0-1.87.34l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.7 1.7 0 0 0 .34-1.87 1.7 1.7 0 0 0-1.56-1.03H3a2 2 0 1 1 0-4h.09A1.7 1.7 0 0 0 4.7 8.9a1.7 1.7 0 0 0-.34-1.87l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.7 1.7 0 0 0 1.87.34H9.1a1.7 1.7 0 0 0 1.03-1.56V3a2 2 0 1 1 4 0v.09a1.7 1.7 0 0 0 1.03 1.56 1.7 1.7 0 0 0 1.87-.34l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.7 1.7 0 0 0-.34 1.87v.01a1.7 1.7 0 0 0 1.56 1.03H21a2 2 0 1 1 0 4h-.09a1.7 1.7 0 0 0-1.51 1.03" />
+  </Svg>
+);
+
+export const IconClose = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m6 6 12 12M18 6 6 18" />
+  </Svg>
+);
+
+export const IconPalette = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="M12 3a9 9 0 0 0 0 18 2 2 0 0 0 1.6-3.2 2 2 0 0 1 1.6-3.2H18a3 3 0 0 0 3-3 9 9 0 0 0-9-8.6" />
+    <path d="M7.5 10.5h.01M10.5 7h.01M14.5 7h.01M17.5 10h.01" />
+  </Svg>
+);
+
+export const IconInfo = (p: IconProps) => (
+  <Svg {...p}>
+    <circle cx="12" cy="12" r="9" />
+    <path d="M12 11v5.5M12 7.8h.01" />
+  </Svg>
+);
+
 /** 条目类型 → 图标。和 `.tile[data-type]` 的配色一一对应 */
 export function TypeIcon({ type, size = 16 }: { type: string; size?: number }) {
   switch (type) {

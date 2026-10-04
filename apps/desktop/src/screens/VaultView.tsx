@@ -6,8 +6,11 @@ import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';
 import { ImportScreen } from './Import';
 import { ItemEditor } from './ItemEditor';
+import { Settings } from './Settings';
+import { FloatingPanel } from '../components/FloatingPanel';
+import { useToast } from '../components/Toast';
 import {
-  IconAlert, IconCheck, IconCopy, IconFolder, IconImport,
+  IconAlert, IconCheck, IconCopy, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   IconSearch, IconShield, IconStar, IconTrash, TypeIcon,
 } from '../components/icons';
@@ -28,12 +31,14 @@ type Mode = { kind: 'browse' } | { kind: 'edit'; item: VaultItem } | { kind: 'ne
 
 export function VaultView({ client, onLock }: Props) {
   const session = client.getSession();
+  const toast = useToast();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<Category>({ kind: 'all' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: 'browse' });
   const [confirmDelete, setConfirmDelete] = useState<VaultItem | null>(null);
   const [bump, setBump] = useState(0); // 本地写入后强制重渲染 —— session 不是响应式的
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
 
@@ -73,19 +78,24 @@ export function VaultView({ client, onLock }: Props) {
     return () => clearInterval(id);
   }, [selected]);
 
-  // ⌘F 聚焦搜索；⌘L 锁定 —— 键盘优先是安全工具的基本要求
+  // ⌘F 聚焦搜索；⌘L 锁定；⌘, 设置 —— 键盘优先是安全工具的基本要求
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      // 浮层开着时这些快捷键全部让路：焦点在设置面板里，
+      // 而 ⌘F 会把焦点抢到背后的搜索框上 —— 那就是焦点跑到模态外面去了
+      if (settingsOpen) return;
       if ((e.metaKey || e.ctrlKey) && e.key === 'f') { e.preventDefault(); searchRef.current?.focus(); }
       if ((e.metaKey || e.ctrlKey) && e.key === 'l') { e.preventDefault(); onLock(); }
+      if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onLock]);
+  }, [onLock, settingsOpen]);
 
   // 快捷键：⌘N 新建。放在编辑态下会被输入框抢走，所以只在浏览态生效
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
+      if (settingsOpen) return;
       if ((e.metaKey || e.ctrlKey) && e.key === 'n' && mode.kind === 'browse') {
         e.preventDefault();
         setMode({ kind: 'new' });
@@ -93,7 +103,7 @@ export function VaultView({ client, onLock }: Props) {
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode.kind]);
+  }, [mode.kind, settingsOpen]);
 
   const sidebar = (
     <Sidebar
@@ -111,6 +121,7 @@ export function VaultView({ client, onLock }: Props) {
         // 而用户不知道为什么
         if (category.kind === 'folder' && category.id === id) setCategory({ kind: 'all' });
       })}
+      onOpenSettings={() => setSettingsOpen(true)}
     />
   );
 
@@ -126,7 +137,12 @@ export function VaultView({ client, onLock }: Props) {
             onCancel={() => setMode({ kind: 'browse' })}
             onDone={(saved) => {
               setMode({ kind: 'browse' });
-              if (saved) { setSelectedId(saved.id); setBump((n) => n + 1); }
+              if (saved) {
+                setSelectedId(saved.id);
+                setBump((n) => n + 1);
+                // 编辑器一关，界面上就没有「存了没有」的位置了 —— 提示条的典型场景
+                toast.show({ tone: 'success', message: `已保存「${saved.name}」` });
+              }
             }}
           />
         </div>
@@ -220,7 +236,17 @@ export function VaultView({ client, onLock }: Props) {
                 onEdit={() => setMode({ kind: 'edit', item: selected })}
                 onDelete={() => setConfirmDelete(selected)}
                 onToggleFavorite={() => {
-                  void client.toggleFavorite(selected.id).then(() => setBump((n) => n + 1));
+                  // ⚠️ 这里原来没有 catch：收藏失败会变成一个没人看见的
+                  // unhandled rejection，用户看到的是「点了没反应」。
+                  // 收藏按钮就在他手指底下，失败时不会有任何别的地方告诉他
+                  void client.toggleFavorite(selected.id)
+                    .then(() => setBump((n) => n + 1))
+                    .catch((e: unknown) => {
+                      toast.show({
+                        tone: 'danger',
+                        message: `没能更改收藏：${e instanceof Error ? e.message : '未知错误'}`,
+                      });
+                    });
                 }}
               />
             ) : <EmptyDetail hasItems={filtered.length > 0} />}
@@ -238,6 +264,7 @@ export function VaultView({ client, onLock }: Props) {
             await client.moveToTrash(target.id);
             setSelectedId(null);
             setBump((n) => n + 1);
+            toast.show({ tone: 'success', message: `已把「${target.name}」移到回收站` });
           }}
           onPermanent={async () => {
             const target = confirmDelete;
@@ -245,9 +272,21 @@ export function VaultView({ client, onLock }: Props) {
             await client.deletePermanently(target.id);
             setSelectedId(null);
             setBump((n) => n + 1);
+            toast.show({ tone: 'neutral', message: `已永久删除「${target.name}」` });
           }}
         />
       )}
+
+      {/*
+        设置面板挂在最外层 —— 它浮在三栏之上，和删除确认是同一层的东西。
+        入口在侧栏顶端（.band 的右端），和另外两栏的头部在同一条水平线上。
+      */}
+      <Settings
+        open={settingsOpen}
+        account={session.account?.email ?? ''}
+        serverUrl={session.account?.serverUrl ?? ''}
+        onClose={() => setSettingsOpen(false)}
+      />
     </div>
   );
 }
@@ -269,31 +308,35 @@ function DeleteDialog(props: {
   onPermanent: () => void;
 }) {
   const [ack, setAck] = useState(false);
+  /*
+    走和设置面板同一个浮层外壳。
+
+    改之前这个对话框是自己写的：没有 Esc、点遮罩不关、Tab 能走到背后的
+    列表上去。它本来是界面上唯一的浮层，所以这些缺口没人碰得到；
+    现在有了第二个浮层，两套各漏一点的交互只会让人怀疑哪一套才是对的。
+  */
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center bg-black/35 p-4 backdrop-blur-[2px]" role="dialog" aria-modal>
-      <div className="w-full max-w-sm rounded-[var(--radius-lg)] bg-[var(--surface-overlay)] p-5"
-        style={{ boxShadow: 'var(--elev-modal)' }}>
-        <h3 className="text-[var(--text-lg)] font-semibold">删除「{props.item.name}」？</h3>
-        <p className="mt-1.5 text-[var(--text-sm)] text-[var(--ink-secondary)]">
-          移到回收站后仍可恢复。永久删除则<strong className="font-medium text-[var(--risk)]">无法撤销</strong>。
-        </p>
+    <FloatingPanel open onClose={props.onCancel} labelledBy="delete-title" className="max-w-sm p-5">
+      <h3 id="delete-title" className="text-[var(--text-lg)] font-semibold">删除「{props.item.name}」？</h3>
+      <p className="mt-1.5 text-[var(--text-sm)] text-[var(--ink-secondary)]">
+        移到回收站后仍可恢复。永久删除则<strong className="font-medium text-[var(--risk)]">无法撤销</strong>。
+      </p>
 
-        <label className="mt-4 flex items-start gap-2.5 rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-2.5 text-[var(--text-xs)] text-[var(--ink-secondary)]">
-          <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
-          我知道永久删除无法恢复
-        </label>
+      <label className="mt-4 flex items-start gap-2.5 rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-2.5 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+        <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
+        我知道永久删除无法恢复
+      </label>
 
-        <div className="mt-4 flex flex-col gap-2">
-          <button onClick={props.onTrash} className="btn btn-primary w-full py-2.5">移到回收站</button>
-          <button onClick={props.onPermanent} disabled={!ack} className="btn btn-danger w-full py-2.5">
-            永久删除
-          </button>
-          <button onClick={props.onCancel} className="btn w-full py-2.5 text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]">
-            取消
-          </button>
-        </div>
+      <div className="mt-4 flex flex-col gap-2">
+        <button onClick={props.onTrash} className="btn btn-primary w-full py-2.5">移到回收站</button>
+        <button onClick={props.onPermanent} disabled={!ack} className="btn btn-danger w-full py-2.5">
+          永久删除
+        </button>
+        <button onClick={props.onCancel} className="btn w-full py-2.5 text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]">
+          取消
+        </button>
       </div>
-    </div>
+    </FloatingPanel>
   );
 }
 
@@ -304,6 +347,7 @@ function Sidebar(props: {
   counts: { all: number; favorites: number };
   onLock: () => void;
   account: string;
+  onOpenSettings: () => void;
   onCreateFolder: (name: string) => Promise<void>;
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
@@ -320,7 +364,17 @@ function Sidebar(props: {
         <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
           <IconLock size={13} />
         </span>
-        <span className="text-[var(--text-lg)] font-semibold tracking-[-0.01em]">Coffer</span>
+        <span className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold tracking-[-0.01em]">Coffer</span>
+        {/* 设置入口在顶栏右端。**不放进底部账户区**：那里是「你是谁 / 离开」，
+            设置是「这个应用怎么运作」，和账户不是一类东西 */}
+        <button
+          onClick={props.onOpenSettings}
+          title="设置  ⌘,"
+          aria-label="设置"
+          className="shrink-0 rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+        >
+          <IconGear size={15} />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-2.5 py-2.5">
@@ -420,7 +474,7 @@ function Sidebar(props: {
                   <IconMore size={14} />
                 </button>
                 {menuFor === f.id && (
-                  <div className="absolute right-1 top-full z-20 mt-1 flex gap-0.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-overlay)] p-1"
+                  <div className="absolute right-1 top-full z-20 mt-1 flex gap-0.5 rounded-[var(--radius-md)] border border-[var(--border-overlay)] bg-[var(--surface-overlay)] p-1"
                     style={{ boxShadow: 'var(--elev-pop)' }}>
                     <button onClick={() => { setRenaming(f.id); setMenuFor(null); }}
                       className="btn btn-ghost px-2 py-1 gap-1.5"><IconPencil size={12} />重命名</button>

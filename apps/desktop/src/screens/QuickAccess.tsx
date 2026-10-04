@@ -56,11 +56,18 @@ export function QuickAccess({ items, locked, busy, notice, onQueryChange, onPick
   }
 
   return (
-    <div className="flex h-full flex-col overflow-hidden rounded-[var(--radius-lg)] border border-[var(--border-subtle)] bg-[var(--surface-overlay)]"
-      style={{ boxShadow: 'var(--elev-modal)' }}>
+    /*
+      表面（.panel）+ 顶栏/底栏（.panel-head / .panel-foot）和设置面板共用同一批
+      样式类 —— 两个浮窗必须长得一样，用户眼里的「浮起来的一层」只有一个概念。
+
+      逻辑上没有共用：这个面板跑在**另一个 OS 窗口**里，窗口边界本身就是它的
+      遮罩，焦点也出不去，所以 FloatingPanel 里的焦点陷阱、点外部关闭对它
+      没有意义。硬套只会多一层空转 —— 该共用的是视觉，不是那些钩子。
+    */
+    <div className="panel flex h-full flex-col overflow-hidden">
       {/* 搜索就是这一屏的主角 —— 给它 --text-lg，比列表里的条目名还大一号，
           因为用户打开面板时脑子里想的是「我要找的那个东西叫什么」 */}
-      <div className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3.5">
+      <div className="panel-head gap-3 px-4 py-3.5">
         {locked
           ? <IconLock size={18} className="shrink-0 text-[var(--ink-tertiary)]" />
           : <IconSearch size={18} className="shrink-0 text-[var(--ink-tertiary)]" />}
@@ -135,7 +142,7 @@ export function QuickAccess({ items, locked, busy, notice, onQueryChange, onPick
         </ul>
       )}
 
-      <footer className="flex items-center justify-between border-t border-[var(--border-subtle)] px-4 py-2.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+      <footer className="panel-foot px-4 py-2.5">
         <span className="min-w-0 truncate">{notice ?? '⏎ 复制密码'}</span>
         <span className="shrink-0">esc 关闭</span>
       </footer>

@@ -8,3 +8,28 @@
  */
 @import '../src/styles.css';
 @source '../src';
+
+/*
+ * ── 退场关键帧的定格（预览专用）
+ *
+ * `?flow=exit&at=<毫秒>` 走这条路，它**不走组件的开合状态机**。
+ *
+ * 为什么不走：组件里有一条 400ms 的兜底卸载（动画没派发 animationend 时
+ * 也要把节点摘掉）。动画一旦被暂停，animationend 就永远不会来，
+ * 于是兜底照样在 400ms 后把面板从 DOM 里拿掉 —— 拍到的是「已经没了」，
+ * 而且看起来像是没定格成功。
+ *
+ * 这里直接把同一段 keyframes 套上去、把时间轴拖到负延迟处再暂停：
+ * 拍到的是**同一组关键帧、同一个时长与缓动**（都取自设计令牌），
+ * 只是不经过计时器。退场动画的形态照样是被证明了，只是入口换了一个。
+ */
+html[data-freeze-out] .panel {
+  animation: coffer-panel-out var(--dur-fast) var(--ease-move) both;
+  animation-delay: calc(var(--freeze-out) * -1ms);
+  animation-play-state: paused;
+}
+html[data-freeze-out] .scrim {
+  animation: coffer-fade-in var(--dur-fast) var(--ease-move) reverse both;
+  animation-delay: calc(var(--freeze-out) * -1ms);
+  animation-play-state: paused;
+}

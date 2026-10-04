@@ -5,6 +5,7 @@ import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
 import { screenFor } from './screens/screen-for';
 import { IconAlert } from './components/icons';
+import { ToastProvider } from './components/Toast';
 import { useQuickBridge } from './use-quick-bridge';
 import { listen } from '@tauri-apps/api/event';
 import { tauriFetch } from './transport';
@@ -43,21 +44,28 @@ export function App() {
   }, [handleLock]);
 
   const session = client.getSession();
+  const screen = screenFor(session.status);
 
-  switch (screenFor(session.status)) {
-    case 'vault':
-      return <VaultView client={client} onLock={handleLock} />;
-    case 'unlock':
-      return (
+  /*
+    提示条的宿主包在**所有屏幕之外** —— 它是窗口级的东西，不属于任何一屏。
+    保险库里的保存确认、解锁屏的报错、连接屏的报错，落在同一个右下角，
+    换个屏幕不会换一套反馈。
+  */
+  return (
+    <ToastProvider>
+      {screen === 'vault' ? (
+        <VaultView client={client} onLock={handleLock} />
+      ) : screen === 'unlock' ? (
         <Unlock
           client={client}
           onUnlocked={forceRender}
           onDisconnect={() => { client.logout(); forceRender(); }}
         />
-      );
-    default:
-      return <Connect client={client} onConnected={forceRender} />;
-  }
+      ) : (
+        <Connect client={client} onConnected={forceRender} />
+      )}
+    </ToastProvider>
+  );
 }
 
 /**

@@ -6,15 +6,17 @@
  *
  * 构建：`bun run preview:build`（产物 `dist-preview/`，不打包进产品）
  */
-import { StrictMode } from 'react';
+import { StrictMode, useEffect, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SecurityReportView } from '../src/screens/SecurityReport';
 import { VaultView, ItemDetail, EmptyDetail } from '../src/screens/VaultView';
 import { QuickAccess } from '../src/screens/QuickAccess';
+import { Settings, type SectionId } from '../src/screens/Settings';
 import { ImportScreen } from '../src/screens/Import';
 import { ItemEditor } from '../src/screens/ItemEditor';
 import { Connect } from '../src/screens/Connect';
 import { Unlock } from '../src/screens/Unlock';
+import { ToastProvider, useToast, type ToastInput } from '../src/components/Toast';
 import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
 import './preview.css';
 
@@ -113,9 +115,187 @@ if (params.has('accounts')) {
   ]));
 }
 
+/*
+ * ── 动效的定格 ──────────────────────────────────────────────
+ *
+ * 静图证明不了动效，但**卡时间点去拍动画中间帧**同样证明不了 ——
+ * 每次拍到的进度都不一样。所以把动画定住：`?at=<毫秒>` 让页面在
+ * 指定时刻把所有正在跑的 CSS 动画设到 `currentTime = at` 然后暂停，
+ * 于是同一张图每次都能重现。
+ *
+ * 定格要在动画**开始之后**再执行，所以由触发动作的那一方调用
+ * （下面几个 Preview 组件里的 `scheduleFreeze`）。
+ */
+const atParam = new URLSearchParams(location.search).get('at');
+const freezeAt = atParam === null ? null : Number(atParam);
+
+function freezeAllAnimations(offset: number): void {
+  for (const a of document.getAnimations()) {
+    /*
+      ⚠️ 只定格**正在跑**的动画。
+      一开始没写这个判断，于是页面加载时那批已经播完的进场动画（整屏淡入）
+      也被倒回到 `offset` 处 —— 结果每张图里整个界面都蒙着一层半透明，
+      而且倒回哪一帧取决于那批动画当时有没有被回收，两次拍同一张图都不一样。
+      「已结束的不动」这一条，是让关键帧可复现的关键。
+    */
+    if (a.playState !== 'running') continue;
+    try {
+      a.currentTime = offset;
+      a.pause();
+    } catch { /* 设不了就跳过，不影响其余 */ }
+  }
+}
+
+/**
+ * 等到真的**有动画在跑**了，再定格。
+ *
+ * ⚠️ 不能用「setTimeout 固定毫秒」代替。React 从 setState 到把新的 class
+ * 落到 DOM 上、浏览器再据此创建动画，中间隔了多少帧是不确定的；
+ * 猜早了我们定格的是一批已经播完的旧动画，猜晚了中间帧已经过去了 ——
+ * 两种都表现为「这张图像是没定格」。盯住「有没有在跑的动画」才是稳的。
+ */
+function scheduleFreeze(offset: number): void {
+  const deadline = performance.now() + 800;
+  const tick = (): void => {
+    const running = document.getAnimations().filter((a) => a.playState === 'running');
+    if (running.length === 0 && performance.now() < deadline) {
+      requestAnimationFrame(tick);
+      return;
+    }
+    for (const a of running) {
+      try {
+        a.currentTime = offset;
+        a.pause();
+      } catch { /* 设不了就跳过 */ }
+    }
+  };
+  requestAnimationFrame(tick);
+}
+
+/**
+ * 用负延迟 + `animation-play-state: paused` 定格（见 preview.css）。
+ * 用于**退场**动画 —— 它不能走上面的 JS 定格，理由写在那条规则上方。
+ */
+function cssFreeze(offset: number): void {
+  document.documentElement.style.setProperty('--freeze-out', String(offset));
+  document.documentElement.dataset.freezeOut = '1';
+}
+
+/**
+ * 设置面板的预览。
+ *
+ *   flow=open    一开始关着，700ms 时打开 —— 配 `?at=` 定格**进场**关键帧
+ *   flow=exit    一直开着，用 CSS 负延迟定格**退场**关键帧（见 preview.css）
+ *   flow=settled 默认，静止的开着的样子
+ */
+function SettingsPreview({ flow }: { flow: string }) {
+  const [open, setOpen] = useState(flow !== 'open');
+
+  useEffect(() => {
+    if (flow === 'exit') {
+      if (freezeAt !== null) cssFreeze(freezeAt);
+      return;
+    }
+    if (flow !== 'open') return;
+    const t = setTimeout(() => {
+      setOpen(true);
+      if (freezeAt !== null) scheduleFreeze(freezeAt);
+    }, 700);
+    return () => clearTimeout(t);
+  }, [flow]);
+
+  return (
+    <>
+      <VaultView client={fakeClient} onLock={() => {}} />
+      <Settings
+        open={open}
+        account="me@example.com"
+        serverUrl="https://vault.example.com"
+        onClose={() => setOpen(false)}
+        initialSection={(new URLSearchParams(location.search).get('section') ?? 'account') as SectionId}
+      />
+    </>
+  );
+}
+
+/**
+ * 提示条的预览。
+ *
+ * `variant=all`    四种语气一次全上（把可见上限调到 4，只为了拍全）
+ * `variant=trio`   连发五条不同的 —— 拍到的是**上限 3 条**，其余排队
+ * `variant=repeat` 同一条连发五次 —— 拍到的是「合并成一条」而不是五条
+ */
+const FIXTURES: Record<string, ToastInput[]> = {
+  all: [
+    { tone: 'success', message: '已保存「GitHub」' },
+    { tone: 'warning', message: '有 3 条密码重复使用，建议改掉其中两条' },
+    { tone: 'danger', message: '没能更改收藏：网络连接超时，请稍后重试' },
+    { tone: 'neutral', message: '已永久删除「老论坛」' },
+  ],
+  trio: [
+    { tone: 'success', message: '已保存「GitHub」' },
+    { tone: 'success', message: '已保存「公司 VPN」' },
+    { tone: 'success', message: '已保存「邮箱（主）」' },
+    { tone: 'neutral', message: '第 4 条：它应该排在队里，看不见' },
+    { tone: 'neutral', message: '第 5 条：同上' },
+  ],
+  repeat: [
+    { tone: 'success', message: '已复制密码' },
+  ],
+};
+
+function ToastFixtures({ variant }: { variant: string }) {
+  const toast = useToast();
+  useEffect(() => {
+    /*
+      `exit` 走的是**真实路径**：发一条短命的提示（duration 覆盖），
+      等它自己到期 → 组件把它标成 leaving → 退场动画起来 → 定格。
+      没有兜底卸载这类会半路插手的东西，所以 JS 定格够用。
+    */
+    if (variant === 'exit') {
+      const timers = [
+        setTimeout(() => toast.show({ tone: 'success', message: '已保存「GitHub」', duration: 900 }), 700),
+        // 到期在 1600ms；定格从 1550ms 开始盯着「有没有动画在跑」
+        setTimeout(() => { if (freezeAt !== null) scheduleFreeze(freezeAt); }, 1550),
+      ];
+      return () => { for (const t of timers) clearTimeout(t); };
+    }
+    const list = FIXTURES[variant] ?? FIXTURES.all!;
+    const times = variant === 'repeat' ? [0, 1, 2, 3, 4] : list.map((_, i) => i);
+    const timers = times.map((n, i) => setTimeout(() => {
+      toast.show(list[variant === 'repeat' ? 0 : i]!);
+      if (i === times.length - 1 && freezeAt !== null) scheduleFreeze(freezeAt);
+    }, 600 + n * 120));
+    return () => { for (const t of timers) clearTimeout(t); };
+    // 只在挂载时发一次
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+  return null;
+}
+
+function ToastPreview({ variant }: { variant: string }) {
+  return (
+    <ToastProvider maxVisible={variant === 'all' ? 4 : 3}>
+      <VaultView client={fakeClient} onLock={() => {}} />
+      <ToastFixtures variant={variant} />
+    </ToastProvider>
+  );
+}
+
+/*
+ * 整棵树都包在 ToastProvider 里：VaultView 会用 useToast()（保存、删除、
+ * 收藏失败都要发提示条），没有 Provider 它会直接抛错 —— 抛出来的结果是
+ * 一张全白的截图，而截图本身是「成功」的。
+ * 提示条自己的预览再在里面套一层，好把可见上限调大。
+ */
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {which === 'import' ? (
+    <ToastProvider>
+    {which === 'settings' ? (
+      <SettingsPreview flow={params.get('flow') ?? 'settled'} />
+    ) : which === 'toasts' ? (
+      <ToastPreview variant={params.get('variant') ?? 'all'} />
+    ) : which === 'import' ? (
       <ImportScreen client={fakeClient} onImported={() => {}} />
     ) : which === 'detail' ? (
       <DetailPane>
@@ -153,5 +333,6 @@ createRoot(document.getElementById('root')!).render(
     ) : (
       <SecurityReportView items={which === 'clean' ? CLEAN : MESSY} />
     )}
+    </ToastProvider>
   </StrictMode>,
 );
