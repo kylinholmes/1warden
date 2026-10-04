@@ -404,6 +404,63 @@ Folder JSON：`{id, revisionDate, name(EncString), object:"folder"}` —— **�
 
 ---
 
+## 9.5 接口稳定性分级（决定我们能依赖什么）
+
+> **设计原则**：只依赖**长期不变**的接口，以支持尽可能大的服务端版本跨度。
+> Bitwarden 协议有一条明确的"向后兼容线"：加密格式与密钥层级一旦定型就**永远不会改**
+> （否则老客户端全部失效）。协议的核心部分因此非常稳定，风险集中在外围。
+
+### 🟢 稳定层 —— 可以放心依赖
+
+这些是协议的骨架，多年来没有破坏性变更。客户端的一切核心功能都建立在它们之上。
+
+| 接口 / 格式 | 稳定理由 |
+|---|---|
+| EncString 格式与类型编号 | 定型即冻结，改了就解不开历史数据 |
+| 密钥层级（KDF → 拉伸 → 用户密钥 → RSA） | 同上 |
+| `POST /identity/connect/token`（password / refresh grant） | 认证协议核心 |
+| `POST /identity/accounts/prelogin` | 同上 |
+| `GET /api/sync` | 保险库读取的唯一入口，字段只增不减 |
+| `/api/ciphers` 的 CRUD 与 `{id}/delete` 动词约定 | 核心写入路径 |
+| `/api/folders` CRUD | 同上 |
+| `/api/accounts/profile`、`/api/accounts/revision-date` | 账户基础读 |
+
+### 🟡 需容错层 —— 可以依赖，但必须两种形态都吃
+
+| 项 | 差异 | 做法 |
+|---|---|---|
+| prelogin 字段大小写 | Vaultwarden 用 camelCase，官方用 PascalCase | 两种都解析（已实现） |
+| token 响应形态 | 老版扁平 `Key`/`PrivateKey`；新版额外有 `AccountKeys`/`UserDecryptionOptions` | 只读老字段，新字段有就用、没有就忽略 |
+| `Key` 字段缺失 | 服务端为空时**整个字段不出现**，不是 `null` | 按 undefined 处理（已实现） |
+| `archivedDate` | 较新字段 | **能力探测**：缺失时降级为"无归档功能"，不报错 |
+| `policiesNew` vs `policies` | 新版优先 | 两者都读，优先 `policiesNew` |
+
+### 🔴 不稳定层 —— **不要依赖**
+
+| 项 | 为什么避开 |
+|---|---|
+| `/api/accounts/key-management/rotate-user-account-keys` | 新端点，Vaultwarden 未实现（会 404） |
+| `/api/accounts/key-management/user-key-id` | 同上。新版官方 CLI 正是死在这里 |
+| `Sends` 相关端点 | Vaultwarden 正在重构中（HEAD 提交就是 Send API cleanup） |
+| `/api/reports/*` | Vaultwarden 完全不存在 → 报表一律客户端算 |
+| 服务端 TOTP / 密码生成端点 | 不存在（三处独立验证） |
+| `organizationUseTotp` | Vaultwarden 恒为 `true`，无信息量，不要据此做判断 |
+| 类型 6/7/8（BankAccount / DriversLicense / Passport） | 2026 年新增，老服务端不认识 → 收到时按"未知类型"只读展示，不提供编辑 |
+
+### 具体做法
+
+1. **新字段一律"有就用，没有就降级"**，绝不因为缺字段而崩溃
+2. **绝不调用会 404 的端点** —— 需要某个能力时先探测
+3. **写请求只发稳定字段**；`encryptedFor` 是例外（见下）
+4. 启动时读 `/api/config` 的 `version`，仅用于**能力探测**，不用于拒绝服务
+5. 读响应时**容错多余字段**（服务端加字段不应影响我们）
+
+> **`encryptedFor` 的特殊说明**：它是当前 Vaultwarden **必填**的字段（缺失导致反序列化失败）。
+> 老版本服务端不认识它，但会**忽略未知字段** —— 所以"总是发送"在两个方向上都是安全的。
+> 这是一个罕见的、可以无条件发送的字段。
+
+---
+
 ## 10. 未解疑点（留待实测）
 
 1. Argon2id 的 `KdfMemory` 单位 —— 见计划 1 Task 4/10，用互操作测试定案。
