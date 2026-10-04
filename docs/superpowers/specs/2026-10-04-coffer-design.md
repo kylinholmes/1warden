@@ -263,10 +263,16 @@ class BitwardenApi {
   > - `tauri-plugin-stronghold` —— **已废弃**，官方明确说不会进入 Tauri v3
   > - `tauri-plugin-store` —— **明文 JSON**，官方文档明说不能存敏感数据
   >
+  > **决定（用户，2026-10-05）：这些官方插件一律不用，自己写。**
+  > 理由：它们的抽象层反而挡住了我们需要的东西，而且问题比自写更大 ——
+  > `biometric` 没有密码学绑定、`stronghold` 已废弃、`store` 是明文。
+  > 自写一个小的 Swift/Kotlin 插件**并不麻烦**，而且能直接用上
+  > `SecAccessControl(.userPresence)` / `BiometricPrompt.CryptoObject` 这些正确的原语。
+  >
   > **正确做法**：把「生物识别通过」作为**解封 Keychain 条目的条件** ——
-  > 用 `SecAccessControl(.userPresence)` 保护的 Keychain item，让**操作系统**
-  > 强制「必须先通过生物识别才能取出密钥」。这样即使绕过 JS gate 也拿不到东西。
-  > 需要自己写一个小的 Swift 插件。详见 `docs/reference/tauri-platform-notes.md`。
+  > 让**操作系统**强制「必须先通过生物识别才能取出密钥」。
+  > 这样即使绕过 JS 层也拿不到密钥本身。
+  > 详见 `docs/reference/tauri-platform-notes.md`。
 - 锁屏/休眠事件监听 → 触发自动锁定
 - **本地 IPC 服务**：给浏览器扩展用的 loopback WebSocket + 握手密钥
 - 剪贴板写入 + N 秒后清除
