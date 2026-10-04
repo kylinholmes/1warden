@@ -20,7 +20,15 @@
         "resizable": true,
         "center": true,
         "titleBarStyle": "Transparent",
-        "hiddenTitle": true
+        "hiddenTitle": true,
+        "transparent": true,
+        "windowEffects": {
+          "effects": [
+            "liquidGlassRegular",
+            "sidebar"
+          ],
+          "state": "active"
+        }
       },
       {
         "label": "quick",
