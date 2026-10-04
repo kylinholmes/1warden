@@ -20,6 +20,9 @@ export function ItemEditor({ client, item, onDone, onCancel }: Props) {
   useEffect(() => { nameRef.current?.focus(); }, []);
 
   const isNew = item === null;
+  // 文件夹列表从会话里取 —— 编辑期间新建的文件夹看不到，这是可接受的：
+  // 用户不会一边编辑一边去侧栏建文件夹
+  const folders = client.getSession().folders;
   function patch(p: Partial<VaultItem>) { setDraft((d) => ({ ...d, ...p })); }
   function patchLogin(p: Partial<NonNullable<VaultItem['login']>>) {
     setDraft((d) => ({ ...d, login: { ...(d.login ?? blankLogin()), ...p } }));
@@ -76,6 +79,24 @@ export function ItemEditor({ client, item, onDone, onCancel }: Props) {
             </select>
           </Field>
         )}
+
+        {/*
+          ⚠️ 这个选择器此前**根本不存在** —— 于是每个条目创建时 folderId 都是
+          null，侧栏那个「文件夹」分区永远不可能有内容。API 层的文件夹 CRUD
+          早就写好了，缺的是把它接到界面上。
+        */}
+        <Field label="文件夹">
+          <select
+            value={draft.folderId ?? ''}
+            onChange={(e) => patch({ folderId: e.target.value === '' ? null : e.target.value })}
+            className={inputCls}
+          >
+            <option value="">（无）</option>
+            {folders.map((f) => (
+              <option key={f.id} value={f.id}>{f.nameFailed ? '无法解密' : f.name}</option>
+            ))}
+          </select>
+        </Field>
 
         {draft.type === 'login' && (
           <>

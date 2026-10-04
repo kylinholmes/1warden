@@ -12,6 +12,7 @@ import {
 } from '@coffer/api';
 import {
   deriveMasterKey, hashMasterPassword, stretchMasterKey, decryptBytes,
+  encryptString,
   KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
@@ -19,6 +20,7 @@ import { VaultSession } from './session';
 import { SyncEngine } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
 import type { AccountInfo, SessionStatus } from './session';
+import type { VaultFolder, VaultItem } from './model';
 
 export interface ConnectParams {
   serverUrl: string;
@@ -214,6 +216,47 @@ export class VaultClient {
 
   getUserId(): string | null { return this.session.account?.userId ?? null; }
 
+  // ── 文件夹 ──
+  //
+  // 文件夹名和条目名一样是**加密后**才发给服务端的 —— 服务端只存密文。
+  // 这也是为什么这些方法必须在客户端而不是 api 层做加解密。
+
+  /** 新建文件夹。重名是允许的 —— 服务端不拦，用户也可能是故意建两个。 */
+  async createFolder(name: string): Promise<VaultFolder> {
+    const key = this.requireKey();
+    const dto = await createFolderApi(this.http, await encryptString(name, key));
+    const folder = await decryptFolder(dto, key);
+    this.session.replaceData(
+      this.session.items.slice(),
+      [...this.session.folders, folder],
+    );
+    return folder;
+  }
+
+  async renameFolder(id: string, name: string): Promise<void> {
+    const key = this.requireKey();
+    await updateFolderApi(this.http, id, await encryptString(name, key));
+    // 名字解出来才算数，所以重新同步一次而不是就地改 —— 免得本地显示
+    // 一个服务端并不认的名字
+    await this.refresh();
+  }
+
+  /**
+   * 删除文件夹。
+   *
+   * ⚠️ **里面的条目不会消失** —— 服务端只删关联行，条目变成「无文件夹」。
+   * 界面上的措辞必须与这个事实一致，不能吓唬用户说会删掉里面的密码。
+   */
+  async deleteFolder(id: string): Promise<void> {
+    await deleteFolderApi(this.http, id);
+    this.session.replaceData(
+      // 同时把本地条目的 folderId 清掉，否则它们会挂在一个已经不存在的文件夹上，
+      // 在「此文件夹」筛选里永远查不到
+      this.session.items.map((i) => (i.folderId === id ? { ...i, folderId: null } : i)),
+      this.session.folders.filter((f) => f.id !== id),
+    );
+  }
+
   // ── 写入 ──
   //
   // 策略：**先乐观更新本地，再触发同步**。
@@ -382,9 +425,12 @@ import {
   sync as apiSync, getRevisionDate as apiRevisionDate,
   createCipher, updateCipher, softDeleteCipher, hardDeleteCipher,
   setArchived as setArchivedApi, updateCipherPartial,
+  createFolder as createFolderApi, updateFolder as updateFolderApi,
+  deleteFolder as deleteFolderApi,
 } from '@coffer/api';
-import { encryptCipher, decryptCipher as decryptCipherExport } from '@coffer/vault';
-import type { VaultItem } from '@coffer/vault';
+// ⚠️ 这两个原来是 `from '@coffer/vault'` —— 那份文件曾经住在 apps/desktop，
+// 搬到包里之后就成了自引用。tsc 能解析所以一直没报错，但它是错的。
+import { encryptCipher } from './encrypt';
 
 function syncVia(http: HttpClient) { return apiSync(http, ''); }
 function getRevisionDateVia(http: HttpClient) { return apiRevisionDate(http, ''); }

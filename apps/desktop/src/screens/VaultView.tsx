@@ -28,6 +28,23 @@ export function VaultView({ client, onLock }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<VaultItem | null>(null);
   const [bump, setBump] = useState(0); // 本地写入后强制重渲染 —— session 不是响应式的
   const searchRef = useRef<HTMLInputElement>(null);
+  const [folderError, setFolderError] = useState<string | null>(null);
+
+  /**
+   * 文件夹操作。
+   *
+   * ⚠️ 每个都必须**有地方报错**。这里出错的原因通常是服务端拒绝
+   * （名字太长、网络断了），静默吞掉的话用户会以为「点了没反应」。
+   */
+  async function folderOp(op: () => Promise<void>): Promise<void> {
+    setFolderError(null);
+    try {
+      await op();
+      setBump((n) => n + 1);
+    } catch (e) {
+      setFolderError(e instanceof Error ? e.message : '文件夹操作失败');
+    }
+  }
 
   const items = session.items;
   const folders = session.folders;
@@ -81,6 +98,14 @@ export function VaultView({ client, onLock }: Props) {
           counts={{ all: items.length, favorites: items.filter((i) => i.favorite).length }}
           onLock={onLock} account={session.account?.email ?? ''}
           onNew={() => setMode({ kind: 'new' })}
+          onCreateFolder={(name) => folderOp(async () => { await client.createFolder(name); })}
+          onRenameFolder={(id, name) => folderOp(async () => { await client.renameFolder(id, name); })}
+          onDeleteFolder={(id) => folderOp(async () => {
+            await client.deleteFolder(id);
+            // 删掉的正是当前筛选中的那个 —— 得切回去，否则列表会空着
+            // 而用户不知道为什么
+            if (category.kind === 'folder' && category.id === id) setCategory({ kind: 'all' });
+          })}
         />
         <div className="flex-1 overflow-hidden">
           <ItemEditor
@@ -107,6 +132,12 @@ export function VaultView({ client, onLock }: Props) {
         onLock={onLock}
         account={session.account?.email ?? ''}
         onNew={() => setMode({ kind: 'new' })}
+        onCreateFolder={(name) => folderOp(async () => { await client.createFolder(name); })}
+        onRenameFolder={(id, name) => folderOp(async () => { await client.renameFolder(id, name); })}
+        onDeleteFolder={(id) => folderOp(async () => {
+          await client.deleteFolder(id);
+          if (category.kind === 'folder' && category.id === id) setCategory({ kind: 'all' });
+        })}
       />
 
       {/*
@@ -121,6 +152,13 @@ export function VaultView({ client, onLock }: Props) {
       ) : (
       <>
       <div className="flex w-[320px] shrink-0 flex-col border-r border-[var(--border-subtle)]">
+        {folderError && (
+          <div className="flex items-start gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-sunken)] px-3 py-2">
+            <p className="min-w-0 flex-1 text-[var(--text-xs)] text-[var(--risk)]">{folderError}</p>
+            <button onClick={() => setFolderError(null)}
+              className="shrink-0 text-[var(--text-xs)] text-[var(--ink-tertiary)] hover:underline">知道了</button>
+          </div>
+        )}
         <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] p-3">
           <input
             ref={searchRef}
@@ -249,7 +287,14 @@ function Sidebar(props: {
   onLock: () => void;
   account: string;
   onNew: () => void;
+  onCreateFolder: (name: string) => Promise<void>;
+  onRenameFolder: (id: string, name: string) => Promise<void>;
+  onDeleteFolder: (id: string) => Promise<void>;
 }) {
+  const [creating, setCreating] = useState(false);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [renaming, setRenaming] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
   return (
     <nav className="flex w-[190px] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
       <div className="flex items-center justify-between p-3">
@@ -281,19 +326,102 @@ function Sidebar(props: {
           active={props.category.kind === 'security'}
           onClick={() => props.onSelect({ kind: 'security' })}
         />
-        {props.folders.length > 0 && (
-          <li className="px-2 pt-4 pb-1 text-[var(--text-xs)] font-medium uppercase tracking-wide text-[var(--ink-tertiary)]">
+        {/*
+          ⚠️ 这一行**始终显示**，不再以「已有文件夹」为前提。
+          之前的写法是 `props.folders.length > 0 && ...`，而那时没有任何途径
+          能建出第一个文件夹 —— 于是这个分区对用户永远不会出现，
+          整套文件夹功能等于不存在。
+        */}
+        <li className="flex items-center justify-between px-2 pt-4 pb-1">
+          <span className="text-[var(--text-xs)] font-medium uppercase tracking-wide text-[var(--ink-tertiary)]">
             文件夹
+          </span>
+          <button
+            onClick={() => { setCreating(true); setMenuFor(null); }}
+            title="新建文件夹"
+            className="rounded-[var(--radius-sm)] px-1.5 text-[var(--text-sm)] leading-none text-[var(--ink-tertiary)] hover:bg-[var(--surface-hover)]"
+          >
+            ＋
+          </button>
+        </li>
+
+        {props.folders.map((f) => {
+          const name = f.nameFailed ? '无法解密' : f.name;
+          if (renaming === f.id) {
+            return (
+              <li key={f.id} className="px-2 py-0.5">
+                <InlineInput
+                  initial={f.nameFailed ? '' : name}
+                  placeholder="文件夹名"
+                  onCancel={() => setRenaming(null)}
+                  onCommit={async (v) => { await props.onRenameFolder(f.id, v); setRenaming(null); }}
+                />
+              </li>
+            );
+          }
+          if (confirmDelete === f.id) {
+            return (
+              <li key={f.id} className="px-2 py-0.5">
+                <div className="rounded-[var(--radius-sm)] bg-[var(--surface-hover)] p-2">
+                  {/* ⚠️ 删除文件夹**不会删掉里面的密码** —— 服务端只删关联行，
+                      条目变成「无文件夹」。措辞必须与这个事实一致 */}
+                  <p className="mb-1.5 text-[var(--text-xs)] leading-relaxed text-[var(--ink-secondary)]">
+                    删除文件夹？里面的条目会变成「无文件夹」，<strong className="font-medium">不会被删除</strong>。
+                  </p>
+                  <div className="flex gap-1.5">
+                    <button onClick={async () => { await props.onDeleteFolder(f.id); setConfirmDelete(null); }}
+                      className="rounded-[var(--radius-sm)] px-2 py-0.5 text-[var(--text-xs)] font-medium text-[var(--risk)] hover:bg-[var(--surface-sunken)]">
+                      删除
+                    </button>
+                    <button onClick={() => setConfirmDelete(null)}
+                      className="rounded-[var(--radius-sm)] px-2 py-0.5 text-[var(--text-xs)] text-[var(--ink-secondary)] hover:bg-[var(--surface-sunken)]">
+                      取消
+                    </button>
+                  </div>
+                </div>
+              </li>
+            );
+          }
+          return (
+            <li key={f.id} className="group relative">
+              <NavItem
+                label={name}
+                active={props.category.kind === 'folder' && props.category.id === f.id}
+                onClick={() => props.onSelect({ kind: 'folder', id: f.id })}
+              />
+              <button
+                onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === f.id ? null : f.id); }}
+                title="更多"
+                className="absolute right-1 top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)] px-1 text-[var(--text-xs)] text-[var(--ink-tertiary)] opacity-0 transition-opacity group-hover:opacity-100 hover:bg-[var(--surface-hover)]"
+              >
+                ⋯
+              </button>
+              {menuFor === f.id && (
+                <div className="absolute right-1 top-full z-10 mt-0.5 flex gap-1 rounded-[var(--radius-sm)] bg-[var(--surface-overlay)] p-1"
+                  style={{ boxShadow: 'var(--elev-2)' }}>
+                  <button onClick={() => { setRenaming(f.id); setMenuFor(null); }}
+                    className="rounded-[var(--radius-sm)] px-2 py-0.5 text-[var(--text-xs)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]">
+                    重命名
+                  </button>
+                  <button onClick={() => { setConfirmDelete(f.id); setMenuFor(null); }}
+                    className="rounded-[var(--radius-sm)] px-2 py-0.5 text-[var(--text-xs)] text-[var(--risk)] hover:bg-[var(--surface-hover)]">
+                    删除
+                  </button>
+                </div>
+              )}
+            </li>
+          );
+        })}
+
+        {creating && (
+          <li className="px-2 py-0.5">
+            <InlineInput
+              placeholder="新文件夹名"
+              onCancel={() => setCreating(false)}
+              onCommit={async (v) => { await props.onCreateFolder(v); setCreating(false); }}
+            />
           </li>
         )}
-        {props.folders.map((f) => (
-          <NavItem
-            key={f.id}
-            label={f.nameFailed ? '无法解密' : f.name}
-            active={props.category.kind === 'folder' && props.category.id === f.id}
-            onClick={() => props.onSelect({ kind: 'folder', id: f.id })}
-          />
-        ))}
       </ul>
 
       <div className="border-t border-[var(--border-subtle)] p-2">
@@ -373,6 +501,35 @@ function ItemGlyph({ type, favorite }: { type: VaultItem['type']; favorite: bool
         <span className="absolute -right-1 -top-1 text-[9px] text-[var(--caution)]" title="已收藏">★</span>
       )}
     </span>
+  );
+}
+
+/**
+ * 就地输入 —— 新建 / 重命名文件夹用。
+ *
+ * 不用 `window.prompt`：原生壳里它不可靠（会被 webview 拦掉或样式不可控），
+ * 而且它拿不到我们的设计系统。
+ */
+function InlineInput({ initial = '', placeholder, onCommit, onCancel }: {
+  initial?: string;
+  placeholder: string;
+  onCommit: (value: string) => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const [value, setValue] = useState(initial);
+  return (
+    <input
+      autoFocus
+      value={value}
+      placeholder={placeholder}
+      onChange={(e) => setValue(e.target.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && value.trim().length > 0) void onCommit(value.trim());
+        if (e.key === 'Escape') onCancel();
+      }}
+      onBlur={onCancel}
+      className="w-full rounded-[var(--radius-sm)] border border-[var(--accent)] bg-[var(--surface-raised)] px-2 py-1 text-[var(--text-sm)] outline-none"
+    />
   );
 }
 

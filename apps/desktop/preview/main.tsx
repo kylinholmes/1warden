@@ -9,7 +9,8 @@
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SecurityReportView } from '../src/screens/SecurityReport';
-import { emptyLogin, type VaultItem } from '@coffer/vault';
+import { VaultView } from '../src/screens/VaultView';
+import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
 import './preview.css';
 
 function item(over: Partial<VaultItem> & { id: string; name: string }): VaultItem {
@@ -45,10 +46,34 @@ const CLEAN: VaultItem[] = [
   item({ id: 'c2', name: '邮箱', login: { ...emptyLogin(), username: 'me', password: 'Xq7!vLm2#Rt9$Wz4&Kp8' } }),
 ];
 
+const FOLDERS: VaultFolder[] = [
+  { id: 'f1', name: '工作', nameFailed: false, updatedAt: 'x' },
+  { id: 'f2', name: '个人', nameFailed: false, updatedAt: 'x' },
+  { id: 'f3', name: '订阅服务', nameFailed: false, updatedAt: 'x' },
+];
+
+/**
+ * 假的客户端 —— 只实现**渲染需要**的那一个方法。
+ *
+ * 目的是让三栏布局（含侧栏的文件夹管理）能在不启动原生壳、不登录的情况下
+ * 被截图核对。点击类操作会抛错，但预览只用来看，不用来点。
+ */
+const fakeClient = {
+  getSession: () => ({
+    items: MESSY.map((i, n) => ({ ...i, folderId: n % 3 === 0 ? 'f1' : null })),
+    folders: FOLDERS,
+    account: { email: 'me@example.com', serverUrl: 'https://vault.example.com', userId: 'u', kdf: { kdf: 0, iterations: 1 } },
+  }),
+} as unknown as VaultClient;
+
 const which = new URLSearchParams(location.search).get('screen') ?? 'messy';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <SecurityReportView items={which === 'clean' ? CLEAN : MESSY} />
+    {which === 'vault' ? (
+      <VaultView client={fakeClient} onLock={() => {}} />
+    ) : (
+      <SecurityReportView items={which === 'clean' ? CLEAN : MESSY} />
+    )}
   </StrictMode>,
 );

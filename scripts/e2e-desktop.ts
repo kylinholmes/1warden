@@ -14,9 +14,10 @@
 import {
   HttpClient, prelogin, loginWithPassword, sync, partitionCiphers, getRevisionDate, DEVICE_TYPE,
   createCipher, hardDeleteCipher,
+  listFolders, createFolder, updateFolder, deleteFolder,
 } from '../packages/api/src/index';
 import type { CipherDto } from '../packages/api/src/index';
-import { deriveMasterKey, hashMasterPassword, stretchMasterKey, decryptBytes, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID } from '../packages/crypto/src/index';
+import { deriveMasterKey, hashMasterPassword, stretchMasterKey, decryptBytes, encryptString, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID } from '../packages/crypto/src/index';
 import type { SymmetricKey } from '../packages/crypto/src/index';
 import { decryptCipher, decryptFolder, searchItems, totpCode, hasTotp, writeTotpSecret, encryptCipher } from '../packages/vault/src/index';
 import type { VaultItem } from '../packages/vault/src/index';
@@ -158,6 +159,53 @@ async function main() {
   check('写入验证码不会丢掉其他自定义字段',
     withTotpWrite.customFields.some((f) => f.name === 'PIN'));
 
+  // ── 文件夹往返 ──
+  //
+  // 这一节针对的是一个**真实存在过的功能空洞**：API 层的文件夹 CRUD 早就写好，
+  // 但界面上没有任何地方能建文件夹，条目编辑器里也没有文件夹选择器 ——
+  // 于是侧栏那个「文件夹」分区永远不可能有内容。所以这里要验的是整条链路：
+  // 建 → 把条目放进去 → 改名 → 删掉文件夹之后条目**还在**。
+  console.log('\n5. 文件夹');
+
+  const folderName = `e2e-folder-${Date.now().toString(36)}`;
+  const folder = await createFolder(http, await encryptString(folderName, userKey));
+  check('新建文件夹成功', Boolean(folder.id));
+
+  const withFolder = { ...newItem, folderId: folder.id };
+  const folderBody = await encryptCipher(withFolder, userKey, {});
+  const inFolder = await createCipher(http, userId, folderBody);
+
+  const listed = await listFolders(http);
+  const found = listed.find((f) => f.id === folder.id);
+  check('文件夹出现在列表里', Boolean(found));
+  if (found) {
+    check('文件夹名能解出来（说明名字加密方式对）',
+      await decryptFolder(found, userKey).then((f) => f.name) === folderName);
+  }
+
+  // 条目里的 folderId 是**明文**字段，不走加密 —— 这一点容易搞错
+  const synced = await sync(http, '');
+  const syncedItem = synced.ciphers.find((c) => c.id === inFolder.id);
+  check('条目真的落到了那个文件夹里', syncedItem?.folderId === folder.id,
+    `folderId=${syncedItem?.folderId}`);
+
+  const renamed = `e2e-renamed-${Date.now().toString(36)}`;
+  await updateFolder(http, folder.id, await encryptString(renamed, userKey));
+  const afterRename = (await listFolders(http)).find((f) => f.id === folder.id);
+  check('改名成功', afterRename
+    ? (await decryptFolder(afterRename, userKey)).name === renamed : false);
+
+  await deleteFolder(http, folder.id);
+  check('文件夹已删除', !(await listFolders(http)).some((f) => f.id === folder.id));
+
+  // ⚠️ 最关键的一条：删文件夹**不该**连条目一起删掉。
+  // 服务端只删关联行。界面上那句「里面的条目不会被删除」必须是真的。
+  const survivor = (await sync(http, '')).ciphers.find((c) => c.id === inFolder.id);
+  check('删文件夹之后条目还在（只是变成无文件夹）',
+    survivor !== undefined && (survivor.folderId === null || survivor.folderId === undefined),
+    survivor === undefined ? '条目被一起删掉了 —— 界面上那句承诺是假的' : `folderId=${survivor.folderId}`);
+
+  await hardDeleteCipher(http, inFolder.id);
   await hardDeleteCipher(http, created.id);
   check('清理测试条目', true);
 
