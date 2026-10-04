@@ -7,6 +7,7 @@ export * from './client';
 export * from './sync-engine';
 export * from './search';
 export * from './url-match';
+export * from './item-display';
 export * from './form-fields';
 export * from './health';
 export * from './csv';

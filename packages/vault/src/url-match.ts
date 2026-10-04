@@ -75,6 +75,24 @@ function registrableDomainOf(url: URL): string {
   return (parsed.domain ?? host).toLowerCase();
 }
 
+/**
+ * 从一个存下来的字符串里取出**可注册域名**，给显示用（条目列表取站点图标）。
+ *
+ * ⚠️ 这个函数**不参与填充决策**，别把它借去判断「该不该填」。
+ * 两者的宽容度不同：填充那边宁可不填，这里宁可有图标 ——
+ * 猜错域名最多是显示了一个别的站点的图标，猜错填充是把密码交出去。
+ *
+ * 比 `matchesUrl` 严的一条：主机名**必须带点**。条目名（「Claude」
+ * 「基金从业-Amac」）会被补上 https:// 后成功解析成一个主机名，
+ * 但它们不是网址，拿去做图标请求只会换回一张灰色占位图。
+ */
+export function displayDomainOf(raw: string): string | null {
+  const url = parseWebUrl(raw, true);
+  if (url === null) return null;
+  if (!url.hostname.includes('.')) return null;
+  return registrableDomainOf(url);
+}
+
 /** 去掉末尾斜杠，便于比较 —— `https://a.com` 与 `https://a.com/` 是同一个地址 */
 function stripTrailingSlash(s: string): string {
   return s.endsWith('/') ? s.slice(0, -1) : s;
