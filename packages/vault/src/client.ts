@@ -61,7 +61,6 @@ export class VaultClient {
   private syncEngine: SyncEngine | null = null;
   private token: TokenResponse | null = null;
   private device: DeviceInfo;
-  private userKey: SymmetricKey | null = null;
   private masterKey: Uint8Array | null = null;
   private pendingConnect: ConnectParams | null = null;
 
@@ -183,7 +182,6 @@ export class VaultClient {
     const userKey: SymmetricKey = { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
 
     this.masterKey = masterKey;
-    this.userKey = userKey;
     this.token = token;
     this.http = this.makeHttp(params.serverUrl, () => ({
       Authorization: `Bearer ${this.token?.accessToken ?? ''}`,
@@ -212,7 +210,7 @@ export class VaultClient {
 
   /** 重新同步（用户手动刷新、或收到服务器变更通知时调用） */
   async refresh(): Promise<void> {
-    const key = this.userKey;
+    const key = this.session.getKey();
     if (!key || !this.session.isUnlocked()) return;
     this.session.replaceData([], []); // 先清空，避免中间态被渲染成「全部消失了」
     await this.doSync(key);
@@ -336,9 +334,18 @@ export class VaultClient {
     void this.refresh().catch(() => {});
   }
 
+  /**
+   * ⚠️ 密钥只有**一份**，在会话里。
+   *
+   * 早先客户端自己又缓存了一份 `userKey`，于是「已解锁」有了两个来源。
+   * 后果是：恢复会话（进程重启）只灌了会话那一份，客户端那份还是 null ——
+   * 读操作全部正常（它们走 session），**写操作全部报「保险库未解锁」**。
+   * 这种「一半能用一半不能用」最难查，因为报错指向的方向是错的。
+   */
   private requireKey(): SymmetricKey {
-    if (!this.userKey) throw new Error('保险库未解锁');
-    return this.userKey;
+    const key = this.session.getKey();
+    if (!key) throw new Error('保险库未解锁');
+    return key;
   }
 
   private requireUserId(): string {
@@ -366,13 +373,12 @@ export class VaultClient {
   }
 
   lock(): void {
-    this.userKey = null;
+    // 密钥由 `session.lock()` 负责 zeroize —— 这里不再单独清一份副本
     this.masterKey = null;
     this.session.lock();
   }
 
   logout(): void {
-    this.userKey = null;
     this.masterKey = null;
     this.token = null;
     this.syncEngine = null;

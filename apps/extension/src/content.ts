@@ -171,6 +171,67 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
 });
 
 /**
+ * WebAuthn 转发 —— MAIN world 的拦截脚本与 background 之间的桥。
+ *
+ * ## 这里**刻意什么都不判断**
+ *
+ * 页面可以伪造这条消息里的任何字段，包括它自称的 origin。所以这份代码
+ * 只是个搬运工：原样送出去，原样送回来。真正的校验在 background，
+ * 它用 `sender.origin`（浏览器给的、页面改不了的）去比对 rpId。
+ *
+ * 在这里「顺手做一次检查」是危险的：那会给人一个已经校验过的错觉，
+ * 而这里的输入全是页面可控的。
+ */
+/**
+ * ⚠️ **必须幂等。**
+ *
+ * MAIN world 那边会每 250ms 重发一次，直到收到回复 —— 因为在它发第一次的时候，
+ * 这份脚本可能还没注入（它跑在 `document_start`，我们跑在 `document_idle`）。
+ * 重发是对的，但**接收方**得扛得住：同一条请求转发两次、执行两次，
+ * 就会注册出两条凭据、或者拿同一个 challenge 签两次名。
+ *
+ * 所以这里记住最近回过的 id，重发时直接把上次的答案再发一遍，不再往下走。
+ */
+const answered = new Map<number, unknown>();
+
+/** 只留最近几十条 —— 页面开一整天的话，这个表不该无限长下去 */
+function remember(id: number, reply: unknown): void {
+  answered.set(id, reply);
+  if (answered.size > 64) answered.delete(answered.keys().next().value as number);
+}
+
+window.addEventListener('message', (event: MessageEvent) => {
+  if (event.source !== window) return;
+  const data = event.data as { tag?: string; id?: number } | null;
+  if (!data || data.tag !== 'coffer:webauthn' || typeof data.id !== 'number') return;
+  const { id } = data;
+
+  // 已经处理过 —— 再把同一个答案发一次。页面那边可能只是没收到上一条回复
+  if (answered.has(id)) {
+    window.postMessage({ tag: 'coffer:webauthn-reply', id, ...(answered.get(id) as object) },
+      window.location.origin);
+    return;
+  }
+
+  /**
+   * ⚠️ 只认 `event.source`，而且只回给同一个窗口。
+   *
+   * 这条消息的载荷是页面说了算的 —— 它也可能是**别的 frame** 发过来的。
+   * 但无论来自谁，能到达的都是 window 自己，所以回给 window 是对的。
+   */
+  chrome.runtime.sendMessage({ type: 'coffer:webauthn', payload: data })
+    .then((reply: unknown) => {
+      remember(id, reply);
+      window.postMessage({ tag: 'coffer:webauthn-reply', id, ...(reply as object) }, window.location.origin);
+    })
+    .catch((e: unknown) => {
+      const reply = { ok: false, error: e instanceof Error ? e.message : '扩展没有响应' };
+      remember(id, reply);
+      window.postMessage({ tag: 'coffer:webauthn-reply', id, ...reply }, window.location.origin);
+    });
+});
+
+/**
  * 表单提交检测。
  */
 

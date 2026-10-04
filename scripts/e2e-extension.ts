@@ -191,6 +191,45 @@ function startSiteServer(): { stop: () => void } {
   return { stop: () => server.stop(true) };
 }
 
+
+// ── passkey 验证用的小 CBOR 解码器 ──
+//
+// 只解 WebAuthn 会出现的那几种类型。放在这里而不是 import @coffer/vault：
+// 端到端测试的意义在于**不复用**被测代码的解析逻辑 —— 用同一份解码器去读
+// 同一份编码器的产出，编码器错了两边一起错，测了等于没测。
+function cborDecode(b: Uint8Array, at = { i: 0 }): unknown {
+  const first = b[at.i++]!;
+  const major = first >> 5;
+  let len = first & 0x1f;
+  if (len === 24) len = b[at.i++]!;
+  else if (len === 25) { len = (b[at.i]! << 8) | b[at.i + 1]!; at.i += 2; }
+  else if (len === 26) { len = (b[at.i]! << 24) | (b[at.i + 1]! << 16) | (b[at.i + 2]! << 8) | b[at.i + 3]!; at.i += 4; }
+  switch (major) {
+    case 0: return len;
+    case 1: return -1 - len;
+    case 2: { const o = b.slice(at.i, at.i + len); at.i += len; return o; }
+    case 3: { const o = new TextDecoder().decode(b.slice(at.i, at.i + len)); at.i += len; return o; }
+    case 4: { const o = []; for (let n = 0; n < len; n++) o.push(cborDecode(b, at)); return o; }
+    case 5: { const o = new Map<unknown, unknown>(); for (let n = 0; n < len; n++) o.set(cborDecode(b, at), cborDecode(b, at)); return o; }
+    default: throw new Error(`CBOR major=${major} 解不了`);
+  }
+}
+
+const b64uToBuf = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, 'base64url'));
+
+/** 从 attestationObject 里取出 RP 会拿到的那把公钥 */
+async function publicKeyFrom(attestationObject: Uint8Array): Promise<CryptoKey> {
+  const obj = cborDecode(attestationObject) as Map<string, unknown>;
+  const auth = obj.get('authData') as Uint8Array;
+  const credIdLen = (auth[53]! << 8) | auth[54]!;
+  const cose = cborDecode(auth.slice(55 + credIdLen)) as Map<number, unknown>;
+  const raw = new Uint8Array(65);
+  raw[0] = 4;
+  raw.set(cose.get(-2) as Uint8Array, 1);
+  raw.set(cose.get(-3) as Uint8Array, 33);
+  return crypto.subtle.importKey('raw', raw, { name: 'ECDSA', namedCurve: 'P-256' }, false, ['verify']);
+}
+
 // ── 主流程 ──
 
 function extensionIdFor(path: string): string {
@@ -310,7 +349,10 @@ async function main(): Promise<void> {
     await page.send('Target.createTarget', { url: `chrome-extension://${extId}/popup.html` });
     const popupTarget = await waitFor('扩展页面就位', async () => {
       const list = await listTargets();
-      return list.find((t) => t.url.startsWith(`chrome-extension://${extId}`)) ?? null;
+      // ⚠️ 必须是 `type === 'page'`。只按 URL 前缀找的话，**离屏文档**
+      // （`offscreen.html`，类型是 background_page）会先被匹配上 ——
+      // 于是整个「扩展页」这一段其实在测离屏文档，弹窗根本没被碰过。
+      return list.find((t) => t.type === 'page' && t.url.startsWith(`chrome-extension://${extId}`)) ?? null;
     });
     ext = await Cdp.connect(popupTarget.webSocketDebuggerUrl!);
     await ext.enableRuntime();
@@ -556,6 +598,143 @@ async function main(): Promise<void> {
     );
     check('密码没变时不再提示保存', second?.pending === null, JSON.stringify(second));
 
+    // ── 6.5 passkey ──
+    // 这一段失败也要继续往下走 —— 否则收尾的清理被跳过，
+    // 每失败一次就往保险库里堆几条测试条目，而且越堆越多
+    try {
+    //
+    // 这一段验证的是「扩展真的能顶替浏览器当认证器」——
+    // 核心不是「有没有返回一个对象」，而是**注册时发出去的那把公钥，
+    // 能不能验过之后每一次断言的签名**。字节布局错一位，这条就挂。
+    console.log('\n6. passkey');
+
+    const injected = await page.eval<boolean>(
+      `!String(navigator.credentials.create).includes('[native code]')`);
+    check('MAIN world 拦截脚本已接管 navigator.credentials', injected);
+
+    // ⚠️ 越权：页面不能为别人的域创建凭据。
+    // 浏览器原生会拦，我们接管之后**必须自己拦** —— 漏了的话任何站点
+    // 都能拿到一份 github.com 的断言签名，而用户完全看不到异常。
+    const crossOrigin = await page.eval<string>(`(async () => {
+      try {
+        await navigator.credentials.create({ publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rp: { id: 'evil.com', name: 'Evil' },
+          user: { id: new Uint8Array(16), name: 'x', displayName: 'x' },
+          pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+        }});
+        return 'ALLOWED';
+      } catch (e) { return 'BLOCKED: ' + e.name; }
+    })()`);
+    check('拒绝为别的域创建凭据（rpId 越权）', crossOrigin.startsWith('BLOCKED'), crossOrigin);
+
+    const pkCreated = await page.eval<{
+      isInstance: boolean; rawIdLen: number; attObjKind: string;
+      credentialId: string; attestationObject: string; clientDataJSON: string;
+    }>(`(async () => {
+      const b64u = (buf) => { const b = new Uint8Array(buf); let s = '';
+        for (const x of b) s += String.fromCharCode(x);
+        return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); };
+      const cred = await navigator.credentials.create({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rp: { id: '127.0.0.1', name: 'E2E 站点' },
+        user: { id: crypto.getRandomValues(new Uint8Array(16)), name: 'e2e-passkey@example.com', displayName: 'E2E' },
+        pubKeyCredParams: [{ type: 'public-key', alg: -7 }],
+      }});
+      return {
+        isInstance: cred instanceof PublicKeyCredential,
+        rawIdLen: cred.rawId.byteLength,
+        attObjKind: Object.prototype.toString.call(cred.response.attestationObject),
+        credentialId: b64u(cred.rawId),
+        attestationObject: b64u(cred.response.attestationObject),
+        clientDataJSON: b64u(cred.response.clientDataJSON),
+      };
+    })()`);
+
+    check('create 返回的是真的 PublicKeyCredential', pkCreated.isInstance, JSON.stringify(pkCreated).slice(0, 120));
+    check('rawId 非空', pkCreated.rawIdLen >= 16, `${pkCreated.rawIdLen} 字节`);
+    check('attestationObject 是 ArrayBuffer（不是 base64 字符串）',
+      pkCreated.attObjKind === '[object ArrayBuffer]', pkCreated.attObjKind);
+
+    const att = cborDecode(b64uToBuf(pkCreated.attestationObject)) as Map<string, unknown>;
+    check('attestationObject 是 fmt=none 的合法 CBOR', att.get('fmt') === 'none', String(att.get('fmt')));
+
+    const cdata = JSON.parse(new TextDecoder().decode(b64uToBuf(pkCreated.clientDataJSON))) as
+      { type: string; origin: string; challenge: string };
+    check('clientDataJSON 的 origin 是页面自己的源',
+      cdata.origin === SITE, `origin=${cdata.origin}`);
+    check('clientDataJSON 的 ceremony 类型是 webauthn.create',
+      cdata.type === 'webauthn.create', cdata.type);
+
+    // ⚠️ 这条是整段的高潮：用**注册时发出去的公钥**验证断言签名。
+    // 只断言「拿到了一个 64 字节的东西」是自证 —— 布局错了照样是 64 字节。
+    const asserted = await page.eval<{
+      credentialId: string; authenticatorData: string; signature: string;
+      clientDataJSON: string; clientDataType: string; sigLen: number;
+    }>(`(async () => {
+      const b64u = (buf) => { const b = new Uint8Array(buf); let s = '';
+        for (const x of b) s += String.fromCharCode(x);
+        return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); };
+      const cred = await navigator.credentials.get({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rpId: '127.0.0.1',
+        allowCredentials: [{ type: 'public-key', id: Uint8Array.from(atob(${JSON.stringify(pkCreated.credentialId)}.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0)) }],
+      }});
+      return {
+        credentialId: b64u(cred.rawId),
+        authenticatorData: b64u(cred.response.authenticatorData),
+        signature: b64u(cred.response.signature),
+        clientDataJSON: b64u(cred.response.clientDataJSON),
+        clientDataType: JSON.parse(new TextDecoder().decode(cred.response.clientDataJSON)).type,
+        sigLen: cred.response.signature.byteLength,
+      };
+    })()`);
+
+    check('get 拿回的是同一条凭据', asserted.credentialId === pkCreated.credentialId);
+    check('断言的 ceremony 类型是 webauthn.get', asserted.clientDataType === 'webauthn.get');
+    check('签名是裸的 64 字节 r||s（不是 DER）', asserted.sigLen === 64, `${asserted.sigLen} 字节`);
+
+    const pub = await publicKeyFrom(b64uToBuf(pkCreated.attestationObject));
+    const authData = b64uToBuf(asserted.authenticatorData);
+    const clientHash = new Uint8Array(await crypto.subtle.digest('SHA-256', b64uToBuf(asserted.clientDataJSON)));
+    const signed = new Uint8Array([...authData, ...clientHash]);
+    const verified = await crypto.subtle.verify(
+      { name: 'ECDSA', hash: 'SHA-256' }, pub, b64uToBuf(asserted.signature), signed);
+    check('★ 断言签名能用注册时的公钥验过（字节布局正确）', verified);
+
+    // 计数必须随断言前进 —— RP 靠它检测同一个凭据被复制到两台设备
+    const counter1 = new DataView(authData.buffer).getUint32(33, false);
+    const secondAssertion = await page.eval<{ authenticatorData: string }>(`(async () => {
+      const b64u = (buf) => { const b = new Uint8Array(buf); let s = '';
+        for (const x of b) s += String.fromCharCode(x);
+        return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); };
+      const cred = await navigator.credentials.get({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rpId: '127.0.0.1',
+        allowCredentials: [{ type: 'public-key', id: Uint8Array.from(atob(${JSON.stringify(pkCreated.credentialId)}.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0)) }],
+      }});
+      return { authenticatorData: b64u(cred.response.authenticatorData) };
+    })()`);
+    const counter2 = new DataView(b64uToBuf(secondAssertion.authenticatorData).buffer).getUint32(33, false);
+    check('计数在递增', counter2 > counter1 && counter1 > 0, `${counter1} → ${counter2}`);
+
+    // allowCredentials 里没列出的凭据不能给
+    const unknown = await page.eval<string>(`(async () => {
+      try {
+        await navigator.credentials.get({ publicKey: {
+          challenge: crypto.getRandomValues(new Uint8Array(32)),
+          rpId: '127.0.0.1',
+          allowCredentials: [{ type: 'public-key', id: crypto.getRandomValues(new Uint8Array(32)) }],
+        }});
+        return 'GAVE';
+      } catch (e) { return 'REFUSED'; }
+    })()`);
+    check('allowCredentials 之外的凭据不给', unknown === 'REFUSED', unknown);
+
+    } catch (e) {
+      check('passkey 全流程', false, e instanceof Error ? e.message : String(e));
+    }
+
     // ── 7. 收尾：删掉这次造的条目 ──
     console.log('\n7. 清理');
     const created = (await ext.eval<{ items: { id: string; name: string }[] }>(
@@ -572,6 +751,11 @@ async function main(): Promise<void> {
     failures++;
   } finally {
     if (failures > 0) {
+      // 出问题时把浏览器里的目标全列出来。「日志出现在哪个上下文」这种事
+      // 猜是猜不出来的，而且猜错的方向往往完全跑偏
+      const all = await listTargets().catch(() => []);
+      console.log('\n── 浏览器里的目标 ──');
+      for (const t of all) console.log(`  [${t.type}] ${t.url}`);
       for (const [name, c] of [['页面', page], ['扩展页', ext], ['service worker', sw]] as const) {
         if (!c) { console.log(`\n── ${name}：没有连接 ──`); continue; }
         console.log(`\n── ${name}的日志（${c.logs.length} 条）──`);

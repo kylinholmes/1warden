@@ -19,13 +19,14 @@
  * storage 里**，模块变量随时可能归零。
  */
 import {
-  VaultClient, classifyFields, matchItemsByUrl, decideCapture,
+  VaultClient, classifyFields, matchItemsByUrl, decideCapture, restoreSession,
   type AccountInfo, type FieldDescriptor, type VaultItem,
   type CaptureDecision,
   totpCode,
 } from '@coffer/vault';
 import { SessionStore, type StorageArea } from './session-store';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
+import { handleWebauthn, type WebauthnPayload } from './webauthn';
 
 /** 会话区：只在内存、浏览器重启即清空 */
 const sessionArea: StorageArea = {
@@ -72,6 +73,48 @@ function newClient(): VaultClient {
     autoLockMs: 15 * 60 * 1000,
     onLock: () => { void sessions.clear(); },
   });
+}
+
+/**
+ * ⚠️ **进程重启后的恢复**，而且时机必须是确定的。
+ *
+ * service worker 每次被唤醒都会重新执行这个模块，此时 `client` 是新的、
+ * 会话是 `loggedOut` —— 而 `chrome.storage.session` 里的密钥**还在**。
+ * 不灌回去的话，所有已解锁的操作都会报「保险库未解锁」，而用户刚刚才解锁过。
+ *
+ * 消息可能在这段恢复完成**之前**就到达，所以 `handle()` 一律先 await 它。
+ * 靠「恢复大概来得及」是碰运气 —— 而这个 bug 的表现是偶发的，
+ * 恰恰是最难查的那种。
+ */
+async function restoreFromStorage(): Promise<VaultClient> {
+  const c = getClient();
+  if (c.getSession().getKey() !== null) return c;   // 已经解锁，别动它
+  const stored = await sessions.load();
+  if (stored) restoreSession(c.getSession(), stored);
+  return c;
+}
+
+/**
+ * ⚠️ 恢复必须发生在**用到的那一刻**，而不是模块加载时。
+ *
+ * 早先这里是一个在模块顶层求值一次的 `ready` promise，然后 `handle()` 里
+ * await 它。那个写法有个致命的时间窗：模块可能**在用户解锁之前**就加载完了
+ * （SW 被提前唤醒、或者同一份代码在不止一个上下文里跑），于是 `ready` 读到的
+ * 是「存储里还没有会话」，之后再也不会重试 —— 用户明明解锁了，
+ * 请求却报「保险库未解锁」，而且刷新一下就好、过一会儿又坏。
+ *
+ * 改成每次用到时先看一眼：已解锁就直接走，没有就去存储里捞。
+ * 这是个幂等的检查，比「赌恢复已经完成」可靠得多。
+ */
+async function unlockedClient(): Promise<VaultClient> {
+  try {
+    return await restoreFromStorage();
+  } catch (e) {
+    // 恢复失败当作没登录，让用户重新解锁 —— 但不能静默，否则
+    // 「解锁了却用不了」会变成一个查不出原因的幽灵问题
+    console.error('[coffer] 恢复会话失败：', e);
+    return getClient();
+  }
 }
 
 function getClient(): VaultClient {
@@ -136,7 +179,8 @@ type Request =
   | { type: 'coffer:save-capture'; tabId?: number }
   | { type: 'coffer:dismiss-capture'; tabId?: number }
   | { type: 'coffer:reveal'; itemId: string; field: 'username' | 'password' | 'totp' }
-  | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' };
+  | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
+  | { type: 'coffer:webauthn'; payload: unknown };
 
 chrome.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
   const req = msg as { type?: string };
@@ -181,7 +225,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
     }
 
     case 'coffer:connect': {
-      const c = getClient();
+      const c = await unlockedClient();
       await c.connect({
         serverUrl: req.serverUrl, email: req.email, masterPassword: req.masterPassword,
       });
@@ -284,7 +328,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const session = await sessions.load();
       if (!session) throw new Error('保险库未解锁');
 
-      const c = getClient();
+      const c = await unlockedClient();
       const decision = p.decision;
       if (decision.kind === 'update') {
         const existing = session.items.find((i) => i.id === decision.itemId);
@@ -292,7 +336,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
         await c.saveItem({
           ...existing,
           login: {
-            ...(existing.login ?? { totp: null, uris: [], passwordRevisionDate: null }),
+            ...(existing.login ?? { totp: null, uris: [], passwordRevisionDate: null, fido2Credentials: [] }),
             username: p.username ?? existing.login?.username ?? null,
             password: p.password,
           },
@@ -331,6 +375,52 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
      *
      * `totp` 是算出来的而不是存下来的：种子存在条目里，验证码每次现算。
      */
+    /**
+     * passkey。
+     *
+     * ⚠️ `sender.origin` 是这里唯一的信任根 —— 消息的载荷全部由页面控制，
+     * 包括它自称的 origin。用载荷里的 origin 去做 rpId 校验，等于没有校验。
+     */
+    case 'coffer:webauthn': {
+      // ⚠️ 只认客户端这一份状态。
+      // 原先这里还额外读了 `sessions.load()` 来判断「解锁了没有」，
+      // 于是同一个事实有了两个来源 —— 而它们会不一致（存储里没有、
+      // 但客户端刚被 connect 解锁过），表现为用户刚解锁却报「保险库未解锁」。
+      // 密钥在不在，`getKey()` 说了算。
+      const c = await unlockedClient();
+      const key = c.getSession().getKey();
+      if (!key) return { ok: false, error: `保险库未解锁（${c.getSession().status}）` };
+
+      const result = await handleWebauthn(
+        req.payload as WebauthnPayload,
+        sender.origin,
+        {
+          items: () => c.getSession().items,
+          userKey: () => key,
+          persist: async (changed) => {
+            for (const item of changed) await c.saveItem(item);
+            // 和 save-capture 一样：存完必须刷一次会话快照，
+            // 否则下一次读到的还是旧的，第二次断言会拿着过期的计数去存
+            const s2 = c.getSession();
+            const k2 = s2.getKey();
+            if (k2) {
+              await sessions.save({
+                account: s2.account as AccountInfo,
+                userKey: k2,
+                items: s2.items.slice(),
+                folders: s2.folders.slice(),
+              });
+            }
+          },
+        },
+      );
+      // passkey 失败在页面上只会表现成一句「NotAllowedError」，
+      // 看不出是 rpId 被拒、没有可用凭据、还是存不进保险库。
+      // 这里是唯一能留下原因的地方。
+      if (result['ok'] === false) console.warn('[coffer] passkey 失败：', result['error']);
+      return result;
+    }
+
     case 'coffer:reveal': {
       const session = await sessions.load();
       if (!session) throw new Error('保险库未解锁');
@@ -587,6 +677,8 @@ function newLoginItem(url: string, username: string | null, password: string): V
       username, password, totp: null,
       uris: [{ uri: url, match: null }],
       passwordRevisionDate: null,
+      // 新建的条目还没有 passkey —— 用户之后可以在站点上注册一个
+      fido2Credentials: [],
     },
     card: null, identity: null, secureNote: null,
     customFields: [], passwordHistory: [], attachments: [],

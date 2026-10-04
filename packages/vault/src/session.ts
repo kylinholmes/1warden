@@ -169,3 +169,41 @@ export class VaultSession {
     }
   }
 }
+
+/** 存储里的会话形态。`@coffer/vault` 不认识存储，这个类型只是恢复路径的入参。 */
+export interface StoredSession {
+  account: AccountInfo;
+  userKey: SymmetricKey;
+  items: VaultItem[];
+  folders: VaultFolder[];
+}
+
+/**
+ * 把一个已存的会话灌回会话对象 —— **进程重启后的恢复路径**。
+ *
+ * ## 为什么必须有
+ *
+ * service worker 约 30 秒空闲就被杀，模块变量全部归零。下次有消息时模块
+ * 重新执行、`getClient()` 造出一个新客户端，它的会话是 `loggedOut` ——
+ * 而 `chrome.storage.session` 里的密钥**还在**。
+ *
+ * 没有这条路径的话，表现是：用户明明刚解锁过，操作却报「保险库未解锁」；
+ * 刷新一下好了、过一会儿又坏。这是最难查的一类问题，因为「存储里有」
+ * 和「内存里有」是两件事，而报错只提后者。
+ *
+ * ⚠️ 数据要**拷贝**，不能直接把存储里那份引用进来 —— 共享数组会让一次写入
+ * 同时改到「会话里看到的」和「下次要存回去的」，而且改坏了不会有人报错。
+ *
+ * ⚠️ 已经解锁时**直接返回**。唤醒时可能已经有别的消息先恢复了，
+ * 再来一次会把用户已经看到的密钥和数据换掉。
+ */
+export function restoreSession(session: VaultSession, stored: StoredSession): void {
+  if (session.getKey() !== null) return;
+
+  // 顺序不能换：replaceData 只在 unlocking / unlocked 生效，
+  // completeUnlock 又只能在 unlocking 调用
+  session.setAccount(stored.account);
+  session.beginUnlock();
+  session.replaceData(stored.items.slice(), stored.folders.slice());
+  session.completeUnlock(stored.userKey);
+}

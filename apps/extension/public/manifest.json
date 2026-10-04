@@ -34,6 +34,18 @@
         "https://*/*"
       ],
       "js": [
+        "webauthn.js"
+      ],
+      "run_at": "document_start",
+      "all_frames": false,
+      "world": "MAIN"
+    },
+    {
+      "matches": [
+        "http://*/*",
+        "https://*/*"
+      ],
+      "js": [
         "content.js"
       ],
       "run_at": "document_idle",

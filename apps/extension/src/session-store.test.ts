@@ -28,7 +28,7 @@ function item(id: string): VaultItem {
     id, type: 'login', rawType: 1, name: `item-${id}`, nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: 'x', updatedAt: 'x', deletedAt: null, archivedAt: null, hasItemKey: false,
-    login: { username: 'u', password: 'p', totp: null, uris: [{ uri: 'https://a.test', match: null }], passwordRevisionDate: null },
+    login: { username: 'u', password: 'p', totp: null, uris: [{ uri: 'https://a.test', match: null }], passwordRevisionDate: null, fido2Credentials: [] },
     card: null, identity: null, secureNote: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
