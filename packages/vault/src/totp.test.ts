@@ -8,7 +8,7 @@ function item(over: Partial<VaultItem> = {}): VaultItem {
     id: 'x', type: 'login', rawType: 1, name: 'n', nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: 'x', updatedAt: 'x', deletedAt: null, archivedAt: null, hasItemKey: false,
-    login: { ...emptyLogin() }, card: null, identity: null, secureNote: null,
+    login: { ...emptyLogin() }, card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
     ...over,
   };

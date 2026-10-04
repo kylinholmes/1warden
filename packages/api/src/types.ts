@@ -42,6 +42,13 @@ export interface CipherFido2CredentialDto {
   creationDate?: string | null;
 }
 
+/** SSH 密钥的三个字段，全是 EncString */
+export interface CipherSshKeyDto {
+  privateKey?: string | null;
+  publicKey?: string | null;
+  fingerprint?: string | null;
+}
+
 export interface CipherLoginDto {
   username?: string | null;
   password?: string | null;
@@ -115,6 +122,14 @@ export interface CipherDto {
   card?: Record<string, string | null> | null;
   identity?: Record<string, string | null> | null;
   secureNote?: { type: number } | null;
+  /**
+   * SSH 密钥（type 5）。三个字段**都是 EncString**。
+   *
+   * ⚠️ 服务端在 `Bitwarden-Client-Version` 低于 2024.12.0 时会把这类条目
+   * **从 sync 结果里整个过滤掉** —— 不是报错，是当作不存在。
+   * 我们发的是 2026.10.0（见 http.ts 的 CLIENT_VERSION）。
+   */
+  sshKey?: CipherSshKeyDto | null;
   fields?: CipherFieldDto[] | null;
   passwordHistory?: CipherPasswordHistoryDto[] | null;
   /** ⚠️ 无附件时是 **null**，不是空数组 */

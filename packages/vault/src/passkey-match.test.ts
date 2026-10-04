@@ -19,7 +19,7 @@ function item(id: string, creds: StoredPasskey[], over: Partial<VaultItem> = {})
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
     login: { ...emptyLogin(), fido2Credentials: creds },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
     ...over,
   };

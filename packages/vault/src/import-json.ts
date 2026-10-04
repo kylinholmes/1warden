@@ -16,7 +16,7 @@
  */
 import type {
   ImportedCard, ImportedField, ImportedIdentity, ImportedItem, ImportedType,
-  ImportResult, ImportedUri,
+  ImportResult, ImportedUri, ImportedSshKey,
 } from './import';
 
 export interface JsonFormatGuess {
@@ -112,9 +112,27 @@ function bitwardenType(n: unknown): ImportedType {
     case 1: return 'login';
     case 3: return 'card';
     case 4: return 'identity';
+    case 5: return 'sshKey';
     case 2: return 'secureNote';
     default: return 'secureNote';
   }
+}
+
+/**
+ * ⚠️ SSH key 必须**真的读**。
+ *
+ * 早先 type 5 落到 `default → secureNote`，而内容在 `sshKey` 这个块里
+ * **没人读** —— 用户导入后拿到一条标题正确、私钥公钥指纹全空的笔记，
+ * 看起来像数据丢了。这比「不支持 SSH key」更糟：前者至少是明确的。
+ */
+function sshKeyOf(raw: unknown): ImportedSshKey | null {
+  const o = obj(raw);
+  if (o === null) return null;
+  return {
+    privateKey: str(o['privateKey']),
+    publicKey: str(o['publicKey']),
+    fingerprint: str(o['fingerprint']),
+  };
 }
 
 /**
@@ -195,6 +213,7 @@ export function parseBitwardenJson(text: string): ImportResult {
         : null,
       card: type === 'card' ? cardOf(o['card']) : null,
       identity: type === 'identity' ? identityOf(o['identity']) : null,
+      sshKey: type === 'sshKey' ? sshKeyOf(o['sshKey']) : null,
       customFields: fieldsOf(o['fields']),
       rowNumber,
     });

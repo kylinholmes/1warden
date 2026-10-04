@@ -1,9 +1,9 @@
 import { decryptString, decryptBytes, DecryptError } from '@coffer/crypto';
 import type { SymmetricKey } from '@coffer/crypto';
 import type { CipherDto, FolderDto, CipherFieldDto } from '@coffer/api';
-import { cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity } from './model';
+import { cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
 import type {
-  VaultItem, VaultFolder, LoginFields, CardFields, IdentityFields,
+  VaultItem, VaultFolder, LoginFields, CardFields, IdentityFields, SshKeyFields,
   CustomField, PasswordHistoryEntry, Attachment,
 } from './model';
 import type { StoredPasskey } from './passkey';
@@ -143,6 +143,20 @@ async function decryptLogin(raw: NonNullable<CipherDto['login']>, key: Symmetric
   return out;
 }
 
+/**
+ * SSH 密钥的三个字段。
+ *
+ * ⚠️ 单独一个字段解不开**不该让整条条目打不开** —— 用户至少有公钥和指纹能用，
+ * 而整条打不开他连「有这么一条」都看不见。所以逐个降级成 null。
+ */
+async function decryptSshKey(raw: NonNullable<CipherDto['sshKey']>, key: SymmetricKey): Promise<SshKeyFields> {
+  const out = emptySshKey();
+  for (const f of ['privateKey', 'publicKey', 'fingerprint'] as const) {
+    out[f] = (await tryDecrypt(raw[f], key)).value;
+  }
+  return out;
+}
+
 async function decryptCard(raw: NonNullable<CipherDto['card']>, key: SymmetricKey): Promise<CardFields> {
   const out = emptyCard();
   for (const f of ['cardholderName', 'brand', 'number', 'expMonth', 'expYear', 'code'] as const) {
@@ -236,6 +250,7 @@ export async function decryptCipher(dto: CipherDto, userKey: SymmetricKey): Prom
     card: dto.card ? await decryptCard(dto.card, key) : null,
     identity: dto.identity ? await decryptIdentity(dto.identity, key) : null,
     secureNote: dto.secureNote ? { type: dto.secureNote.type ?? 0 } : null,
+    sshKey: dto.sshKey ? await decryptSshKey(dto.sshKey, key) : null,
 
     customFields: await decryptFields(dto.fields, key),
     passwordHistory: await decryptHistory(dto.passwordHistory, key),

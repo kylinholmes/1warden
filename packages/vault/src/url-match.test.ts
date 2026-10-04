@@ -13,7 +13,7 @@ function item(id: string, uris: (string | LoginUri)[]): VaultItem {
       username: 'u', password: 'p',
       uris: uris.map((u) => (typeof u === 'string' ? { uri: u, match: null } : u)),
     },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }

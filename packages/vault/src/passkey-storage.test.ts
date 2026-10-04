@@ -32,7 +32,7 @@ function loginItem(over: Partial<VaultItem> = {}): VaultItem {
     createdAt: '2026-01-01T00:00:00.000000Z', updatedAt: '2026-01-01T00:00:00.000000Z',
     deletedAt: null, archivedAt: null, hasItemKey: false,
     login: { ...emptyLogin(), fido2Credentials: [PASSKEY] },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
     ...over,
   };

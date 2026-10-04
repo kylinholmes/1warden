@@ -10,7 +10,7 @@ function fakeItem(id: string, password: string): VaultItem {
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: 'x', updatedAt: 'x', deletedAt: null, archivedAt: null, hasItemKey: false,
     login: { ...emptyLogin(), username: 'u', password },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }

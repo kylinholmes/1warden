@@ -128,6 +128,14 @@ export async function encryptCipher(
     const identity: Record<string, string | null> = {};
     for (const [k, v] of Object.entries(item.identity)) identity[k] = await enc(v, key);
     body.identity = identity;
+  } else if (item.type === 'sshKey' && item.sshKey) {
+    // ⚠️ 三个字段都加密，包括 fingerprint —— 它是从公钥算出来的，
+    // 但一样泄露「用户有哪些密钥」，服务端那边也是加密存的
+    body.sshKey = {
+      privateKey: await enc(item.sshKey.privateKey, key),
+      publicKey: await enc(item.sshKey.publicKey, key),
+      fingerprint: await enc(item.sshKey.fingerprint, key),
+    };
   } else if (item.type === 'secureNote') {
     // ⚠️ secureNote 只有 `{ type: 0 }` 一个合法值，而且**不被加密**
     body.secureNote = { type: item.secureNote?.type ?? 0 };

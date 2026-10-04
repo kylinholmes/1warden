@@ -9,7 +9,7 @@ function item(over: Partial<VaultItem> & { id: string }): VaultItem {
     notes: null, folderId: null, favorite: false, reprompt: 0,
     createdAt: 'x', updatedAt: '2026-01-01T00:00:00.000000Z',
     deletedAt: null, archivedAt: null, hasItemKey: false,
-    name: '', login: emptyLogin(), card: null, identity: null, secureNote: null,
+    name: '', login: emptyLogin(), card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
     ...over,
   };

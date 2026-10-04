@@ -21,7 +21,7 @@
  */
 import { parseGenericCsv } from './import-csv';
 
-export type ImportedType = 'login' | 'secureNote' | 'card' | 'identity';
+export type ImportedType = 'login' | 'secureNote' | 'card' | 'identity' | 'sshKey';
 
 export interface ImportedField {
   name: string;
@@ -56,6 +56,16 @@ export interface ImportedCard {
   expMonth: string | null;
   expYear: string | null;
   code: string | null;
+}
+
+/**
+ * SSH 密钥。三个字段都是**明文**（这是「已经解出来的导入数据」，
+ * 加密是落库那一步的事）。
+ */
+export interface ImportedSshKey {
+  privateKey: string | null;
+  publicKey: string | null;
+  fingerprint: string | null;
 }
 
 export interface ImportedIdentity {
@@ -95,6 +105,7 @@ export interface ImportedItem {
    */
   card?: ImportedCard | null;
   identity?: ImportedIdentity | null;
+  sshKey?: ImportedSshKey | null;
   customFields: ImportedField[];
   /** 在源文件里的行号（表头是第 1 行）—— 报告问题时要能指出来 */
   rowNumber: number;

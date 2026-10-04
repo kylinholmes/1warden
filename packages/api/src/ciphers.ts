@@ -1,6 +1,6 @@
 import type { HttpClient } from './http';
 import type {
-  CipherDto, CipherLoginDto, CipherFieldDto, CipherPasswordHistoryDto,
+  CipherDto, CipherLoginDto, CipherFieldDto, CipherPasswordHistoryDto, CipherSshKeyDto,
 } from './types';
 
 /**
@@ -26,7 +26,7 @@ export interface CipherWriteBody {
   card?: unknown;
   identity?: unknown;
   secureNote?: unknown;
-  sshKey?: unknown;
+  sshKey?: CipherSshKeyDto;
   fields?: CipherFieldDto[] | null;
   passwordHistory?: CipherPasswordHistoryDto[] | null;
   lastKnownRevisionDate?: string | null;

@@ -11,7 +11,7 @@ function login(
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: 'x', updatedAt: 'x', deletedAt: null, archivedAt: null, hasItemKey: false,
     login: { ...emptyLogin(), username, password, uris: uris.map((u) => ({ uri: u, match: null })) },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }

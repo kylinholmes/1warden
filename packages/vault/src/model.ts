@@ -64,6 +64,18 @@ export interface IdentityFields {
   licenseNumber: string | null;
 }
 
+/**
+ * SSH 密钥（Bitwarden 的 type 5）。
+ *
+ * ⚠️ 三个字段**都是密文**，包括 `fingerprint` —— 指纹是从公钥算出来的，
+ * 但它本身也泄露「用户有哪些密钥」，所以服务端一样加密。
+ */
+export interface SshKeyFields {
+  privateKey: string | null;
+  publicKey: string | null;
+  fingerprint: string | null;
+}
+
 export interface SecureNoteFields {
   type: number;
 }
@@ -118,6 +130,7 @@ export interface VaultItem {
   card: CardFields | null;
   identity: IdentityFields | null;
   secureNote: SecureNoteFields | null;
+  sshKey: SshKeyFields | null;
 
   customFields: CustomField[];
   passwordHistory: PasswordHistoryEntry[];
@@ -152,6 +165,11 @@ export function cipherTypeToItemType(raw: number): ItemType {
 /** 每次都返回全新对象 —— 共享可变状态会让两条条目互相污染 */
 export function emptyLogin(): LoginFields {
   return { username: null, password: null, totp: null, uris: [], passwordRevisionDate: null, fido2Credentials: [] };
+}
+
+/** 每次都返回全新对象 —— 共享可变状态会让两条条目互相污染 */
+export function emptySshKey(): SshKeyFields {
+  return { privateKey: null, publicKey: null, fingerprint: null };
 }
 
 export function emptyCard(): CardFields {

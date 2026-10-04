@@ -18,7 +18,7 @@ function item(over: Partial<VaultItem> = {}): VaultItem {
     createdAt: '2026-01-01T00:00:00.000000Z', updatedAt: '2026-01-02T00:00:00.000000Z',
     deletedAt: null, archivedAt: null, hasItemKey: false,
     login: { ...emptyLogin(), username: 'kylin', password: 'pw', totp: 'WQIQ25BRKZYCJVYP', uris: [{ uri: 'https://github.com', match: 0 }] },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [{ name: 'PIN', value: '1234', type: 1, linkedId: null }],
     passwordHistory: [{ lastUsedDate: '2025-12-01T00:00:00.000000Z', password: 'old' }],
     attachments: [],

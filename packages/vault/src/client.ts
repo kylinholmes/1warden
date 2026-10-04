@@ -22,11 +22,11 @@ import { decryptCipher, decryptFolder } from './decrypt';
 import type { AccountInfo, SessionStatus, StoredSession } from './session';
 import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
-import { emptyLogin, emptyCard, emptyIdentity } from './model';
+import { emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
 
 /** 导入的类型名 → Bitwarden 的数字类型 */
 const RAW_TYPE: Record<ImportedItem['type'], number> = {
-  login: 1, secureNote: 2, card: 3, identity: 4,
+  login: 1, secureNote: 2, card: 3, identity: 4, sshKey: 5,
 };
 
 /** 导入用的空白条目骨架 */
@@ -38,7 +38,7 @@ function blankImportItem(): VaultItem {
     login: emptyLogin(),
     card: emptyCard(),
     identity: emptyIdentity(),
-    secureNote: null,
+    secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }
@@ -515,6 +515,7 @@ export class VaultClient {
           // 丢掉的话用户会发现所有的卡都不见了，而导入报告说「全部成功」
           card: src.card ?? null,
           identity: src.identity ?? null,
+          sshKey: src.sshKey ?? null,
           customFields: src.customFields.map((f) => ({
             name: f.name, value: f.value, type: f.type, linkedId: null,
           })),
