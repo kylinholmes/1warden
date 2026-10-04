@@ -131,7 +131,14 @@ async function main() {
     notes: '端到端写入测试', notesFailed: false,
     folderId: null, favorite: false, reprompt: 0,
     createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
-    login: { username: 'e2e@example.com', password: 'kJ8#mPq2$vXn9!wZt4&bR', totp: null, uris: [{ uri: 'https://example.com', match: 0 }], passwordRevisionDate: null },
+    login: {
+      username: 'e2e@example.com', password: 'kJ8#mPq2$vXn9!wZt4&bR', totp: null,
+      uris: [{ uri: 'https://example.com', match: 0 }], passwordRevisionDate: null,
+      // ⚠️ 不能省。`encryptCipher` 在字段缺失时**故意抛错**而不是默认成空数组 ——
+      // 默认的话，一个漏了字段的调用方会把用户已有的 passkey 从服务端抹掉。
+      // 所以这里必须显式写出来（这个脚本不过 tsc，只能靠运行时发现）
+      fido2Credentials: [],
+    },
     card: null, identity: null, secureNote: null,
     customFields: [{ name: 'PIN', value: '4321', type: 1, linkedId: null }],
     passwordHistory: [], attachments: [],
