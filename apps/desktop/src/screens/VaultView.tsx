@@ -3,6 +3,7 @@ import { searchItems, totpCode, hasTotp, type VaultItem, type VaultFolder } from
 import type { VaultClient } from '@coffer/vault';
 import { SecretField } from '../components/SecretField';
 import { AutotypeAction } from '../components/AutotypeAction';
+import { SecurityReportView } from './SecurityReport';
 import { ItemEditor } from './ItemEditor';
 
 interface Props {
@@ -10,7 +11,11 @@ interface Props {
   onLock: () => void;
 }
 
-type Category = { kind: 'all' } | { kind: 'favorites' } | { kind: 'folder'; id: string };
+type Category =
+  | { kind: 'all' }
+  | { kind: 'favorites' }
+  | { kind: 'folder'; id: string }
+  | { kind: 'security' };
 
 type Mode = { kind: 'browse' } | { kind: 'edit'; item: VaultItem } | { kind: 'new' };
 
@@ -104,6 +109,17 @@ export function VaultView({ client, onLock }: Props) {
         onNew={() => setMode({ kind: 'new' })}
       />
 
+      {/*
+        安全报告占满右侧。刻意**不**保留条目列表这一栏 ——
+        报告讲的是「整个库的状态」，旁边杵着一个可点的列表会把注意力
+        拉回单条记录，而且点哪一条都没有对应的详情可看。
+      */}
+      {category.kind === 'security' ? (
+        <div className="flex-1 overflow-y-auto">
+          <SecurityReportView items={items} />
+        </div>
+      ) : (
+      <>
       <div className="flex w-[320px] shrink-0 flex-col border-r border-[var(--border-subtle)]">
         <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] p-3">
           <input
@@ -151,6 +167,9 @@ export function VaultView({ client, onLock }: Props) {
           />
         ) : <EmptyDetail />}
       </div>
+
+      </>
+      )}
 
       {confirmDelete && (
         <DeleteDialog
@@ -254,6 +273,13 @@ function Sidebar(props: {
           label="收藏" count={props.counts.favorites}
           active={props.category.kind === 'favorites'}
           onClick={() => props.onSelect({ kind: 'favorites' })}
+        />
+        {/* 安全报告不是一个「列表筛选」，而是一整块内容 —— 选中它时右侧
+            不再显示条目列表，理由见下面的渲染分支 */}
+        <NavItem
+          label="安全报告"
+          active={props.category.kind === 'security'}
+          onClick={() => props.onSelect({ kind: 'security' })}
         />
         {props.folders.length > 0 && (
           <li className="px-2 pt-4 pb-1 text-[var(--text-xs)] font-medium uppercase tracking-wide text-[var(--ink-tertiary)]">

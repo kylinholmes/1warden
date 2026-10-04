@@ -17,7 +17,8 @@
     "e2e": "bun run scripts/e2e-desktop.ts",
     "dev:desktop": "cd apps/desktop && bun run tauri dev",
     "build:desktop": "cd apps/desktop && bun run tauri build",
-    "e2e:extension": "bun run scripts/e2e-extension.ts"
+    "e2e:extension": "bun run scripts/e2e-extension.ts",
+    "ui:shot": "bun run scripts/ui-shot.ts"
   },
   "devDependencies": {
     "@bitwarden/cli": "2025.2.0",
