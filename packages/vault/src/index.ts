@@ -10,5 +10,7 @@ export * from './form-fields';
 export * from './health';
 export * from './csv';
 export * from './import';
+export * from './cbor';
+export * from './passkey';
 export * from './credential-capture';
 export * from './totp';
