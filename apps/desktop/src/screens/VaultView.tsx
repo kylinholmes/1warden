@@ -461,13 +461,20 @@ function Sidebar(props: {
               );
             }
             return (
-              <li key={f.id} className="group relative">
-                <NavItem
-                  icon={<IconFolder size={16} />}
-                  label={name}
-                  active={props.category.kind === 'folder' && props.category.id === f.id}
-                  onClick={() => props.onSelect({ kind: 'folder', id: f.id })}
-                />
+              /*
+               * ⚠️ **不要再包一层 `<li>`** —— `NavItem` 自己渲染的就是 `<li>`，
+               * 套起来会产生 `<li>` 嵌 `<li>`，React 会报 hydration 错误，
+               * 而浏览器会把结构改写成别的东西，排 version 就跟着乱。
+               * 菜单按钮与重命名输入框都挂到同一个 `<li>` 里。
+               */
+              <NavItem
+                key={f.id}
+                className="group relative"
+                icon={<IconFolder size={16} />}
+                label={name}
+                active={props.category.kind === 'folder' && props.category.id === f.id}
+                onClick={() => props.onSelect({ kind: 'folder', id: f.id })}
+              >
                 <button
                   onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === f.id ? null : f.id); }}
                   title="更多" aria-label="文件夹操作"
@@ -484,7 +491,7 @@ function Sidebar(props: {
                       className="btn btn-ghost px-2 py-1 gap-1.5 text-[var(--risk)]"><IconTrash size={12} />删除</button>
                   </div>
                 )}
-              </li>
+              </NavItem>
             );
           })}
 
@@ -528,9 +535,12 @@ function NavItem(props: {
   count?: number;
   active: boolean;
   onClick: () => void;
+  /** 挂在同一个 `<li>` 里的附加内容（文件夹的重命名/删除菜单） */
+  className?: string;
+  children?: React.ReactNode;
 }) {
   return (
-    <li>
+    <li className={props.className}>
       {/* 选中态用**填充 + 字重**，不用强调色文字 ——
           强调色留给「可以点的动作」，用它给导航项上色会让界面到处是青色 */}
       <button
@@ -549,6 +559,7 @@ function NavItem(props: {
           <span className="shrink-0 text-[var(--text-2xs)] tabular-nums text-[var(--ink-tertiary)]">{props.count}</span>
         )}
       </button>
+      {props.children}
     </li>
   );
 }
