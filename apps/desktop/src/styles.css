@@ -11,15 +11,18 @@
  * 换主题时不会出现色相偏移。
  */
 @theme {
-  /* 间距 —— 4px 基准 */
-  --spacing-hairline: 1px;
-  --spacing-2xs: 4px;
-  --spacing-xs: 8px;
-  --spacing-sm: 12px;
-  --spacing-md: 16px;
-  --spacing-lg: 24px;
-  --spacing-xl: 32px;
-  --spacing-2xl: 48px;
+  /*
+   * ⚠️ 这里**刻意不定义** `--spacing-*`。
+   *
+   * Tailwind 4 的 `@theme` 命名空间是共享的：一旦定义了 `--spacing-sm`，
+   * `max-w-sm` 就会被解析成 `max-width: var(--spacing-sm)` 而不是 24rem。
+   * 曾因此把值设成 12px，导致整个连接表单宽度只有 12 像素 ——
+   * 每个汉字换一行，界面完全不可用。
+   *
+   * 而且这些 token 本来也没被用到：组件里用的都是 Tailwind 的数字档位
+   * （`p-3`、`gap-2`、`mb-4`），它们走的是 `--spacing` 基准值。
+   * 需要自定义间距时用 Tailwind 的任意值语法 `p-[13px]`，不要动 `--spacing-*`。
+   */
 
   /* 圆角 —— 6/10/16，比 1Password 的 4/8/12 更柔和一点，是我们的手感 */
   --radius-sm: 6px;

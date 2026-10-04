@@ -10,7 +10,8 @@ function session(): VaultSession {
   const s = new VaultSession();
   s.setAccount({ serverUrl: 'https://x', email: 'a@b.com', userId: 'u1', kdf: { kdf: 0, iterations: 1 } });
   s.beginUnlock();
-  s.completeUnlock(makeUserKey(), [], []);
+  s.beginUnlock();
+  s.completeUnlock(makeUserKey());
   return s;
 }
 

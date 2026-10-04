@@ -13,6 +13,7 @@
     "@coffer/api": "workspace:*",
     "@coffer/crypto": "workspace:*",
     "@coffer/vault": "workspace:*",
+    "@tauri-apps/api": "2.12.1",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

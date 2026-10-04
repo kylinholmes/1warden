@@ -1,4 +1,4 @@
-import { ApiError, classifyStatus, messageFor } from './errors';
+import { ApiError, classifyStatus, messageFor, isApiErrorKind, type ApiErrorKind } from './errors';
 
 export interface HttpOptions {
   baseUrl: string;
@@ -82,11 +82,26 @@ export class HttpClient {
       });
     } catch (e) {
       const aborted = (e as { name?: string } | null)?.name === 'AbortError';
-      throw new ApiError(
-        aborted ? 'timeout' : 'network',
-        aborted ? '请求超时' : '连不上服务器，请检查地址与网络',
-        { cause: e },
-      );
+      if (aborted) {
+        throw new ApiError('timeout', '请求超时', { cause: e });
+      }
+
+      // 传输层（桌面端走的是 Rust 侧的原生请求）比这里更清楚失败的原因。
+      // 比如证书无法验证根本不是网络故障 —— 压成 network 的话，界面就只能说
+      // 「连不上服务器」，用户永远不知道该去信任那张证书。
+      if (isApiErrorKind((e as { kind?: unknown } | null)?.kind)) {
+        const err = e as { kind: ApiErrorKind; message?: string; fingerprint?: string };
+        const fingerprint = err.fingerprint;
+        throw new ApiError(
+          err.kind,
+          typeof err.message === 'string' && err.message.length > 0
+            ? err.message
+            : '连不上服务器，请检查地址与网络',
+          { cause: e, ...(fingerprint === undefined ? {} : { fingerprint }) },
+        );
+      }
+
+      throw new ApiError('network', '连不上服务器，请检查地址与网络', { cause: e });
     } finally {
       clearTimeout(timer);
     }

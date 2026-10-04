@@ -15,7 +15,11 @@ import {
   KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
-import { VaultSession, SyncEngine, decryptCipher, decryptFolder, type AccountInfo } from '@coffer/vault';
+import {
+  VaultSession, SyncEngine, decryptCipher, decryptFolder,
+  type AccountInfo, type SessionStatus,
+} from '@coffer/vault';
+import { tauriFetch } from './transport';
 
 export interface ConnectParams {
   serverUrl: string;
@@ -39,22 +43,51 @@ export class VaultClient {
   private masterKey: Uint8Array | null = null;
   private pendingConnect: ConnectParams | null = null;
 
-  constructor(opts: { autoLockMs?: number; onLock?: () => void; onStatus?: (s: string) => void } = {}) {
+  /** 传输层。默认走 Rust 侧；测试里可以换成假的服务器。 */
+  private readonly fetchImpl: typeof fetch;
+
+  constructor(opts: {
+    autoLockMs?: number;
+    onLock?: () => void;
+    onStatus?: (s: SessionStatus) => void;
+    /**
+     * 仅供测试注入。
+     *
+     * ⚠️ 生产环境**不要**传 —— 不传时走 `tauriFetch`（Rust 侧原生请求）。
+     * 换成浏览器 fetch 会被 CORS 拦掉，见 transport.ts。
+     */
+    fetchImpl?: typeof fetch;
+  } = {}) {
+    this.fetchImpl = opts.fetchImpl ?? tauriFetch;
     this.device = {
       // 用桌面端的值而不是 CLI —— 服务端日志里能看出这是我们的应用
       type: DEVICE_TYPE.macOSDesktop,
       identifier: getDeviceIdentifier(),
       name: 'Coffer',
     };
-    this.http = new HttpClient({ baseUrl: 'https://localhost' });
+    this.http = this.makeHttp('https://localhost');
     const sessionOpts: ConstructorParameters<typeof VaultSession>[0] = {};
     if (opts.autoLockMs !== undefined) sessionOpts.autoLockMs = opts.autoLockMs;
     if (opts.onLock) sessionOpts.onLock = opts.onLock;
-    if (opts.onStatus) sessionOpts.onStatusChange = opts.onStatus as never;
+    if (opts.onStatus) sessionOpts.onStatusChange = opts.onStatus;
     this.session = new VaultSession(sessionOpts);
   }
 
   getSession(): VaultSession { return this.session; }
+
+  /**
+   * 所有 HTTP 都从这里出去。
+   *
+   * ⚠️ **不要**在别处直接 `new HttpClient`：默认走的是 WebView 的 `fetch`，
+   * 而页面的 origin 是 `tauri://localhost`，跨源请求会被 CORS 拦掉 ——
+   * Vaultwarden 只对配置的 DOMAIN 回 ACAO，改不了。表现是「一直连不上服务器」，
+   * 且与网络无关。详见 transport.ts 顶部的说明。
+   */
+  private makeHttp(baseUrl: string, headers?: () => Record<string, string>): HttpClient {
+    return headers
+      ? new HttpClient({ baseUrl, fetchImpl: this.fetchImpl, headers })
+      : new HttpClient({ baseUrl, fetchImpl: this.fetchImpl });
+  }
 
   /**
    * 连接并解锁。
@@ -64,7 +97,7 @@ export class VaultClient {
    */
   async connect(params: ConnectParams): Promise<void> {
     this.pendingConnect = params;
-    const bare = new HttpClient({ baseUrl: params.serverUrl });
+    const bare = this.makeHttp(params.serverUrl);
 
     const pl = await prelogin(bare, params.email);
     const kdf: KdfConfig = pl.kdf === KDF_TYPE_ARGON2ID
@@ -86,7 +119,7 @@ export class VaultClient {
     if (!params) throw new Error('没有待完成的两步验证流程');
     if (!this.masterKey) throw new Error('内部状态丢失，请重新开始登录');
 
-    const bare = new HttpClient({ baseUrl: params.serverUrl });
+    const bare = this.makeHttp(params.serverUrl);
     const hash = await hashMasterPassword(this.masterKey, params.masterPassword);
     await this.finishConnect(bare, params, this.masterKey, hash, { token: code, provider, remember });
   }
@@ -117,16 +150,13 @@ export class VaultClient {
     this.masterKey = masterKey;
     this.userKey = userKey;
     this.token = token;
-    this.http = new HttpClient({
-      baseUrl: params.serverUrl,
-      headers: () => ({
-        Authorization: `Bearer ${this.token?.accessToken ?? ''}`,
-        'Device-Type': String(this.device.type),
-        'Bitwarden-Client-Name': 'desktop',
-        // 发一个较新的版本号：服务端在版本过旧时会过滤掉 SSH key 类条目
-        'Bitwarden-Client-Version': '2026.10.0',
-      }),
-    });
+    this.http = this.makeHttp(params.serverUrl, () => ({
+      Authorization: `Bearer ${this.token?.accessToken ?? ''}`,
+      'Device-Type': String(this.device.type),
+      'Bitwarden-Client-Name': 'desktop',
+      // 发一个较新的版本号：服务端在版本过旧时会过滤掉 SSH key 类条目
+      'Bitwarden-Client-Version': '2026.10.0',
+    }));
 
     // 从 JWT 的 sub 取用户 uuid —— 写入条目时 encryptedFor 需要它，
     // 而 api 层会自己填，我们只需要传给 createCipher
@@ -142,7 +172,7 @@ export class VaultClient {
     this.session.beginUnlock();
 
     await this.doSync(userKey);
-    this.session.completeUnlock(userKey, this.session.items.slice(), this.session.folders.slice());
+    this.session.completeUnlock(userKey);
   }
 
   /** 重新同步（用户手动刷新、或收到服务器变更通知时调用） */
@@ -164,10 +194,9 @@ export class VaultClient {
       },
       onError: (e) => console.warn('[sync] 一条记录解密失败，已跳过', e),
     });
-    // 第一次同步前先解锁，否则 replaceData 会被忽略
-    if (!this.session.isUnlocked()) {
-      this.session.completeUnlock(unlockedKey, [], []);
-    }
+    // 同步会把解密结果直接写进会话。`unlocking` 态也允许写入 ——
+    // 首次解锁正是「先同步、后 completeUnlock」，数据必须在解锁完成前就位，
+    // 否则解锁的那一瞬间会先渲染出一个空保险库。
     await this.syncEngine.sync({ unlockedKey, force: true });
   }
 
@@ -279,7 +308,7 @@ export class VaultClient {
   async unlock(masterPassword: string): Promise<void> {
     const account = this.session.account;
     if (!account) throw new Error('没有已保存的账户');
-    const bare = new HttpClient({ baseUrl: account.serverUrl });
+    const bare = this.makeHttp(account.serverUrl);
     const pl = await prelogin(bare, account.email);
     const kdf: KdfConfig = pl.kdf === KDF_TYPE_ARGON2ID
       ? { kdf: KDF_TYPE_ARGON2ID, iterations: pl.iterations, memory: pl.memory ?? 64, parallelism: pl.parallelism ?? 4 }

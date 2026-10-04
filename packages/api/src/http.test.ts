@@ -119,4 +119,40 @@ describe('HttpClient', () => {
     const http = new HttpClient({ baseUrl: 'https://x.test', fetchImpl });
     await expect(http.request('GET', '/x')).rejects.toThrow(/^(?!.*2\.).*$/);
   });
+
+  /**
+   * 桌面端的传输层（Rust 侧）会自己给错误分类。它比这里更清楚发生了什么 ——
+   * 比如「服务器证书无法验证」根本不是一个网络故障，压成 `network` 之后
+   * 界面就只能说「连不上服务器」，用户永远不知道该去信任证书。
+   */
+  it('preserves a transport-classified kind instead of flattening it to network', async () => {
+    const fromTransport = Object.assign(new Error('vault.example.com 的证书无法验证'), {
+      kind: 'certUntrusted',
+      fingerprint: 'AB:CD:EF',
+    });
+    const fetchImpl = mockFetch(async () => { throw fromTransport; });
+    const http = new HttpClient({ baseUrl: 'https://self-hosted.test', fetchImpl });
+    await expect(http.request('GET', '/api/config')).rejects.toMatchObject({
+      kind: 'certUntrusted',
+      fingerprint: 'AB:CD:EF',
+    });
+  });
+
+  // 分类得由传输层说了算 —— 但它不能凭空造出一个这里不认识的类别
+  it('ignores an unknown kind from the transport and falls back to network', async () => {
+    const fetchImpl = mockFetch(async () => {
+      throw Object.assign(new Error('boom'), { kind: 'somethingElse' });
+    });
+    const http = new HttpClient({ baseUrl: 'https://x.test', fetchImpl });
+    await expect(http.request('GET', '/x')).rejects.toMatchObject({ kind: 'network' });
+  });
+
+  // AbortError 仍然要优先判成超时 —— 传输层不该影响这条既有规则
+  it('still reports timeout for an AbortError even if the transport attached a kind', async () => {
+    const fetchImpl = mockFetch(async () => {
+      throw Object.assign(new DOMException('Aborted', 'AbortError'), { kind: 'certUntrusted' });
+    });
+    const http = new HttpClient({ baseUrl: 'https://x.test', fetchImpl });
+    await expect(http.request('GET', '/x')).rejects.toMatchObject({ kind: 'timeout' });
+  });
 });

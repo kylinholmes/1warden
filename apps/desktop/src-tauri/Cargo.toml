@@ -5,6 +5,13 @@ description = "Coffer —— 个人密码管理器"
 edition = "2021"
 rust-version = "1.77"
 
+[lib]
+# Tauri 的约定：lib 名必须是 `<package>_lib`，否则 main.rs 里的
+# `coffer_lib::run()` 会找不到 crate。
+# staticlib/cdylib 是给移动端（iOS/Android）用的 —— 桌面端用 rlib。
+name = "coffer_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
@@ -12,6 +19,30 @@ tauri-build = { version = "2", features = [] }
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+
+# ── 网络 ──
+# 网络请求必须在 Rust 侧发出：WebView 的 origin 是 tauri://localhost，
+# 跨源请求会被 CORS 拦掉（Vaultwarden 只对配置的 DOMAIN 回 ACAO）。
+# 详见 src/http.rs 顶部的说明。
+#
+# `-no-provider`：让 reqwest 不要自己挑加密后端，由我们显式装 ring。
+# 这样能避开 aws-lc-rs —— 它在部分机器上需要 cmake 才能编。
+reqwest = { version = "0.12", default-features = false, features = [
+    "rustls-tls-manual-roots-no-provider",
+    "charset",
+    "http2",
+] }
+rustls = { version = "0.23", default-features = false, features = [
+    "ring",
+    "std",
+    "tls12",
+    "logging",
+] }
+# 用系统信任库：用户把自签证书装进钥匙串后，应用就该直接认
+rustls-native-certs = "0.8"
+sha2 = "0.10"
+# 解析证书的签发者/有效期 —— 只给指纹的话，普通用户没法判断该不该信任
+x509-parser = "0.16"
 
 [features]
 # 生产构建时关掉 devtools —— 密码管理器不该在发布版里留调试入口

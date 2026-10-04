@@ -26,9 +26,10 @@
     "security": {
       "csp": {
         "default-src": "'self'",
+        "script-src": "'self' 'wasm-unsafe-eval'",
         "style-src": "'self' 'unsafe-inline'",
         "img-src": "'self' data:",
-        "connect-src": "'self' https: http://127.0.0.1:* http://localhost:*"
+        "connect-src": "'self'"
       }
     }
   },
@@ -40,7 +41,7 @@
     "shortDescription": "个人密码管理器",
     "longDescription": "Coffer 是一个面向个人用户的密码管理器，后端对接自建的 Vaultwarden。",
     "macOS": {
-      "minimumSystemVersion": "11.0"
+      "minimumSystemVersion": "13.0"
     }
   }
 }

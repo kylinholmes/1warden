@@ -82,23 +82,40 @@ export class VaultSession {
     this.clearTimer();
   }
 
-  completeUnlock(key: SymmetricKey, items: VaultItem[], folders: VaultFolder[]): void {
+  /**
+   * 完成解锁：落下密钥，状态翻到 `unlocked`。
+   *
+   * ⚠️ **刻意不收 items/folders**。数据只有一条来路 —— 同步经 `replaceData` 写进来。
+   *
+   * 早先的签名是 `completeUnlock(key, items, folders)`，看起来可以「先解锁、
+   * 数据待会再来」，于是解锁流程里写成 `completeUnlock(key, [], [])` 绕开
+   * 「replaceData 只在解锁态生效」的限制，再在同步之后调用第二次 —— 第二次
+   * 直接抛「只能在 unlocking 状态调用，当前是 unlocked」。用户看到的是
+   * 登录成功、同步成功，最后一步却弹错。
+   *
+   * 去掉这两个参数之后，那个写法在类型上就不成立了。
+   */
+  completeUnlock(key: SymmetricKey): void {
     if (this._status !== 'unlocking') {
       throw new Error(`completeUnlock 只能在 unlocking 状态调用，当前是 ${this._status}`);
     }
     this._key = key;
-    this._items = items;
-    this._folders = folders;
     this.setStatus('unlocked');
     this.resetTimer();
   }
 
   /**
    * 刷新数据（同步完成时调用）。
-   * ⚠️ 只在解锁态生效 —— 否则一个迟到的同步响应会把数据写回一个已经锁定的会话。
+   *
+   * ⚠️ 只在 `unlocking` 与 `unlocked` 生效 —— 其余状态（`locked` / `loggedOut`）
+   * 必须忽略，否则一个迟到的同步响应会把数据写回一个已经锁定的会话。
+   *
+   * `unlocking` 也要放行，是因为首次解锁的顺序就是
+   * `beginUnlock → 同步写入 → completeUnlock(key)`：数据必须在解锁完成**之前**
+   * 就位，否则解锁完成的瞬间会先渲染出一个空保险库。
    */
   replaceData(items: VaultItem[], folders: VaultFolder[]): void {
-    if (this._status !== 'unlocked') return;
+    if (this._status !== 'unlocked' && this._status !== 'unlocking') return;
     this._items = items;
     this._folders = folders;
   }

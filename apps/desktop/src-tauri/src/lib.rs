@@ -19,6 +19,8 @@
 //!   I1. AX 读取只在用户按下快捷键后发生一次，**绝不在后台**
 //!   I2. 写入之后必须**读回验证** —— 该 API 有文档记载会静默失败
 
+mod http;
+
 use tauri::Manager;
 
 #[tauri::command]
@@ -28,16 +30,33 @@ fn app_version() -> String {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
-        .invoke_handler(tauri::generate_handler![app_version])
+    let builder = tauri::Builder::default()
+        .invoke_handler(tauri::generate_handler![
+            app_version,
+            http::http_request,
+            http::probe_certificate,
+            http::trust_certificate,
+            http::forget_certificate,
+        ])
         .setup(|app| {
-            // 开发期打开 devtools 会方便很多；发布版没有这个入口
+            // 证书指纹固定存在应用数据目录里 —— 它属于「这台机器信任了什么」，
+            // 不属于用户数据，卸载应用时应当随之消失
+            let dir = app.path().app_data_dir()?;
+            let state = http::HttpState::new(dir.join("trusted-certs.json"))
+                .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
+            app.manage(state);
+
+            // 开发期打开 devtools 会方便很多；发布版刻意没有这个入口 ——
+            // 密码管理器不该在正式版里留一个能看到内存中明文的调试器。
             #[cfg(debug_assertions)]
             if let Some(w) = app.get_webview_window("main") {
                 w.open_devtools();
             }
+
             Ok(())
-        })
+        });
+
+    builder
         .run(tauri::generate_context!())
         .expect("启动 Coffer 失败");
 }

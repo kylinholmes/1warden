@@ -11,7 +11,7 @@
  *   bun run seed
  *   bun run test:contract
  */
-import { describe, it, expect, beforeAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import { HttpClient } from './http';
 import { prelogin, getServerConfig } from './prelogin';
 import { loginWithPassword, DEVICE_TYPE } from './auth';
@@ -44,6 +44,43 @@ function uniqueName(tag: string): string {
   return `2.contract|${tag}|${Date.now()}|${Math.floor(Math.random() * 1e6)}`;
 }
 
+/**
+ * 测试数据的标记前缀。**同时也是清扫的依据** —— 见 `sweepLeftovers`。
+ */
+const MARKER = '2.contract|';
+
+/**
+ * 删掉历史遗留的测试数据。
+ *
+ * ⚠️ 这些测试跑在**开发账户**上，而桌面 App 用的正是同一个账户。
+ * 中途失败（断言挂了、Ctrl-C、网络抖动）会把它创建的东西留在库里，
+ * 于是 App 里冒出一堆解不开的条目和文件夹 —— 看起来像解密坏了，
+ * 实际只是测试没扫干净。
+ *
+ * 所以每次开跑前先扫一遍：凡是带标记前缀的，一律删掉。
+ * 用名字前缀而不是记 id：id 记在内存里，进程一死就没了。
+ */
+async function sweepLeftovers(): Promise<number> {
+  let removed = 0;
+
+  for (const f of await listFolders(http).catch(() => [])) {
+    if (typeof f.name === 'string' && f.name.startsWith(MARKER)) {
+      await deleteFolder(http, f.id).catch(() => {});
+      removed++;
+    }
+  }
+
+  const data = await sync(http, '').catch(() => null);
+  for (const c of data?.ciphers ?? []) {
+    if (typeof c.name === 'string' && c.name.startsWith(MARKER)) {
+      await hardDeleteCipher(http, c.id).catch(() => {});
+      removed++;
+    }
+  }
+
+  return removed;
+}
+
 beforeAll(async () => {
   const bare = new HttpClient({ baseUrl: BASE });
   const cfg = await getServerConfig(bare);
@@ -70,6 +107,15 @@ beforeAll(async () => {
   });
   userId = (await getProfile(http)).id;
   expect(userId).toBeTruthy();
+
+  // 先清掉上一次跑挂留下的东西，否则它会一直堆在 App 里
+  const swept = await sweepLeftovers();
+  if (swept > 0) console.log(`  （清扫了 ${swept} 条历史遗留测试数据）`);
+});
+
+// 收尾再扫一次：用例中途失败时，它创建的东西不该留到下一次
+afterAll(async () => {
+  await sweepLeftovers();
 });
 
 describe('契约：真实服务器往返', () => {

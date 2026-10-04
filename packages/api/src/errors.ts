@@ -1,17 +1,40 @@
 export type ApiErrorKind =
-  | 'network' | 'timeout' | 'auth' | 'twoFactorRequired' | 'twoFactorInvalid'
+  | 'network' | 'timeout' | 'certUntrusted'
+  | 'auth' | 'twoFactorRequired' | 'twoFactorInvalid'
   | 'rateLimited' | 'notFound' | 'conflict' | 'server' | 'malformedResponse';
+
+/** 运行期可枚举的类别 —— 用来判断外部（传输层）给的分类能不能直接用 */
+const KNOWN_KINDS: ReadonlySet<string> = new Set<ApiErrorKind>([
+  'network', 'timeout', 'certUntrusted',
+  'auth', 'twoFactorRequired', 'twoFactorInvalid',
+  'rateLimited', 'notFound', 'conflict', 'server', 'malformedResponse',
+]);
+
+/**
+ * 传输层（桌面端是 Rust 侧）可能已经给错误分过类了。它比这一层更清楚
+ * 到底发生了什么，但它也可能给出一个这里不认识的字符串 —— 那种情况
+ * 必须退回去自己分类，否则 `kind` 会漏出一个界面没处理过的值。
+ */
+export function isApiErrorKind(value: unknown): value is ApiErrorKind {
+  return typeof value === 'string' && KNOWN_KINDS.has(value);
+}
 
 export interface ApiErrorInit {
   status?: number;
   body?: unknown;
   cause?: unknown;
+  /**
+   * 仅 `certUntrusted` 会带：被拒证书的 SHA-256 指纹。
+   * 界面要把指纹显示给用户 —— 信任一个证书的决定，不能只凭一句「无法验证」。
+   */
+  fingerprint?: string;
 }
 
 export class ApiError extends Error {
   readonly kind: ApiErrorKind;
   readonly status: number | undefined;
   readonly body: unknown;
+  readonly fingerprint: string | undefined;
 
   constructor(kind: ApiErrorKind, message: string, init: ApiErrorInit = {}) {
     super(message, init.cause === undefined ? undefined : { cause: init.cause });
@@ -19,6 +42,7 @@ export class ApiError extends Error {
     this.kind = kind;
     this.status = init.status;
     this.body = init.body;
+    this.fingerprint = init.fingerprint;
   }
 }
 
