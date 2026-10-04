@@ -2476,3 +2476,166 @@ git commit -m "test(crypto): add cross-implementation interop test against offic
 - [ ] `packages/crypto` 无任何网络调用、无 `fs` 导入
 
 **下一份计划**：计划 2 —— `@coffer/api`（Bitwarden REST 客户端）+ `@coffer/vault`（领域层：同步引擎、会话状态机、搜索、Watchtower）。
+
+---
+
+# 附录：实施记录（执行台账）
+
+> 以下是执行本计划时的原始台账。记录的是**过程决策**（研究修正、被测试抓到的真 bug、
+> 与计划文本的偏差），与计划本身一起保留，供后续计划参考。
+
+Executor: inline (executing-plans)
+
+## Pre-flight scan
+
+**Ruling: 用 git 分支而非 worktree 做隔离** — 仓库只有 1 个提交、无并行工作，
+分支已提供所需的隔离；worktree 会额外付出 node_modules 与 cargo target 路径的代价。
+— cost if wrong: 若后续要并行开发，需要补建 worktree（一次性成本）。
+
+共享接口逐行核对：
+
+| 生产者 → 消费者 | 接口 | 结果 |
+|---|---|---|
+| Task 3 → 4 | `toBase64`, `utf8Encode` | ✓ 一致 |
+| Task 3 → 5 | `fromBase64`, `toBase64` | ✗→✓ 已修（见下 C1） |
+| Task 3 → 9 | `randomBytes` | ✓ 一致 |
+| Task 5 → 6 | `parseEncString`, `serializeEncString`, `EncryptionType`, `DecryptError`, `aesCbcEncrypt`, `aesCbcDecrypt`, `hmacSha256` | ✓ 一致 |
+| Task 5 → 8 | `hmacSha256` | ✓ 一致 |
+| Task 6 → 10 | `deriveMasterKey`, `hashMasterPassword`, `stretchMasterKey`, `encryptString`, `decryptString`, `KDF_TYPE_PBKDF2` | ✓ 一致 |
+| Task 2 → 10 | `VW_URL`, `COFFER_TEST_EMAIL`, `COFFER_TEST_PASSWORD` | ✓ 一致 |
+
+**冲突与裁决（动手前已修入计划）：**
+
+- **C1 — 歧义星号导出（3 处）**：Task 5 `encstring.ts` 转出 `randomBytes`、
+  Task 7 `rsa.ts` 转出 `toBase64`、Task 8 `totp.ts` 转出 `concatBytes`/`utf8Encode`，
+  而 `index.ts` 用 `export *` 聚合 —— 同名符号会被 TS 判为歧义导出。
+  三处转出**均未被任何代码使用**（纯属残留），已全部删除。
+  *cost if wrong: 无（删除的是死代码）。*
+- **C2 — EncString 段数计算错误**：`expectedSegments = shape.iv > 0 ? 3 : …`
+  对 type 0（`iv|data` 两段，无 MAC）会算成 3 段，Task 5 自带的 type-0 测试
+  必然失败。已改为 `(iv?1:0) + 1 + (mac?1:0)`。
+  *cost if wrong: 无（原式在任何含 type-0 的输入上都是错的）。*
+
+**遗留待验证（非阻塞，Task 4/10 定案）：**
+~~Argon2id 的 `KdfMemory` 单位~~ → **已确认**，见 R3。
+
+## 开工前的第二轮修正（基于密码学调研的源码核实）
+
+官方实现源码（`bitwarden/sdk-internal` + `bitwarden-vault`）核实后又修了 5 处，
+全部在动手前改入计划：
+
+- **R1 — Argon2id 的盐是 `SHA-256(邮箱)`，不是邮箱原文。**
+  PBKDF2 用邮箱原文，Argon2id 用哈希后的。搞错的话 PBKDF2 账户全对、
+  Argon2id 账户永远「密码错误」，且无任何线索指向盐。
+  已在 `kdf.ts` 修正，并加了一条**独立复算两条路径**的测试钉死它。
+  *cost if wrong: 全部 Argon2id 用户无法登录。*
+- **R2 — HKDF 测试从自拍快照换成官方 KAT。**
+  用 `sdk-internal` 里 `test_stretch_kdf_key` 的真实向量
+  （masterKey `1f4f68e2…` → encKey `6f1fb22d…` / macKey `dd7fceea…`）。
+  这一条能同时抓住 HMAC 用错、info 串写错、enc/mac 顺序颠倒，
+  以及最阴险的「误用 WebCrypto 的 extract+expand HKDF」。
+  *cost if wrong: 无，只是测试更强。*
+- **R3 — `ARGON2_MEMORY_UNIT_MULTIPLIER = 1024` 由源码确认。**
+  `let memory = memory.get() * 1024; // Convert MiB to KiB`。不再是假设。
+  *cost if wrong: 无。*
+- **R4 — base32 解码器语义反了。**
+  官方实现**静默丢弃**字母表外字符（而非抛错），并丢弃末尾不足 8 位的比特。
+  我的实现和测试都写成了「非法字符抛错」。已改为过滤语义，
+  并加入官方向量 `"ABCD123" → [0, 68, 61]` 与 `"PIUD1IS!EQYA=" == "PIUDISEQYA"`。
+  *cost if wrong: 部分用户的验证码直接算不出来。*
+- **R5 — Steam 只认字面量 `steam://` 前缀。**
+  我原本还会从 `otpauth://totp/Steam:...` 和 `encoder=steam` 推断 Steam，
+  但官方不这样做 —— 会导致同一条目我们算 5 位、官方客户端算 6 位。
+  已改为完全跟随官方。
+  *cost if wrong: 少一个便利特性；换成分歧则更糟。*
+
+## 进度
+
+Task 1: complete (commits f663f78..1faa20a, tests: bun run test → 0 files, expected "No test files found")
+Task 3: complete (commits 1faa20a..f2189f8, tests: bun run test → 12/12 pass, typecheck clean)
+Task 3: Ruling: 补建根 tsconfig.json（files:[] + references:[packages/crypto]）——
+  计划 Task 1 的 "tsc --build --force" 脚本需要根 project references 文件，
+  但计划没建它，导致 typecheck 无法运行。— cost if wrong: 无，标准 composite 布局。
+Task 2: complete (commits 1faa20a..e9ac724, verified: /api/config + /identity/accounts/prelogin 实测通过)
+Task 2: Ruling: 加 WEB_VAULT_ENABLED=false — 我们只用 API，不需要自带网页前端；
+  不关掉 Vaultwarden 会因找不到 web-vault/ 拒绝启动。— cost if wrong: 无。
+Task 2: Ruling: start() 增加「端口被外来进程占用」检测（is_ours）——
+  原脚本只看端口通不通，会把别的 vaultwarden 实例误判成「已在运行」，
+  导致后续所有测试打在错误的服务器上（本次真实踩到）。— cost if wrong: 无。
+Task 2: Ruling: build 脚本优先复用已有 cargo 产物 —
+  避免重复一次 5-15 分钟的 release 编译。— cost if wrong: 理论上可能复用到版本不符的产物，
+  但路径固定且由同一个 pin 的源码产出。
+
+Task 4-9: complete (commits e9ac724..b8b1739, tests: bun run test → 111/111 pass, typecheck clean)
+
+期间被测试抓到的**真实实现 bug**（不是测试写错，是代码错）：
+- **R6 — TOTP 的 SHA-1 分支被错写成 HMAC-SHA256。** hmacWith 里图省事把
+  alg==='SHA-1' 短路成了 hmacSha256。SHA-1 是 TOTP 的默认算法，
+  意味着绝大多数验证码会算错；而只测 SHA-256 的话完全发现不了。
+  由 RFC 6238 官方向量抓到。— cost if wrong: 所有 TOTP 验证码错误。
+- **R7 — randomIndex 只支持 bound ≤ 256。** 单字节拒绝采样，
+  而 Fisher-Yates 洗牌需要 bound = 密码长度，generatePassword({length:300}) 直接抛错。
+  改为按 bound 取足够字节。— cost if wrong: 长密码生成崩溃。
+- **R8 — 模偏差测试的判别力不足。** 原本用「最大偏差 < 15%」，
+  但 26 字符池用 % 取模的真实偏差只有 8.6%，测不出来；收紧又会随机翻红。
+  改用卡方检验（均匀 ≈25，有偏 ≈348，阈值 60），两边都离得远。
+  — cost if wrong: 测试形同虚设，模偏差悄悄上线。
+
+计划文本与实际 API 的偏差（已实测修正）：
+- **R9 — prelogin 字段大小写。** 实测 Vaultwarden 1.37.3 返回 **camelCase**
+  （kdf/kdfIterations），而 token 端点返回 PascalCase（Key/PrivateKey）。
+  同一个服务端两种风格。互操作测试已改为两种都吃。— cost if wrong: KDF 参数读不到 → 全盘失败。
+- **R10 — hash-wasm 的 pbkdf2 API。** hashFunction 要 createSHA256() 实例而非
+  'sha256' 字符串；且默认 outputType 是 'hex'（返回 64 字符），必须显式 'binary'。
+  — cost if wrong: 派生出的密钥长度翻倍，全部认证失败。
+- **R11 — parseOtpauthUri 保留展示用大小写。** 官方实现把整个 URI 小写再解析，
+  副作用是 issuer 从 "GitHub" 变成 "github"（UI 受损）。改为只对参数名大小写不敏感。
+  — cost if wrong: 无，纯 UI 改善。
+
+测试自身的笔误（非实现问题）：HMAC 断言拿 base64 比 hex；totp.test.ts 少一个引号。
+
+Task 10: complete (commits 68f6482, tests: bun run test:interop → 全部 ✓, exit 0)
+
+## 计划 1 收尾验收（全部通过）
+
+- bun run test          → 111/111 pass
+- bun run typecheck     → 无错误
+- bun run test:interop  → ✅ 双向兼容（PBKDF2 与 Argon2id 两种账户均验证）
+- dev-server reset/start → 可从零复现干净实例
+- packages/crypto 无 console.log、无网络调用、无 fs 导入
+
+## Task 10 期间的裁决
+
+- **R12 — 本地服务改走 HTTPS + 自签证书。** 官方 CLI 2026.x 拒绝明文 HTTP
+  （InsecureUrlNotAllowedError），且没有开关。生产环境本就是 HTTPS，顺带更贴近真实。
+  — cost if wrong: 无；仅本地开发，证书在 .dev/ 下（已 gitignore）。
+- **R13 — 固定 @bitwarden/cli@2025.2.0。** 2026.x 登录后会做「用户密钥 ID 回填」迁移，
+  调用 Vaultwarden 未实现的端点而失败（KeyIdBackfillError，404）。
+  这是**新版官方 CLI 与 Vaultwarden 的兼容性缺口**，不是我们的 bug ——
+  真实用户也会遇到，值得写进产品文档。
+  ⚠️ 但注意：登录**本身**是成功的（错误发生在登录后），所以密码学验证不受影响。
+  — cost if wrong: 参照实现停留在旧版本；协议本身未变（RFC 与密钥层级均一致）。
+- **R14 — 用我们自己的 crypto 注册账户，而非 CLI。** CLI 2026.9.1 起**没有 register 命令**。
+  改用自己注册反而更好：注册本身就跑通了完整密钥层级，随后官方 CLI 能登录即证明正确。
+  — cost if wrong: 无。
+- **R15 — `bw create item` 必须把 JSON 以 base64 作为参数传入。** 从 stdin 喂原始 JSON
+  会报 "Error parsing the encoded request data."。— cost if wrong: 方向 B 无法执行。
+- **R16 — bw 调用必须统一走辅助函数并带 `--session`。** 手写 execFileSync 漏掉 session 时，
+  bw 会转为**交互式索要主密码**，非 TTY 下刷屏并抛 readline 错误，
+  报错信息完全指向不到真正原因（本次为此浪费了两轮）。— cost if wrong: 极难排查的假失败。
+
+## 最终审查（独立审查者，全新上下文）
+
+结论：**无 Critical**。审查者独立复算了全部密码学向量（Python）、
+亲自跑通了双向互操作、并核对了官方 CLI 自带的实现代码。
+
+4 个 Important 已全部修复（每个先写失败测试）：
+- I1 TOTP digits/period 钳制与官方不一致（真 bug）→ 改为只在 >0 时采纳
+- I2 环境变量未接入文档流程 → 移入脚本自身，全新 shell 可跑通
+- I3 bw 解析依赖调用方式，版本 pin 只是偶然 → 显式解析 + 版本断言
+- I4 畸形输入漏出 TypeError/DOMException/URIError → 统一为 DecryptError
+
+Minor 中一并修掉：dev-server reset 未清 CLI 状态（会让测试以"像密码学错误"的方式失败）。
+
+未修（列入 deferred）：type 0 遗留账户、RSA 类型 5/6 的 MAC 语义、
+明文扫描测试推迟到有持久化的计划、密码强度评分过于乐观（应在 vault 层用词典式评分）。
