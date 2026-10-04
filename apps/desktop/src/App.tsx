@@ -4,6 +4,8 @@ import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
 import { screenFor } from './screens/screen-for';
+import { IconAlert } from './components/icons';
+import { ToastProvider } from './components/Toast';
 import { useQuickBridge } from './use-quick-bridge';
 import { listen } from '@tauri-apps/api/event';
 import { tauriFetch } from './transport';
@@ -42,21 +44,28 @@ export function App() {
   }, [handleLock]);
 
   const session = client.getSession();
+  const screen = screenFor(session.status);
 
-  switch (screenFor(session.status)) {
-    case 'vault':
-      return <VaultView client={client} onLock={handleLock} />;
-    case 'unlock':
-      return (
+  /*
+    提示条的宿主包在**所有屏幕之外** —— 它是窗口级的东西，不属于任何一屏。
+    保险库里的保存确认、解锁屏的报错、连接屏的报错，落在同一个右下角，
+    换个屏幕不会换一套反馈。
+  */
+  return (
+    <ToastProvider>
+      {screen === 'vault' ? (
+        <VaultView client={client} onLock={handleLock} />
+      ) : screen === 'unlock' ? (
         <Unlock
           client={client}
           onUnlocked={forceRender}
           onDisconnect={() => { client.logout(); forceRender(); }}
         />
-      );
-    default:
-      return <Connect client={client} onConnected={forceRender} />;
-  }
+      ) : (
+        <Connect client={client} onConnected={forceRender} />
+      )}
+    </ToastProvider>
+  );
 }
 
 /**
@@ -87,23 +96,26 @@ export class ErrorBoundary extends Component<{ children: React.ReactNode }, Boun
     if (!error) return this.props.children;
 
     return (
-      <div className="flex h-full items-center justify-center overflow-y-auto p-8">
-        <div className="w-full max-w-md">
-          <h1 className="mb-1 text-[var(--text-lg)] font-semibold text-[var(--risk)]">界面出错了</h1>
-          <p className="mb-5 text-[var(--text-sm)] leading-relaxed text-[var(--ink-secondary)]">
+      <div className="flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8">
+        <div className="screen-in w-full max-w-[420px]">
+          <span className="mb-4 grid h-10 w-10 place-items-center rounded-full bg-[var(--surface-well)] text-[var(--risk)]">
+            <IconAlert size={20} />
+          </span>
+          <h1 className="text-[var(--text-lg)] font-semibold">界面出错了</h1>
+          <p className="mt-1.5 text-[var(--text-sm)] leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
             这是 Coffer 的缺陷，不是你的操作问题。你的保险库数据没有受影响 ——
             它还在服务器上，重新打开即可。
           </p>
 
           {/* 技术细节给出来是为了能定位问题；不展示任何密钥或条目内容 */}
-          <pre className="secret mb-5 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-[var(--radius-md)] bg-[var(--surface-sunken)] p-3 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+          <pre className="secret my-5 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-well)] p-3 text-[var(--text-xs)] text-[var(--ink-secondary)]">
             {error.message || String(error)}
           </pre>
 
           <button
             type="button"
             onClick={() => window.location.reload()}
-            className="w-full rounded-[var(--radius-md)] bg-[var(--accent)] px-4 py-2 font-medium text-[var(--accent-ink)] transition-opacity duration-[var(--dur-fast)] hover:bg-[var(--accent-hover)]"
+            className="btn btn-primary w-full py-2.5"
           >
             重新打开
           </button>

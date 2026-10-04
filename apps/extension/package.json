@@ -6,6 +6,7 @@
   "scripts": {
     "build": "vite build && vite build -c vite.content.config.ts && COFFER_ENTRY=webauthn vite build -c vite.content.config.ts",
     "dev": "vite build --watch & vite build --watch -c vite.content.config.ts & COFFER_ENTRY=webauthn vite build --watch -c vite.content.config.ts",
+    "preview:build": "vite build -c vite.preview.config.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

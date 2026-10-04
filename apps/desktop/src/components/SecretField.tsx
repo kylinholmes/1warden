@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
+import { IconCheck, IconCopy, IconEye } from './icons';
 
 interface Props {
   label: string;
@@ -12,6 +13,15 @@ interface Props {
  *
  * ⚠️ **永不默认明文展示** —— 这是 spec 里明确的安全不变量。
  * 遮蔽的字段要用户主动点「显示」才展开，且展开状态在失焦或切换条目时收回。
+ *
+ * ── 排版
+ *
+ * 上一版是「标签靠左、值靠右」两端对齐。对短值没问题，
+ * 但网址一长就变成右边一坨被截断的省略号，而左边空着一大片。
+ *
+ * 改成两列网格：标签占固定宽度的一列，值从同一条竖线开始、向左排满。
+ * 于是所有值**左边缘对齐**，扫一眼就能上下比较；长网址也能从头读起。
+ * 这处偏离 1Password 是有意的 —— 它也是两端对齐，代价同样是长网址难读。
  */
 export function SecretField({ label, value, masked = false }: Props) {
   const [revealed, setRevealed] = useState(false);
@@ -25,7 +35,7 @@ export function SecretField({ label, value, masked = false }: Props) {
     try {
       await navigator.clipboard.writeText(value);
       setCopied(true);
-      if (clearTimer.current) clearTimer.current = null;
+      if (clearTimer.current) clearTimeout(clearTimer.current);
       clearTimer.current = setTimeout(async () => {
         setCopied(false);
         // ⚠️ 只有剪贴板里还是**我们写进去的那个值**时才清空。
@@ -42,42 +52,49 @@ export function SecretField({ label, value, masked = false }: Props) {
     }
   }, [value]);
 
-  const shown = masked && !revealed ? '•'.repeat(Math.min(value.length, 24)) : value;
+  const hidden = masked && !revealed;
+  const shown = hidden ? '•'.repeat(Math.min(value.length, 20)) : value;
 
   return (
-    <div className="group flex items-center justify-between gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-0">
-      <span className="shrink-0 text-[var(--text-sm)] text-[var(--ink-secondary)]">{label}</span>
+    <div className="group flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-b-0">
+      <span className="w-[76px] shrink-0 truncate text-[var(--text-sm)] text-[var(--ink-tertiary)]" title={label}>
+        {label}
+      </span>
 
-      <span className="flex min-w-0 items-center gap-1">
-        <span
-          className={`secret truncate text-right text-[var(--text-md)] ${masked && !revealed ? 'tracking-widest' : ''}`}
-          title={masked && !revealed ? undefined : value}
-        >
-          {shown}
-        </span>
+      <span
+        className={`secret min-w-0 flex-1 truncate text-[var(--text-md)] ${hidden ? 'tracking-[0.2em] text-[var(--ink-secondary)]' : ''}`}
+        title={hidden ? undefined : value}
+      >
+        {shown}
+      </span>
 
+      {/*
+        ⚠️ 按钮**始终可见**，只是画得很轻（tertiary 灰）。
+        上一版是悬停才出现（opacity-0 → group-hover），看着很干净，
+        但对普通用户是实打实的发现问题：界面上一眼看不出「这里能复制」，
+        而复制恰恰是密码管理器里最高频的动作。
+        保持低调的办法是不给它颜色和边框，而不是把它藏起来。
+      */}
+      <span className="flex shrink-0 items-center gap-0.5">
         {masked && (
           <button
             onClick={() => setRevealed((r) => !r)}
             aria-label={revealed ? '隐藏' : '显示'}
             title={revealed ? '隐藏' : '显示'}
-            className="shrink-0 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[var(--text-xs)] text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)]"
+            className="rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
           >
-            {revealed ? '隐藏' : '显示'}
+            <IconEye size={14} off={revealed} />
           </button>
         )}
-
         <button
           onClick={copy}
           aria-label="复制"
           title="复制（30 秒后自动清空剪贴板）"
-          className={`shrink-0 rounded-[var(--radius-sm)] px-1.5 py-0.5 text-[var(--text-xs)] transition-colors duration-[var(--dur-fast)] ${
-            copied
-              ? 'text-[var(--safe)]'
-              : 'text-[var(--ink-tertiary)] opacity-0 group-hover:opacity-100 focus:opacity-100 hover:bg-[var(--surface-hover)]'
+          className={`rounded-[var(--radius-sm)] p-1.5 transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
+            copied ? 'text-[var(--safe)]' : 'text-[var(--ink-tertiary)] hover:text-[var(--ink-primary)]'
           }`}
         >
-          {copied ? '已复制 ✓' : '复制'}
+          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
         </button>
       </span>
     </div>
