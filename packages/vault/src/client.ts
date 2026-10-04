@@ -502,11 +502,19 @@ export class VaultClient {
             username: src.login.username,
             password: src.login.password,
             totp: src.login.totp,
-            uris: src.login.uri === null ? [] : [{ uri: src.login.uri, match: null }],
+            // 有完整网址列表时以它为准（Bitwarden JSON / 1Password 导出能挂多个，
+            // 且各带自己的匹配方式）；只有一列的 CSV 才退回 `uri`
+            uris: src.login.uris
+              ?? (src.login.uri === null ? [] : [{ uri: src.login.uri, match: null }]),
             passwordRevisionDate: null,
-            // CSV 里没有 passkey 这一列 —— 1Password 自己的导出也是静默丢弃的
+            // 导出的文件里没有 passkey —— 1Password 自己的导出也是静默丢弃的
             fido2Credentials: [],
           },
+          // ⚠️ 卡片与身份必须一起搬。CSV 路径上它们是 null，
+          // 但 Bitwarden 的 JSON 与 1Password 的导出里是完整存在的 ——
+          // 丢掉的话用户会发现所有的卡都不见了，而导入报告说「全部成功」
+          card: src.card ?? null,
+          identity: src.identity ?? null,
           customFields: src.customFields.map((f) => ({
             name: f.name, value: f.value, type: f.type, linkedId: null,
           })),

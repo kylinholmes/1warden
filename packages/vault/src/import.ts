@@ -30,13 +30,71 @@ export interface ImportedField {
   type: 0 | 1;
 }
 
+/** 一条网址及其匹配方式。`match` 的含义见 model.ts 的 `LoginUri` */
+export interface ImportedUri {
+  uri: string;
+  match: number | null;
+}
+
+export interface ImportedLogin {
+  username: string | null;
+  password: string | null;
+  totp: string | null;
+  /** 主网址。CSV 这类只有一列的格式用它 */
+  uri: string | null;
+  /**
+   * 完整网址列表 —— Bitwarden 的 JSON 与 1Password 的导出都能挂多个，
+   * 而且每个各带自己的匹配方式。有它时以它为准。
+   */
+  uris?: ImportedUri[];
+}
+
+export interface ImportedCard {
+  cardholderName: string | null;
+  brand: string | null;
+  number: string | null;
+  expMonth: string | null;
+  expYear: string | null;
+  code: string | null;
+}
+
+export interface ImportedIdentity {
+  title: string | null;
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  address1: string | null;
+  address2: string | null;
+  address3: string | null;
+  city: string | null;
+  state: string | null;
+  postalCode: string | null;
+  country: string | null;
+  company: string | null;
+  email: string | null;
+  phone: string | null;
+  ssn: string | null;
+  username: string | null;
+  passportNumber: string | null;
+  licenseNumber: string | null;
+}
+
 export interface ImportedItem {
   name: string;
   type: ImportedType;
   folderName: string | null;
   favorite: boolean;
   notes: string | null;
-  login: { username: string | null; password: string | null; totp: string | null; uri: string | null } | null;
+  login: ImportedLogin | null;
+  /**
+   * 卡片与身份。
+   *
+   * ⚠️ CSV 只有登录那几列，所以这两项在 CSV 路径上一直是空的 ——
+   * 但 **Bitwarden 的 JSON 和 1Password 的导出里它们是完整存在的**。
+   * 丢掉的话，用户导入之后会发现所有的卡都不见了，而导入报告说「全部成功」。
+   */
+  card?: ImportedCard | null;
+  identity?: ImportedIdentity | null;
   customFields: ImportedField[];
   /** 在源文件里的行号（表头是第 1 行）—— 报告问题时要能指出来 */
   rowNumber: number;
