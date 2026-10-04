@@ -22,8 +22,8 @@ describe('unwrapAttachmentKey', () => {
   it('unwraps a 64-byte key from its EncString', async () => {
     const attKey = makeAttachmentKey();
     // ⚠️ 按**字节**包装，和用户密钥一样 —— 不是把它转成 base64 再当字符串加密。
-    // 后者解出来是那串 base64 的 UTF-8 字节（长度也不对），
-    // 而这正是「用错夹具会让测试通过、真实数据却解不开」的典型
+    // 后者解出来是那串 base64 的 UTF-8 文本（88 字节 ≠ 64），
+    // 下面的长度检查会把它拦下来（这条测试最早就是那么红的）
     const wrapped = await encryptBytes(new Uint8Array([...attKey.encKey, ...attKey.macKey]), key);
     const got = await unwrapAttachmentKey(wrapped, key);
     expect(got).not.toBeNull();

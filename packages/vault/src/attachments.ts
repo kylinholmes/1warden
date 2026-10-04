@@ -14,8 +14,15 @@
  * （32 enc + 32 mac，布局与用户密钥一致）。它被用户密钥（或条目密钥）
  * **包装**后存在 `attachments[].key` 里。
  *
- * 用错密钥的表现是：文件确实下载到了，解密出来却是一堆乱码 ——
- * 用户说「附件坏了」，而我们多半会去查网络。
+ * ⚠️ 这里**没有**「解出来是乱码」那种失败模式：EncString 是
+ * AES-CBC + HMAC，密钥不对时 MAC 校验不过、**直接抛错**。
+ * 乱码才是更危险的情况（用户会把一个坏文件存下来并以为它是好的），
+ * 我们不会走到那一步。
+ *
+ * 真正会静默出错的是**包装方式**：那把 64 字节的密钥必须按**字节**加密
+ * （`encryptBytes`），不是转成 base64 再当字符串加密 —— 后者解出来是
+ * 那串 base64 的 UTF-8 文本（88 字节），长度就不对。
+ * 好在下面的长度检查会拦住它。
  */
 import { decryptBytes, decryptString, DecryptError } from '@coffer/crypto';
 import type { SymmetricKey } from '@coffer/crypto';
