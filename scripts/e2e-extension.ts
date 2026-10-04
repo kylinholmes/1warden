@@ -420,6 +420,24 @@ async function main(): Promise<void> {
     }, 10_000).catch(() => '');
     check('content script 注入并识别出登录表单（角标点亮）', badge !== '', `badge="${badge}"`);
 
+    /**
+     * ⚠️ 开跑前先清扫上一次的残留。
+     *
+     * 失败中断的运行会在保险库里留下测试条目（带 passkey 的那些尤其麻烦）——
+     * passkey 的「不限 allowCredentials」那条断言取的是**第一条候选**，
+     * 残留条目会先被取到，于是断言失败，而且失败信息指向完全错误的方向
+     * （显示成「凭据 ID 对不上」，看起来像序列化坏了）。
+     *
+     * 这个项目在契约测试上踩过同一个坑，那里的修法也是开跑前清扫。
+     */
+    {
+      const stale = await ext.eval<{ items: { id: string; name: string }[] }>(
+        `chrome.runtime.sendMessage({ type: 'coffer:matches', url: ${JSON.stringify(PAGE_URL)} })`,
+      );
+      const swept = await cleanupItems(stale.items.map((i) => i.id));
+      if (swept > 0) console.log(`  （清掉了上一次残留的 ${swept} 条测试条目）`);
+    }
+
     // ── 3. 保存捕获 ──
     console.log('\n3. 提交表单 → 捕获 → 保存');
 
@@ -719,15 +737,41 @@ async function main(): Promise<void> {
       const b64u = (buf) => { const b = new Uint8Array(buf); let s = '';
         for (const x of b) s += String.fromCharCode(x);
         return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); };
+      // ⚠️ 必须补 padding。43 个字符（32 字节）不是 4 的倍数，
+      // 裸 atob 在 Chrome 上会解出**错误的字节**（不报错，只是值不对），
+      // 于是匹配不上、报「没有可用的 passkey」—— 看起来像产品的问题。
+      // node 的 atob 宽容，所以这个差异只在浏览器里才看得见。
+      const idOf = (b64) => { const p = b64.replace(/-/g,'+').replace(/_/g,'/');
+        const bin = atob(p.padEnd(Math.ceil(p.length / 4) * 4, '='));
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out; };
       const cred = await navigator.credentials.get({ publicKey: {
         challenge: crypto.getRandomValues(new Uint8Array(32)),
         rpId: '127.0.0.1',
-        allowCredentials: [{ type: 'public-key', id: Uint8Array.from(atob(${JSON.stringify(pkCreated.credentialId)}.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0)) }],
+        allowCredentials: [{ type: 'public-key', id: idOf(${JSON.stringify(pkCreated.credentialId)}) }],
       }});
       return { authenticatorData: b64u(cred.response.authenticatorData) };
     })()`);
     const counter2 = new DataView(b64uToBuf(secondAssertion.authenticatorData).buffer).getUint32(33, false);
     check('计数在递增', counter2 > counter1 && counter1 > 0, `${counter1} → ${counter2}`);
+
+    // 先验证「页面里的 idOf 往返」本身是对的 —— 否则失败时分不清是
+    // 我们的序列化错了，还是测试脚本自己的 base64 助手写错了
+    const roundTrip = await page.eval<string>(`(async () => {
+      const b64u = (buf) => { const b = new Uint8Array(buf); let s = '';
+        for (const x of b) s += String.fromCharCode(x);
+        return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); };
+      const idOf = (b64) => { const p = b64.replace(/-/g,'+').replace(/_/g,'/');
+        const bin = atob(p.padEnd(Math.ceil(p.length / 4) * 4, '='));
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out; };
+      return b64u(idOf(${JSON.stringify(pkCreated.credentialId)}).buffer);
+    })()`);
+    check('测试脚本自己的 base64 往返是对的（否则下面的失败会指向错的地方）',
+      roundTrip === pkCreated.credentialId,
+      `往返得到 ${roundTrip}，原值 ${pkCreated.credentialId}`);
 
     // 页面指定凭据 ID 时也要找得到 —— 上面那次是不限定的
     const narrowed = await page.eval<string>(`(async () => {
