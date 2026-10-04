@@ -305,6 +305,16 @@ async function claim(key: string): Promise<boolean> {
   map[key] = Date.now();
   await chrome.storage.session.set({ [WA_CLAIM_KEY]: map });
 
+  // ⚠️ 写完要**等一小段随机时间再读回来**。
+  //
+  // 两个实例可能几乎同时读（都看到没被认领）→ 都写 → 都回读。
+  // 如果回读发生得太快，可能在自己写完之后、对方写之前完成，于是两边都以为
+  // 自己赢了 —— 互斥形同虚设。加抖动把「写」和「回读」错开，让后来者一定被看见。
+  //
+  // 这是最后一道保险：实测过没有它时好时坏（同一份代码连着跑两次，
+  // 一次全绿一次红），而这种「偶尔丢凭据」的 bug 正是最难被用户说清楚的。
+  await new Promise((r) => setTimeout(r, 30 + Math.floor(Math.random() * 70)));
+
   const back = await chrome.storage.session.get(WA_CLAIM_KEY);
   const after = (back[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
   // 不是自己写的 → 有人抢先。两个实例同时写时后写的赢，先写的读到不是自己就让位
@@ -553,6 +563,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
        * 抢不到的那个**等**对方的结果，而不是自己也跑一遍。
        */
       if (!(await claim(key))) {
+        // 抢不到就等对方 —— 不自己也跑一遍
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 250));
           const r = await readDone(key);

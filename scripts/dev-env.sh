@@ -37,12 +37,20 @@ export VW_ENV=(
   # 不关掉的话 Vaultwarden 会因为找不到 web-vault/ 目录而拒绝启动。
   "WEB_VAULT_ENABLED=false"
 
-  # 放宽登录限流。默认值是 10 次/60 秒，而测试套件每跑一轮要登录好几次
-  # （契约测试、端到端、互操作各自都要登一次，端到端还要为清理再登一次）——
-  # 连着跑几轮就会撞上 "Too many login requests"，把「测试跑得太密」
-  # 伪装成功能故障。**仅限本地开发**。
-  "LOGIN_RATELIMIT_MAX_BURST=1000"
+  # 放宽登录限流。测试套件每跑一轮要登录好几次（契约测试、端到端、互操作各自
+  # 都要登一次），连着跑几轮就会撞上 "Too many requests"，
+  # 把「测试跑得太密」伪装成功能故障。**仅限本地开发**。
+  #
+  # ⚠️ **只有 `*_SECONDS` 是可配的，突发次数在这个版本里是写死的。**
+  # 对着 vendor/vaultwarden 这个二进制 `strings` 过，配置项只有这三个：
+  #     admin_ratelimit_seconds
+  #     login_ratelimit_seconds
+  #     unauthenticated_ratelimit_seconds
+  # 没有任何 `*_max_burst`。早先这里写过
+  # `LOGIN_RATELIMIT_MAX_BURST=1000` 和 `RATELIMIT_MAX_BURST=1000` ——
+  # **它们被静默忽略**，而「配置里明明放宽了」这个假象会让人一直往别处找原因
+  # （我就在上面绕了好几轮）。窗口调到 1 秒是这里唯一真正有效的旋钮。
   "LOGIN_RATELIMIT_SECONDS=1"
-  "RATELIMIT_MAX_BURST=1000"
   "RATELIMIT_SECONDS=1"
+  "UNAUTHENTICATED_RATELIMIT_SECONDS=1"
 )
