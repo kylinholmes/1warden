@@ -4,6 +4,7 @@ import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
 import { screenFor } from './screens/screen-for';
+import { useQuickBridge } from './use-quick-bridge';
 import { tauriFetch } from './transport';
 
 export function App() {
@@ -19,6 +20,10 @@ export function App() {
     onLock: () => forceRender(),
     onStatus: () => forceRender(),
   }), []);
+
+  // 快速面板是另一个窗口，它向这里要数据、也由这里执行动作 ——
+  // 主窗口是唯一持有会话的地方（见 quick-bridge.ts）
+  useQuickBridge(client);
 
   const handleLock = useCallback(() => {
     client.lock();

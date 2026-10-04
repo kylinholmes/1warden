@@ -10,6 +10,7 @@ import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SecurityReportView } from '../src/screens/SecurityReport';
 import { VaultView } from '../src/screens/VaultView';
+import { QuickAccess } from '../src/screens/QuickAccess';
 import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
 import './preview.css';
 
@@ -70,7 +71,24 @@ const which = new URLSearchParams(location.search).get('screen') ?? 'messy';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {which === 'vault' ? (
+    {which === 'quick' ? (
+      <div style={{ width: 620, height: 400 }}>
+        <QuickAccess
+          items={[
+            { id: '1', name: 'GitHub', username: 'me@example.com', hasPassword: true, hasTotp: true },
+            { id: '2', name: '公司 VPN', username: 'zhang', hasPassword: true, hasTotp: false },
+            { id: '3', name: '一个名字特别特别长的服务用来测试截断', username: 'x', hasPassword: true, hasTotp: false },
+            { id: '4', name: '云服务商', username: null, hasPassword: true, hasTotp: false },
+          ]}
+          locked={false}
+          busy={false}
+          notice={null}
+          onQueryChange={() => {}}
+          onPick={() => {}}
+          onClose={() => {}}
+        />
+      </div>
+    ) : which === 'vault' ? (
       <VaultView client={fakeClient} onLock={() => {}} />
     ) : (
       <SecurityReportView items={which === 'clean' ? CLEAN : MESSY} />

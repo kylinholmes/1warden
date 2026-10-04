@@ -21,6 +21,20 @@
         "center": true,
         "titleBarStyle": "Transparent",
         "hiddenTitle": true
+      },
+      {
+        "label": "quick",
+        "title": "Coffer",
+        "url": "quick.html",
+        "width": 620,
+        "height": 400,
+        "resizable": false,
+        "decorations": false,
+        "alwaysOnTop": true,
+        "skipTaskbar": true,
+        "center": true,
+        "visible": false,
+        "focus": true
       }
     ],
     "security": {
@@ -35,8 +49,13 @@
   },
   "bundle": {
     "active": true,
-    "targets": ["app", "dmg"],
-    "icon": ["icons/icon.png"],
+    "targets": [
+      "app",
+      "dmg"
+    ],
+    "icon": [
+      "icons/icon.png"
+    ],
     "category": "Utility",
     "shortDescription": "个人密码管理器",
     "longDescription": "Coffer 是一个面向个人用户的密码管理器，后端对接自建的 Vaultwarden。",

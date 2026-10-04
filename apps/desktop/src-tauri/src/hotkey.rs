@@ -113,11 +113,14 @@ extern "C" fn on_hotkey(
     }
 
     // 只做「显示并聚焦窗口」——回调在主线程上，重活会卡住整个界面
+    //
+    // 调出来的是**快速面板**而不是主窗口：用户按快捷键时人还在别的应用里，
+    // 弹出一个 1080×720 的完整窗口会把他的上下文整个顶掉。面板只占中间一小块，
+    // 搜到就走。
     if let Ok(app) = APP.lock() {
         if let Some(app) = app.as_ref() {
-            if let Some(w) = app.get_webview_window("main") {
+            if let Some(w) = app.get_webview_window("quick") {
                 let _ = w.show();
-                let _ = w.unminimize();
                 let _ = w.set_focus();
             }
         }

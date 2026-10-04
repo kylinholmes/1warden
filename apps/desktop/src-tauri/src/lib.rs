@@ -31,6 +31,43 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/// 最小化主窗口。
+///
+/// ⚠️ 走 Rust 命令而不是前端的 `getCurrentWindow().minimize()`：
+/// Tauri v2 的 `core:window:default` 里**只有只读权限**（一堆 getter），
+/// `minimize` 不在其中。前端直接调会因为没有 ACL 授权而失败，
+/// 而我们的调用点又用 `.catch(() => {})` 兜着 —— 于是它**一直静默失败**：
+/// 自动输入倒计时结束时主窗口根本没让出焦点，按键有可能敲进我们自己的界面。
+///
+/// 自定义命令不受 ACL 约束，所以这条路既安全又不用放宽权限。
+#[tauri::command]
+fn main_minimize(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.minimize();
+    }
+}
+
+/// 收起快速面板。Esc、选中条目、失焦都走它。
+#[tauri::command]
+fn quick_hide(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("quick") {
+        let _ = w.hide();
+    }
+}
+
+/// 从快速面板切到主窗口 —— 面板一次只够做一件事，需要完整界面时把主窗口叫出来。
+#[tauri::command]
+fn quick_open_main(app: tauri::AppHandle) {
+    if let Some(w) = app.get_webview_window("quick") {
+        let _ = w.hide();
+    }
+    if let Some(w) = app.get_webview_window("main") {
+        let _ = w.show();
+        let _ = w.unminimize();
+        let _ = w.set_focus();
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
@@ -44,6 +81,9 @@ pub fn run() {
             autotype::autotype_set_enabled,
             autotype::autotype_open_settings,
             autotype::autotype_type,
+            main_minimize,
+            quick_hide,
+            quick_open_main,
         ])
         .setup(|app| {
             // 证书指纹固定存在应用数据目录里 —— 它属于「这台机器信任了什么」，

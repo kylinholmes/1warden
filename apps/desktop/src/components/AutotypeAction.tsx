@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { getCurrentWindow } from '@tauri-apps/api/window';
+import { invoke } from '@tauri-apps/api/core';
 import {
   autotypeStatus, autotypeType, autotypeOpenSettings,
   AUTOTYPE_SUCCESS_NOTE, type PermissionState,
@@ -64,7 +64,11 @@ export function AutotypeAction({ username, password }: {
     try {
       // 先最小化自己。用户此刻应该已经切到目标窗口了，但万一没有，
       // 这一步能把焦点还给上一个应用 —— 否则按键会敲进我们自己的界面。
-      await getCurrentWindow().minimize().catch(() => { /* 有些平台不支持 */ });
+      //
+      // 走 Rust 命令而不是前端的 window API：后者需要 ACL 授权，
+      // 而 Tauri 的默认窗口权限里没有 minimize（见 lib.rs 的说明）。
+      // 之前这里用的是前端 API + `.catch(() => {})`，也就是说**它从来没生效过**。
+      await invoke('main_minimize');
       // 给窗口管理器一点时间完成焦点切换
       await new Promise((r) => setTimeout(r, 350));
 
