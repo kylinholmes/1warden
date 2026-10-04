@@ -23,6 +23,13 @@ export interface RequestOptions {
 
 const DEFAULT_TIMEOUT_MS = 30_000;
 
+/**
+ * 客户端身份。服务端会拿版本号做**功能过滤**（版本过旧会被藏掉 SSH key
+ * 这类新条目），所以它必须是个能改的值，不能散落在各处写死。
+ */
+export const CLIENT_NAME = 'desktop';
+export const CLIENT_VERSION = '2026.10.0';
+
 export class HttpClient {
   readonly baseUrl: string;
   private readonly fetchImpl: typeof fetch;
@@ -54,6 +61,14 @@ export class HttpClient {
   async requestRaw(method: string, path: string, opts: RequestOptions = {}): Promise<Response> {
     const headers: Record<string, string> = {
       Accept: 'application/json',
+      // ⚠️ 这两个头**每个请求**都要带，包括登录之前的 prelogin / login。
+      // 这个 Vaultwarden 版本对缺 Bitwarden-Client-Version 的请求直接回 401，
+      // 而那些 401 **计入限流额度** —— 连续跑几轮测试就会撞上 "Too many requests"，
+      // 把「我们的请求缺个头」伪装成「服务器在限流」。
+      // 放在这里而不是放在已登录客户端上：登录路径用的是裸客户端，那边没有。
+      'Bitwarden-Client-Name': CLIENT_NAME,
+      'Bitwarden-Client-Version': CLIENT_VERSION,
+      // headerFn 在后，调用方仍然能覆盖
       ...this.headerFn?.(),
       ...opts.headers,
     };

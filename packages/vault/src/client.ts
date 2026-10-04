@@ -223,10 +223,9 @@ export class VaultClient {
   private authHeaders(): () => Record<string, string> {
     return () => ({
       Authorization: `Bearer ${this.token?.accessToken ?? ''}`,
+      // 名称与版本号由 @coffer/api 的 HttpClient 默认带上（那里是唯一的来源），
+      // 这里只补客户端特有的设备类型
       'Device-Type': String(this.device.type),
-      'Bitwarden-Client-Name': 'desktop',
-      // 发一个较新的版本号：服务端在版本过旧时会过滤掉 SSH key 类条目
-      'Bitwarden-Client-Version': '2026.10.0',
     });
   }
 

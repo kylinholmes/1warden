@@ -30,6 +30,37 @@ describe('HttpClient', () => {
     expect(callOf(fetchImpl).url).toBe('https://x.test/api/config');
   });
 
+  /**
+   * ⚠️ **每个请求都要带**，包括登录之前的 prelogin / login。
+   *
+   * 这个 Vaultwarden 版本对缺 `Bitwarden-Client-Version` 的请求直接回 401，
+   * 而那些 401 **计入限流额度** —— 连续跑几轮测试就会撞上
+   * "Too many requests"，把「我们的请求缺个头」伪装成「服务器在限流」。
+   *
+   * 早先只有登录**之后**的客户端才带这个头，登录路径用的是裸客户端。
+   */
+  it('always sends the Bitwarden client identification headers', async () => {
+    const fetchImpl = mockFetch(async () => jsonResponse({}));
+    const http = new HttpClient({ baseUrl: 'https://x.test', fetchImpl });
+    await http.request('GET', '/api/accounts/prelogin');
+
+    const h = callOf(fetchImpl).init.headers as Record<string, string>;
+    expect(h['Bitwarden-Client-Version']).toBeTruthy();
+    expect(h['Bitwarden-Client-Name']).toBeTruthy();
+  });
+
+  /** 但调用方要能覆盖 —— 版本号是会被服务端拿来做过滤的，不能写死到没法改 */
+  it('lets the caller override the client headers', async () => {
+    const fetchImpl = mockFetch(async () => jsonResponse({}));
+    const http = new HttpClient({
+      baseUrl: 'https://x.test', fetchImpl,
+      headers: () => ({ 'Bitwarden-Client-Version': '2099.1.0' }),
+    });
+    await http.request('GET', '/api/config');
+    const h = callOf(fetchImpl).init.headers as Record<string, string>;
+    expect(h['Bitwarden-Client-Version']).toBe('2099.1.0');
+  });
+
   it('joins baseUrl and path without doubling slashes', async () => {
     const fetchImpl = mockFetch(async () => jsonResponse({}));
     const http = new HttpClient({ baseUrl: 'https://x.test/', fetchImpl });
