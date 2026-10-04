@@ -1,6 +1,18 @@
 import type { HttpClient } from './http';
-import type { CipherDto } from './types';
+import type {
+  CipherDto, CipherLoginDto, CipherFieldDto, CipherPasswordHistoryDto,
+} from './types';
 
+/**
+ * ⚠️ 这里刻意把 `login` / `fields` / `passwordHistory` 写成**具体 DTO** 而不是 `unknown`。
+ *
+ * `unknown` 能通过编译但会让调用方对自己的输出一无所知 —— 写错字段名、
+ * 忘了某个字段都不会有人提醒，直到用户发现 passkey 或自定义字段没了。
+ * 组装这一层的价值就在于它**知道**自己该产出什么形状，就该把它写出来。
+ *
+ * `card` / `identity` / `secureNote` / `sshKey` 仍是 `unknown`：
+ * 前两者的字段集合随服务端版本变化，后两者是固定的小结构，暂不值得建模。
+ */
 export interface CipherWriteBody {
   type: number;
   name: string;
@@ -10,13 +22,13 @@ export interface CipherWriteBody {
   favorite: boolean;
   reprompt: number;
   key?: string | null;
-  login?: unknown;
+  login?: CipherLoginDto;
   card?: unknown;
   identity?: unknown;
   secureNote?: unknown;
   sshKey?: unknown;
-  fields?: unknown;
-  passwordHistory?: unknown;
+  fields?: CipherFieldDto[] | null;
+  passwordHistory?: CipherPasswordHistoryDto[] | null;
   lastKnownRevisionDate?: string | null;
   archivedDate?: string | null;
 }

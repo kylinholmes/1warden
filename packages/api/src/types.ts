@@ -16,6 +16,32 @@ export interface CipherLoginUriDto {
   uriChecksum?: string | null;
 }
 
+/**
+ * 一条 passkey 的**线上**形态。
+ *
+ * ⚠️ 只有 `keyValue`（PKCS#8 私钥）是 EncString，其余字段都是**明文**。
+ * 这是 Bitwarden 客户端的约定 —— 别处的凭据元数据（rpId、用户名）本来也不是秘密，
+ * 真正的秘密只有那把私钥。整条一起加密的话，官方客户端读不出来。
+ *
+ * ⚠️ `counter` 与 `discoverable` 是**字符串**，不是数字与布尔。
+ */
+export interface CipherFido2CredentialDto {
+  credentialId?: string | null;
+  keyType?: string | null;
+  keyAlgorithm?: string | null;
+  keyCurve?: string | null;
+  /** EncString，内容是 base64url 的 PKCS#8 私钥 */
+  keyValue?: string | null;
+  rpId?: string | null;
+  rpName?: string | null;
+  userHandle?: string | null;
+  userName?: string | null;
+  userDisplayName?: string | null;
+  counter?: string | null;
+  discoverable?: string | null;
+  creationDate?: string | null;
+}
+
 export interface CipherLoginDto {
   username?: string | null;
   password?: string | null;
@@ -25,7 +51,7 @@ export interface CipherLoginDto {
   uris?: CipherLoginUriDto[] | null;
   autofillOnPageLoad?: boolean | null;
   /** passkey。Vaultwarden 原样存取，结构上与 1Password 的 passkey 字段一一对应。 */
-  fido2Credentials?: unknown[] | null;
+  fido2Credentials?: CipherFido2CredentialDto[] | null;
   /** 服务端为向后兼容自动补的，等于 uris[0].uri —— 不要依赖它做判断 */
   uri?: string | null;
 }

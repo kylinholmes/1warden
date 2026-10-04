@@ -6,6 +6,7 @@ import type {
   VaultItem, VaultFolder, LoginFields, CardFields, IdentityFields,
   CustomField, PasswordHistoryEntry, Attachment,
 } from './model';
+import type { StoredPasskey } from './passkey';
 
 interface Decrypted { value: string | null; failed: boolean }
 
@@ -57,8 +58,77 @@ export async function resolveItemKey(
   };
 }
 
+/** EncString 一定形如 `2.…`；base64url 里不可能出现 `.`，所以这个判别没有歧义 */
+const ENC_STRING = /^\d+\./;
+
+function str(v: unknown): string | null {
+  return typeof v === 'string' && v.length > 0 ? v : null;
+}
+
+/**
+ * 一条 passkey 的私钥。
+ *
+ * ⚠️ **两种形态都要认。**
+ *
+ * `keyValue` 是不是 EncString，取决于写它的那个客户端。用户从别的客户端同步过来的
+ * 数据里可能两种都有。只认加密形态的话，明文那种会表现为「这条 passkey 打不开」，
+ * 而失败点在解密而不是在 WebAuthn，排查时很难想到。
+ */
+async function decryptPasskeyKeyValue(raw: unknown, key: SymmetricKey): Promise<string | null> {
+  if (typeof raw !== 'string' || raw.length === 0) return null;
+  if (!ENC_STRING.test(raw)) return raw;
+  return (await tryDecrypt(raw, key)).value;
+}
+
+/**
+ * 读出条目上的 passkey 列表。
+ *
+ * ⚠️ 读不出来的凭据**直接丢掉**，而不是留一条空壳。
+ * 缺私钥的凭据是**死凭据**：RP 那边还认得它，我们这边永远签不出名，
+ * 用户点它只会得到一句语焉不详的失败。丢掉它，「这个站点没有可用的 passkey」
+ * 就成为一个明确的结论 —— 用户可以据此重新注册一个。
+ */
+async function decryptPasskeys(raw: unknown, key: SymmetricKey): Promise<StoredPasskey[]> {
+  if (!Array.isArray(raw)) return [];
+  const out: StoredPasskey[] = [];
+  for (const c of raw) {
+    if (c === null || typeof c !== 'object') continue;
+    const r = c as Record<string, unknown>;
+
+    const credentialId = str(r.credentialId);
+    if (credentialId === null) continue;
+    const keyValue = await decryptPasskeyKeyValue(r.keyValue, key);
+    if (keyValue === null) continue;
+
+    const p: StoredPasskey = {
+      credentialId,
+      keyType: 'public-key',
+      keyAlgorithm: 'ECDSA',
+      keyCurve: 'P-256',
+      keyValue,
+      rpId: str(r.rpId) ?? '',
+      counter: str(r.counter) ?? '0',
+      discoverable: str(r.discoverable) ?? 'true',
+      creationDate: str(r.creationDate) ?? '',
+    };
+    // 只在有值时写入 —— exactOptionalPropertyTypes 下不能赋 undefined
+    const rpName = str(r.rpName);
+    if (rpName !== null) p.rpName = rpName;
+    const userHandle = str(r.userHandle);
+    if (userHandle !== null) p.userHandle = userHandle;
+    const userName = str(r.userName);
+    if (userName !== null) p.userName = userName;
+    const userDisplayName = str(r.userDisplayName);
+    if (userDisplayName !== null) p.userDisplayName = userDisplayName;
+
+    out.push(p);
+  }
+  return out;
+}
+
 async function decryptLogin(raw: NonNullable<CipherDto['login']>, key: SymmetricKey): Promise<LoginFields> {
   const out = emptyLogin();
+  out.fido2Credentials = await decryptPasskeys(raw.fido2Credentials, key);
   out.username = (await tryDecrypt(raw.username, key)).value;
   out.password = (await tryDecrypt(raw.password, key)).value;
   out.totp = (await tryDecrypt(raw.totp, key)).value;

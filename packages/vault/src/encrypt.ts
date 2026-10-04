@@ -1,6 +1,7 @@
 import { encryptString } from '@coffer/crypto';
 import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherWriteBody } from '@coffer/api';
+import type { CipherWriteBody, CipherFido2CredentialDto } from '@coffer/api';
+import type { StoredPasskey } from './passkey';
 import type { VaultItem, ItemType } from './model';
 
 export interface EncryptOptions {
@@ -26,6 +27,32 @@ const TYPE_TO_NUMBER: Record<ItemType, number> = {
 async function enc(v: string | null | undefined, key: SymmetricKey): Promise<string | null> {
   if (v === null || v === undefined) return null;
   return encryptString(v, key);
+}
+
+/**
+ * 一条 passkey → 线上形态。
+ *
+ * ⚠️ **只加密 `keyValue`**（PKCS#8 私钥），其余字段留明文。
+ * 这是 Bitwarden 客户端的约定：元数据（rpId、用户名、计数）本来就不是秘密，
+ * 整条一起加密的话官方客户端读不出来 —— 用户哪天换回官方客户端，passkey 就丢了。
+ * 反过来一个都不加密，私钥就明文躺在服务器上。真正的秘密只有那把私钥。
+ */
+async function encryptPasskey(c: StoredPasskey, key: SymmetricKey): Promise<CipherFido2CredentialDto> {
+  return {
+    credentialId: c.credentialId,
+    keyType: c.keyType,
+    keyAlgorithm: c.keyAlgorithm,
+    keyCurve: c.keyCurve,
+    keyValue: await encryptString(c.keyValue, key),
+    rpId: c.rpId,
+    rpName: c.rpName ?? null,
+    userHandle: c.userHandle ?? null,
+    userName: c.userName ?? null,
+    userDisplayName: c.userDisplayName ?? null,
+    counter: c.counter,
+    discoverable: c.discoverable,
+    creationDate: c.creationDate,
+  };
 }
 
 /**
@@ -84,6 +111,9 @@ export async function encryptCipher(
         uri: await encryptString(u.uri, key),
         match: u.match,
       }))),
+      // ⚠️ **总是发送**，和 folderId 同理：用户删掉最后一条 passkey 时，
+      // 不发这个字段就等于没删掉 —— 下次同步它会原样回来。
+      fido2Credentials: await Promise.all(item.login.fido2Credentials.map((c) => encryptPasskey(c, key))),
     };
   } else if (item.type === 'card' && item.card) {
     body.card = {

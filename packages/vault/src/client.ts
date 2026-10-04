@@ -437,6 +437,8 @@ export class VaultClient {
             totp: src.login.totp,
             uris: src.login.uri === null ? [] : [{ uri: src.login.uri, match: null }],
             passwordRevisionDate: null,
+            // CSV 里没有 passkey 这一列 —— 1Password 自己的导出也是静默丢弃的
+            fido2Credentials: [],
           },
           customFields: src.customFields.map((f) => ({
             name: f.name, value: f.value, type: f.type, linkedId: null,

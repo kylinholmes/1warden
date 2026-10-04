@@ -9,6 +9,9 @@
  * 这个包不得导入 fs / localStorage / indexedDB / 任何持久化 API —— 有一条 grep 检查把关。
  */
 
+// 只借类型。passkey.ts 反过来不依赖本文件，不构成循环。
+import type { StoredPasskey } from './passkey';
+
 export const ITEM_TYPES = ['login', 'secureNote', 'card', 'identity', 'sshKey', 'unknown'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
@@ -25,6 +28,8 @@ export interface LoginFields {
   totp: string | null;
   uris: LoginUri[];
   passwordRevisionDate: string | null;
+  /** 该条目上的 passkey。与 1Password 一样**不单独成条目类型**，就挂在登录条目上。 */
+  fido2Credentials: StoredPasskey[];
 }
 
 export interface CardFields {
@@ -146,7 +151,7 @@ export function cipherTypeToItemType(raw: number): ItemType {
 
 /** 每次都返回全新对象 —— 共享可变状态会让两条条目互相污染 */
 export function emptyLogin(): LoginFields {
-  return { username: null, password: null, totp: null, uris: [], passwordRevisionDate: null };
+  return { username: null, password: null, totp: null, uris: [], passwordRevisionDate: null, fido2Credentials: [] };
 }
 
 export function emptyCard(): CardFields {
