@@ -18,12 +18,18 @@
  * `tauriFetch` 只负责把它们和 `invoke` 串起来。
  */
 import { invoke } from '@tauri-apps/api/core';
+// 二进制过 JSON 边界的编解码只有一处实现 —— 它错一位的症状是
+// 「文件存出来是坏的」，很难联想到编码
+import { toBase64, fromBase64 } from './base64';
 
 /** Rust 侧 `http_request` 的返回形状 */
 export interface NativeResponse {
   status: number;
   headers: Record<string, string>;
-  body: string;
+  /** 文本体。与 `bodyBase64` 二选一 —— Rust 按字节是不是合法 UTF-8 决定走哪条 */
+  body?: string;
+  /** 二进制体（base64）。附件下载、图标走这条 */
+  bodyBase64?: string;
 }
 
 /** Rust 侧 `HttpError` 的形状 */
@@ -90,12 +96,6 @@ export function headersOf(input: RequestInfo | URL, init?: RequestInit): Record<
 }
 
 /**
- * 取出请求体。
- *
- * `@coffer/api` 只发字符串（JSON 或 urlencoded），所以常见路径就是原样返回。
- * 其余形态（FormData/Blob/URLSearchParams）走 text() 兜底，宁可转错也不要静默丢 body。
- */
-/**
  * 取出请求体，**分成文本与二进制两条路**。
  *
  * ⚠️ 二进制必须走 base64，不能拿 `TextDecoder` 转字符串 ——
@@ -143,11 +143,6 @@ function decodeIfUtf8(bytes: Uint8Array): string | undefined {
   return text.includes('\uFFFD') ? undefined : text;
 }
 
-function toBase64(bytes: Uint8Array): string {
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);
-  return btoa(s);
-}
 
 export async function toNativeRequest(
   input: RequestInfo | URL, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS,
@@ -178,7 +173,13 @@ export function toResponse(native: NativeResponse): Response {
     if (k.toLowerCase() === 'set-cookie') continue;
     try { headers.set(k, v); } catch { /* 非法头名 —— 跳过，不影响其余 */ }
   }
-  return new Response(NULL_BODY_STATUS.has(native.status) ? null : native.body, {
+  // ⚠️ 二进制走 `bodyBase64`。只认 `body` 的话，下载的附件与图标会变成
+  // **空响应**，而状态码是 200 —— 看起来一切正常，存下来是 0 字节。
+  const body = NULL_BODY_STATUS.has(native.status) ? null
+    : native.bodyBase64 !== undefined ? fromBase64(native.bodyBase64)
+      : native.body ?? null;
+
+  return new Response(body, {
     status: native.status,
     statusText: '',
     headers,

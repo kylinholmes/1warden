@@ -146,6 +146,31 @@ describe('toResponse', () => {
     expect(res.headers.get('content-type')).toBe('text/plain');
     expect(res.status).toBe(200);
   });
+
+  /**
+   * ⚠️ **二进制响应体必须一个字节不差地还原。**
+   *
+   * Rust 侧从 `res.bytes()` 取字节，非 UTF-8 的走 `bodyBase64` 回来。
+   * 前端这一半如果只认 `body`，二进制就会变成**空响应** —— 下载的附件
+   * 是坏的、图标是空的，而状态码是 200，看起来一切正常。
+   */
+  it('restores a base64 body as the original bytes', async () => {
+    // PNG 魔数：0x89 不是合法 UTF-8 首字节，正是会被有损解码改掉的那类
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00]);
+    let bin = '';
+    for (const b of png) bin += String.fromCharCode(b);
+
+    const res = toResponse({ status: 200, headers: { 'content-type': 'image/png' }, bodyBase64: btoa(bin) });
+
+    expect(res.status).toBe(200);
+    expect([...new Uint8Array(await res.arrayBuffer())]).toEqual([...png]);
+  });
+
+  /** 文本那一半不受影响 */
+  it('still prefers the text body when there is one', async () => {
+    const res = toResponse({ status: 200, headers: {}, body: '{"a":1}' });
+    expect(await res.json()).toEqual({ a: 1 });
+  });
 });
 
 describe('toTransportError', () => {

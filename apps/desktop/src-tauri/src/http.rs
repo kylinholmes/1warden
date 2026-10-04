@@ -65,7 +65,33 @@ pub struct HttpRequest {
 pub struct HttpResponse {
     pub status: u16,
     pub headers: HashMap<String, String>,
-    pub body: String,
+    /// 文本体。与 `body_base64` 二选一
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    /// 二进制体（base64）。图标、以及**附件下载**走这条
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub body_base64: Option<String>,
+}
+
+impl HttpResponse {
+    /// 按字节决定走哪条通道 —— 与请求侧 `body_base64` 对称。
+    ///
+    /// 规则：**合法的 UTF-8 一律当文本**。即便一份二进制恰好是合法 UTF-8，
+    /// 走文本通道也是无损的（UTF-8 → String → UTF-8 不改字节），
+    /// 所以这条规则不可能损坏数据 —— 它只在「当文本会损坏」时才改走 base64。
+    pub fn from_body(status: u16, headers: HashMap<String, String>, bytes: Vec<u8>) -> Self {
+        let (body, body_base64) = if bytes.is_empty() {
+            // 两个都不给。发一个空的 base64 只会让前端白解一次
+            (None, None)
+        } else {
+            match String::from_utf8(bytes) {
+                Ok(text) => (Some(text), None),
+                // 解不开时 `FromUtf8Error` 会把**原始字节**还给我们
+                Err(e) => (None, Some(B64.encode(e.as_bytes()))),
+            }
+        };
+        Self { status, headers, body, body_base64 }
+    }
 }
 
 /// 错误分成几类，界面才能给出不同的话术 ——
@@ -433,11 +459,13 @@ pub async fn execute(state: &HttpState, req: HttpRequest) -> Result<HttpResponse
         .filter_map(|(k, v)| v.to_str().ok().map(|v| (k.as_str().to_string(), v.to_string())))
         .collect();
 
-    // 二进制响应（例如图标）会以字符串形式回来 —— 这是为 JSON API 设计的传输层，
-    // 遇到非 UTF-8 就退回 lossy，而不是让整个请求失败
-    let body = res.text().await.map_err(|e| HttpError::new("network", format!("读取响应失败：{e}")))?;
+    // ⚠️ 取**字节**，不能取 `res.text()`。后者是有损 UTF-8 解码：非法序列
+    // 变成 U+FFFD 且不报错，下载的附件与图标会静默损坏。
+    let bytes = res.bytes().await
+        .map_err(|e| HttpError::new("network", format!("读取响应失败：{e}")))?
+        .to_vec();
 
-    Ok(HttpResponse { status, headers, body })
+    Ok(HttpResponse::from_body(status, headers, bytes))
 }
 
 /// 探取服务器证书 —— 用户要在看到指纹和信息之后，才能决定信不信。
@@ -777,7 +805,8 @@ mod tests {
             trust(&state.pins, &state.pins_path, &base, &fingerprint).expect("保存信任");
             let res = fetch(&state, &url).expect("信任之后应当能连上");
             assert_eq!(res.status, 200);
-            assert!(res.body.contains("environment"), "拿到的应当是 Vaultwarden 的配置：{}", res.body);
+            let body = res.body.as_deref().expect("配置响应应当是文本");
+            assert!(body.contains("environment"), "拿到的应当是 Vaultwarden 的配置：{body}");
 
             // 4. 重新探测应当显示已信任
             assert!(probe(&state.pins, &base).unwrap().already_trusted);
@@ -832,5 +861,51 @@ mod tests {
 
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    /// ⚠️ **二进制响应体必须在传输中保持原样。**
+    ///
+    /// 这个传输层原本是给 JSON API 写的，响应体一律走 `res.text()` ——
+    /// 而 `text()` 是**有损**解码：非法 UTF-8 序列变成 U+FFFD，且**不报错**。
+    ///
+    /// 实测一张 33270 字节的 PNG 走完这一趟变成 60381 字节、13806 个 U+FFFD，
+    /// 哈希面目全非。所以下载的附件一直是坏的，而用户看到的是「保存成功」。
+    ///
+    /// 请求侧早就有 `bodyBase64` 了（附件上传靠它），响应侧一直缺这一半 ——
+    /// 传输层是不对称的，这个测试补的就是另一半。
+    #[test]
+    fn binary_response_body_survives_as_base64() {
+        // PNG 的魔数：0x89 不是合法 UTF-8 的首字节，正是会被 text() 改掉的那类
+        let png: Vec<u8> = vec![0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0xff, 0xfe, 0x00];
+        assert!(std::str::from_utf8(&png).is_err(), "这组字节本来就该不是合法 UTF-8");
+
+        let res = HttpResponse::from_body(200, HashMap::new(), png.clone());
+
+        assert!(res.body.is_none(), "二进制不该走文本通道");
+        let encoded = res.body_base64.expect("二进制必须走 base64 通道");
+        assert_eq!(B64.decode(encoded.as_bytes()).unwrap(), png, "字节必须一个不差地回来");
+    }
+
+    /// 反面：JSON 还得是文本，否则所有调用方都要改
+    #[test]
+    fn text_response_body_stays_text() {
+        let res = HttpResponse::from_body(200, HashMap::new(), br#"{"a":1}"#.to_vec());
+        assert_eq!(res.body.as_deref(), Some(r#"{"a":1}"#));
+        assert!(res.body_base64.is_none());
+    }
+
+    /// 中文是合法 UTF-8，不该被误判成二进制
+    #[test]
+    fn non_ascii_text_is_still_text() {
+        let res = HttpResponse::from_body(200, HashMap::new(), "保险库未解锁".as_bytes().to_vec());
+        assert_eq!(res.body.as_deref(), Some("保险库未解锁"));
+    }
+
+    /// 响应体为空时两个字段都不给 —— 不要发一个空的 base64 让前端去解
+    #[test]
+    fn empty_body_produces_neither_field() {
+        let res = HttpResponse::from_body(204, HashMap::new(), Vec::new());
+        assert!(res.body.is_none());
+        assert!(res.body_base64.is_none());
     }
 }
