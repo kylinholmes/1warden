@@ -153,7 +153,9 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
   // 表单提交：异步处理，不需要回包
   if (req?.type === 'coffer:submitted') {
     void onSubmitted(sender.tab?.id, (msg as { url?: string }).url)
-      .catch(() => { /* 捕获失败不该影响页面 */ });
+      // 捕获失败确实不该影响页面，但**必须留下痕迹** —— 静默吞掉的错误
+      // 会让「点了保存没反应」变成一个查不出原因的幽灵问题
+      .catch((e: unknown) => console.error('[coffer] 捕获失败：', e));
     return undefined;
   }
 
@@ -190,6 +192,8 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
         items: session.items.slice(),
         folders: session.folders.slice(),
       });
+      // 解锁之后要把角标补上 —— 见 refreshBadges 的说明
+      await refreshBadges();
       return { ok: true, itemCount: session.items.length };
     }
 
@@ -428,14 +432,25 @@ async function readFieldsFrom(tabId: number): Promise<FieldDescriptor[]> {
  * 而它正是最容易被打字机/XSS 够到的地方。
  */
 async function onSubmitted(tabId: number | undefined, url: string | undefined): Promise<void> {
-  if (tabId === undefined || url === undefined) return;
+  // 这条链路上每一步都可能「合理地」放弃，而每一个放弃都必须是**可诊断的** ——
+  // 否则用户那边表现为「提交了但没提示保存」，我们这边什么都看不到。
+  if (tabId === undefined || url === undefined) {
+    console.debug('[coffer] 捕获跳过：拿不到标签页或地址');
+    return;
+  }
 
   const session = await sessions.load();
-  if (!session) return;
+  if (!session) {
+    console.debug('[coffer] 捕获跳过：保险库未解锁');
+    return;
+  }
 
   const fields = await readFieldsFrom(tabId);
   const plan = classifyFields(fields);
-  if (plan.password === undefined) return;
+  if (plan.password === undefined) {
+    console.debug(`[coffer] 捕获跳过：页面上没识别出密码框（读到 ${fields.length} 个输入框）`);
+    return;
+  }
 
   const indices = plan.username === undefined ? [plan.password] : [plan.username, plan.password];
   const [injection] = await chrome.scripting.executeScript({
@@ -444,11 +459,18 @@ async function onSubmitted(tabId: number | undefined, url: string | undefined): 
     args: [indices],
   });
   const values = (injection?.result ?? []) as (string | null)[];
-  if (values.length === 0) return;
+  if (values.length === 0) {
+    console.debug('[coffer] 捕获跳过：注入读取没有返回结果');
+    return;
+  }
 
   const username = plan.username === undefined ? null : values[0] ?? null;
   const password = plan.username === undefined ? values[0] : values[1];
-  if (typeof password !== 'string') return;
+  if (typeof password !== 'string') {
+    console.debug('[coffer] 捕获跳过：读到的密码不是字符串');
+    return;
+  }
+  console.debug(`[coffer] 捕获到登录信息（用户名 ${username === null ? '空' : '有'}，密码长度 ${password.length}）`);
 
   const decision = decideCapture({ url, username, password }, session.items);
   if (decision.kind === 'none') {
@@ -497,6 +519,37 @@ async function updateBadge(tabId: number, isLoginForm: boolean): Promise<void> {
     tabId,
     text: isLoginForm && session ? '•' : '',
   }).catch(() => {});
+}
+
+/**
+ * 重新点亮所有「有登录表单」的标签页角标。
+ *
+ * ⚠️ 必须有这一步。角标原本只在**收到 content script 上报的那一刻**算，
+ * 而那一刻通常发生在用户还没解锁的时候 —— 于是解锁之后角标依然是空的，
+ * 用户盯着浏览器工具栏看不出这个站点有没有存过密码。
+ *
+ * 顺带解决了 service worker 被杀的问题：它醒来后 `tabFields` 是空的，
+ * 但直接问各标签页拿得到当前状态。
+ */
+async function refreshBadges(): Promise<void> {
+  const session = await sessions.load();
+  const tabs = await chrome.tabs.query({});
+
+  await Promise.all(tabs.map(async (t) => {
+    if (t.id === undefined) return;
+    let isLoginForm = false;
+    try {
+      const res = await chrome.tabs.sendMessage(t.id, { type: 'coffer:read-fields' }) as
+        { isLoginForm?: boolean } | undefined;
+      isLoginForm = res?.isLoginForm === true;
+    } catch {
+      // 这个标签页没有我们的 content script（chrome:// 之类）—— 正常
+      return;
+    }
+    await chrome.action.setBadgeText({
+      tabId: t.id, text: session !== null && isLoginForm ? '•' : '',
+    }).catch(() => {});
+  }));
 }
 
 async function clearBadges(): Promise<void> {

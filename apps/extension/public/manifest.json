@@ -3,6 +3,10 @@
   "name": "Coffer",
   "version": "0.0.0",
   "description": "个人密码管理器 —— 自动填充、密码生成、自建 Vaultwarden",
+  "minimum_chrome_version": "116",
+  "content_security_policy": {
+    "extension_pages": "script-src 'self' 'wasm-unsafe-eval'; object-src 'self'"
+  },
   "background": {
     "service_worker": "background.js",
     "type": "module"
@@ -16,7 +20,7 @@
     "scripting",
     "activeTab"
   ],
-  "optional_host_permissions": [
+  "host_permissions": [
     "http://*/*",
     "https://*/*"
   ],
@@ -32,6 +36,5 @@
       "run_at": "document_idle",
       "all_frames": true
     }
-  ],
-  "minimum_chrome_version": "116"
+  ]
 }

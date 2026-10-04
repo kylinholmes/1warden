@@ -36,4 +36,13 @@ export VW_ENV=(
   # 我们只需要 API 服务端 —— 自带网页前端是给浏览器用的，我们的客户端是自己写的。
   # 不关掉的话 Vaultwarden 会因为找不到 web-vault/ 目录而拒绝启动。
   "WEB_VAULT_ENABLED=false"
+
+  # 放宽登录限流。默认值是 10 次/60 秒，而测试套件每跑一轮要登录好几次
+  # （契约测试、端到端、互操作各自都要登一次，端到端还要为清理再登一次）——
+  # 连着跑几轮就会撞上 "Too many login requests"，把「测试跑得太密」
+  # 伪装成功能故障。**仅限本地开发**。
+  "LOGIN_RATELIMIT_MAX_BURST=1000"
+  "LOGIN_RATELIMIT_SECONDS=1"
+  "RATELIMIT_MAX_BURST=1000"
+  "RATELIMIT_SECONDS=1"
 )

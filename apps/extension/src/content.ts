@@ -111,10 +111,6 @@ function maybeReport(): void {
 
 let reportedOnce = false;
 
-report();
-maybeReport();
-setInterval(maybeReport, 1000);
-
 /**
  * 表单提交检测。
  *
@@ -133,6 +129,7 @@ function onFormSubmit(event: Event): void {
   // 只关心含密码框的表单 —— 搜索框、订阅框提交时不该触发保存提示
   if (!form.querySelector('input[type="password"]')) return;
 
+  console.debug('[coffer] 检测到登录表单提交');
   chrome.runtime.sendMessage({ type: 'coffer:submitted', url: location.href })
     .catch(() => { /* 没有接收方是正常情况 */ });
 }
@@ -151,6 +148,17 @@ document.addEventListener('keydown', (e) => {
   chrome.runtime.sendMessage({ type: 'coffer:submitted', url: location.href }).catch(() => {});
 }, true);
 
+// ── 注册顺序很重要 ──
+//
+// ⚠️ **先注册所有监听器，再干别的。**
+//
+// 早先的顺序是先 `report()` 再注册 onMessage —— 只要初始上报抛一次异常
+// （扩展上下文还没就绪、页面状态古怪……），后面的注册就全被跳过，
+// 整个 content script 变成哑的：不响应消息、不检测提交，
+// 而页面上看起来一切正常，控制台也未必有声。
+// 这个脆弱性是端到端测试抓出来的（表现为偶发的
+// "Receiving end does not exist"）。
+
 /**
  * popup 点击填充时，background 需要知道「现在这份字段列表」——
  * 页面可能已经变了。这里按需重新读一遍再回。
@@ -161,3 +169,33 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
   respond({ fields, isLoginForm: isLikelyLoginForm(fields) });
   return true;
 });
+
+/**
+ * 表单提交检测。
+ */
+
+// 初始上报放在所有监听器就绪**之后**，并且单独兜住异常 ——
+// 上报失败只该让角标不亮，不该让整个脚本失去响应能力。
+function safeReport(): void {
+  try {
+    report();
+  } catch (e) {
+    console.error('[coffer] 初始上报失败：', e);
+  }
+}
+
+safeReport();
+safeReportDelayed();
+
+/** 表单可能是异步渲染出来的，稍后再看一次 */
+function safeReportDelayed(): void {
+  for (const ms of [1500, 4000]) {
+    setTimeout(() => { try { report(); } catch { /* 同上 */ } }, ms);
+  }
+}
+
+setInterval(() => {
+  try {
+    maybeReport();
+  } catch { /* 轮询失败不该让脚本停摆 */ }
+}, 1000);
