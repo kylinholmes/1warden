@@ -1,3 +1,5 @@
+import { asBytes, b64urlFromBytes, bytesFromB64url, serializeAllow } from './webauthn-wire';
+
 /**
  * MAIN world 的 WebAuthn 拦截 —— 我们替浏览器回答 `navigator.credentials`。
  *
@@ -23,6 +25,9 @@
 /** 消息标记。带前缀是为了不和页面自己的 postMessage 撞上 */
 const TAG = 'coffer:webauthn';
 const REPLY = 'coffer:webauthn-reply';
+/** 探针。只用来确认转发脚本在不在，**不带任何副作用** */
+const PING = 'coffer:webauthn-ping';
+const PONG = 'coffer:webauthn-pong';
 
 interface Reply {
   id: number;
@@ -42,17 +47,10 @@ const pending = new Map<number, { resolve: (r: Reply) => void; reject: (e: Error
 let nextId = 1;
 
 function b64urlToBuf(s: string): ArrayBuffer {
-  const bin = atob(s.replace(/-/g, '+').replace(/_/g, '/'));
-  const out = new Uint8Array(bin.length);
-  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
-  return out.buffer;
-}
-
-function bufToB64url(buf: ArrayBuffer | Uint8Array): string {
-  const bytes = buf instanceof Uint8Array ? buf : new Uint8Array(buf);
-  let s = '';
-  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);
-  return btoa(s).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+  const bytes = bytesFromB64url(s);
+  // ⚠️ 切出独立的一段。直接把视图的 buffer 交出去的话，页面上任何
+  // 对它的写入都会落到我们的数组上 —— 而这段数据将进入签名
+  return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength) as ArrayBuffer;
 }
 
 /**
@@ -72,32 +70,55 @@ window.addEventListener('message', (event: MessageEvent) => {
   waiter.resolve(data);
 });
 
-function ask(payload: Record<string, unknown>): Promise<Reply> {
+/**
+ * 等转发脚本就位。
+ *
+ * ⚠️ **这一步是必须的，而且它不能带副作用。**
+ *
+ * 这份脚本跑在 `document_start`，承载转发的 content script 跑在
+ * `document_idle` —— 页面若在两者之间调用 WebAuthn（很常见：首屏就发登录挑战），
+ * 直接发出去的消息会打在空气里。
+ *
+ * 早先的做法是**把真正的请求每 250ms 重发一次**，直到收到回复。
+ * 那是有害的：一次 create 要跑几百毫秒到几秒，重发会挤进来好几次，
+ * 每一次都各建一把密钥、各写一遍服务端。第二次读到的还是**过期快照**
+ * （凭据列表尚未更新），写回去就把第一次刚存的凭据覆盖掉了 ——
+ * 用户看到「注册成功」，下次登录却被告知没有可用的 passkey。
+ *
+ * 改成先发一个**无副作用的探针**，探针有回应了再发真正的请求，且只发一次。
+ */
+function waitForRelay(timeoutMs: number): Promise<boolean> {
+  return new Promise((resolve) => {
+    const deadline = Date.now() + timeoutMs;
+    const ping = (): void => {
+      if (Date.now() >= deadline) { resolve(false); return; }
+      window.postMessage({ tag: PING }, window.location.origin);
+      setTimeout(ping, 100);
+    };
+    const onPong = (event: MessageEvent): void => {
+      if (event.source !== window) return;
+      if ((event.data as { tag?: string } | null)?.tag !== PONG) return;
+      window.removeEventListener('message', onPong);
+      resolve(true);
+    };
+    window.addEventListener('message', onPong);
+    ping();
+  });
+}
+
+async function ask(payload: Record<string, unknown>): Promise<Reply> {
   const id = nextId++;
+  const ready = await waitForRelay(5_000);
+  if (!ready) throw new Error('Coffer 扩展没有响应，请确认已启用');
+
   return new Promise<Reply>((resolve, reject) => {
     pending.set(id, { resolve, reject });
-    const message = { tag: TAG, id, ...payload };
-
-    /**
-     * ⚠️ **重发**，不是发一次就等。
-     *
-     * 这份脚本在 `document_start` 跑，而承载转发的 content script 在
-     * `document_idle` —— 页面若在两者之间调用 WebAuthn（很常见：
-     * 首屏就发登录挑战），第一次 postMessage 会打在空气里。
-     *
-     * 转发是幂等的（background 按 id 处理，重发只是重建同一个请求），
-     * 所以重发安全。
-     */
-    window.postMessage(message, window.location.origin);
-    const retry = setInterval(() => {
-      if (!pending.has(id)) { clearInterval(retry); return; }
-      window.postMessage(message, window.location.origin);
-    }, 250);
+    // ⚠️ **只发一次。** 重发会让同一次操作被执行多次，而 create 不是幂等的
+    window.postMessage({ tag: TAG, id, ...payload }, window.location.origin);
 
     // 隔离世界始终没起来（扩展被禁用）时不能永远挂着 ——
     // 页面那边会表现为一个永不 settle 的 Promise，比抛错更难查
     setTimeout(() => {
-      clearInterval(retry);
       if (!pending.delete(id)) return;
       reject(new Error('Coffer 没有响应，请确认扩展已启用并解锁'));
     }, 30_000);
@@ -105,31 +126,10 @@ function ask(payload: Record<string, unknown>): Promise<Reply> {
 }
 
 /** 把 ArrayBuffer 转成能过 postMessage 的 base64url */
-function b64(v: ArrayBuffer | ArrayBufferView | undefined): string | null {
-  if (v === undefined || v === null) return null;
-  if (v instanceof ArrayBuffer) return bufToB64url(v);
-  return bufToB64url(new Uint8Array(v.buffer, v.byteOffset, v.byteLength));
-}
-
-interface SerializedDescriptor {
-  id: string;
-  type: string;
-  transports?: string[];
-}
-
-function serializeAllow(list: unknown): SerializedDescriptor[] | null {
-  if (!Array.isArray(list)) return null;
-  const out: SerializedDescriptor[] = [];
-  for (const entry of list) {
-    const e = entry as { id?: unknown; type?: unknown; transports?: string[] };
-    if (!(e?.id instanceof ArrayBuffer) && !ArrayBuffer.isView(e?.id)) continue;
-    const id = b64(e.id as ArrayBuffer);
-    if (id === null) continue;
-    const d: SerializedDescriptor = { id, type: typeof e.type === 'string' ? e.type : 'public-key' };
-    if (Array.isArray(e.transports)) d.transports = e.transports;
-    out.push(d);
-  }
-  return out;
+/** 字节 → base64url；拿不到字节就返回 null */
+function b64(v: unknown): string | null {
+  const bytes = asBytes(v);
+  return bytes === null ? null : b64urlFromBytes(bytes);
 }
 
 /** 造一个「长得像平台对象」的凭据。原型对上了 `instanceof` 才会通过 */
@@ -238,6 +238,13 @@ async function handleGet(options: CredentialRequestOptions): Promise<unknown> {
 function intercept(): void {
   const container = navigator.credentials as CredentialsContainer | undefined;
   if (!container) return;
+
+  // ⚠️ 只接管一次。这份脚本可能被求值两次（重新注入），
+  // 那时再包一层会让同一个调用走两遍 —— 而 create 不是幂等的
+  const flag = '__cofferWebauthnInstalled__' as const;
+  const w = window as unknown as Record<string, unknown>;
+  if (w[flag] === true) return;
+  w[flag] = true;
 
   const origCreate = container.create.bind(container);
   const origGet = container.get.bind(container);

@@ -217,6 +217,15 @@ function send(id: number, payload: Record<string, unknown>): void {
 window.addEventListener('message', (event: MessageEvent) => {
   if (event.source !== window) return;
   const data = event.data as { tag?: string; id?: number } | null;
+
+  // 探针：MAIN world 用它确认我们已经就位。**只回一个标记，不做任何事** ——
+  // 它跑在 document_start，我们跑在 document_idle，它必须等我们。
+  // 让重发带副作用（直接重发真正的请求）会让一次 create 执行多遍
+  if (data?.tag === 'coffer:webauthn-ping') {
+    window.postMessage({ tag: 'coffer:webauthn-pong' }, window.location.origin);
+    return;
+  }
+
   if (!data || data.tag !== 'coffer:webauthn' || typeof data.id !== 'number') return;
   const { id } = data;
 

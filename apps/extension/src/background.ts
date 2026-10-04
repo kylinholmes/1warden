@@ -215,6 +215,40 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
   return true;   // 异步响应
 });
 
+/**
+ * 同一请求 id 的**执行中结果**。见 `coffer:webauthn` 里的说明 ——
+ * 重发本身是对的（转发脚本可能还没注入），但接收方必须幂等，
+ * 否则第二次会拿着过期快照把第一次的结果覆盖掉。
+ */
+const webauthnDone = new Map<number, Promise<Record<string, unknown>>>();
+
+async function runWebauthn(payload: unknown, senderOrigin: string | undefined): Promise<Record<string, unknown>> {
+  // ⚠️ 只认客户端这一份状态。
+  // 原先这里还额外读了 `sessions.load()` 来判断「解锁了没有」，
+  // 于是同一个事实有了两个来源 —— 而它们会不一致（存储里没有、
+  // 但客户端刚被 connect 解锁过），表现为用户刚解锁却报「保险库未解锁」。
+  // 密钥在不在，`getKey()` 说了算。
+  const c = await unlockedClient();
+  const key = c.getSession().getKey();
+  if (!key) return { ok: false, error: `保险库未解锁（${c.getSession().status}）` };
+
+  const result = await handleWebauthn(payload as WebauthnPayload, senderOrigin, {
+    items: () => c.getSession().items,
+    userKey: () => key,
+    persist: async (changed) => {
+      for (const item of changed) await c.saveItem(item);
+      // 和 save-capture 一样：存完必须刷一次会话快照，
+      // 否则下一次读到的还是旧的，第二次断言会拿着过期的计数去存
+      if (c.getSession().getKey()) await sessions.save(c.exportState());
+    },
+  });
+  // passkey 失败在页面上只会表现成一句「NotAllowedError」，
+  // 看不出是 rpId 被拒、没有可用凭据、还是存不进保险库。
+  // 这里是唯一能留下原因的地方。
+  if (result['ok'] === false) console.warn('[coffer] passkey 失败：', result['error']);
+  return result;
+}
+
 async function handle(req: Request, sender: chrome.runtime.MessageSender): Promise<unknown> {
   switch (req.type) {
     case 'coffer:status': {
@@ -372,34 +406,30 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
      * 包括它自称的 origin。用载荷里的 origin 去做 rpId 校验，等于没有校验。
      */
     case 'coffer:webauthn': {
-      // ⚠️ 只认客户端这一份状态。
-      // 原先这里还额外读了 `sessions.load()` 来判断「解锁了没有」，
-      // 于是同一个事实有了两个来源 —— 而它们会不一致（存储里没有、
-      // 但客户端刚被 connect 解锁过），表现为用户刚解锁却报「保险库未解锁」。
-      // 密钥在不在，`getKey()` 说了算。
-      const c = await unlockedClient();
-      const key = c.getSession().getKey();
-      if (!key) return { ok: false, error: `保险库未解锁（${c.getSession().status}）` };
+      /**
+       * ⚠️ **幂等：同一个请求 id 只执行一次。**
+       *
+       * MAIN world 每 250ms 重发一次（它跑在 `document_start`，转发脚本跑在
+       * `document_idle`，第一次必然打空），而一次 create 要跑几百毫秒到几秒。
+       * content script 那层也在去重，但那是页面里的一份内存，扛不住所有情况。
+       *
+       * 不幂等的后果不是「多做一次无用功」，而是**丢数据**：第二次拿到的是
+       * 过期快照（凭据列表还是空的），写回去就把第一次刚存进去的凭据覆盖掉了。
+       * 用户看到的是「注册好像成功了」，直到下次登录才被告知没有可用的 passkey。
+       */
+      const reqId = (req.payload as { id?: number } | null)?.id;
+      if (typeof reqId === 'number') {
+        const prev = webauthnDone.get(reqId);
+        if (prev) return await prev;
+      }
 
-      const result = await handleWebauthn(
-        req.payload as WebauthnPayload,
-        sender.origin,
-        {
-          items: () => c.getSession().items,
-          userKey: () => key,
-          persist: async (changed) => {
-            for (const item of changed) await c.saveItem(item);
-            // 和 save-capture 一样：存完必须刷一次会话快照，
-            // 否则下一次读到的还是旧的，第二次断言会拿着过期的计数去存
-            if (c.getSession().getKey()) await sessions.save(c.exportState());
-          },
-        },
-      );
-      // passkey 失败在页面上只会表现成一句「NotAllowedError」，
-      // 看不出是 rpId 被拒、没有可用凭据、还是存不进保险库。
-      // 这里是唯一能留下原因的地方。
-      if (result['ok'] === false) console.warn('[coffer] passkey 失败：', result['error']);
-      return result;
+      const run = runWebauthn(req.payload, sender.origin);
+      if (typeof reqId === 'number') {
+        webauthnDone.set(reqId, run);
+        // 只留最近几十条 —— 页面开一整天的话这个表不该无限长下去
+        if (webauthnDone.size > 64) webauthnDone.delete(webauthnDone.keys().next().value as number);
+      }
+      return await run;
     }
 
     case 'coffer:reveal': {
