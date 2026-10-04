@@ -190,14 +190,28 @@ chrome.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
  * 重发是对的，但**接收方**得扛得住：同一条请求转发两次、执行两次，
  * 就会注册出两条凭据、或者拿同一个 challenge 签两次名。
  *
- * 所以这里记住最近回过的 id，重发时直接把上次的答案再发一遍，不再往下走。
+ * 所以要挡住**两种**重发，只挡一种是不够的：
+ *
+ *   - 已经回过的：把上次的答案再发一遍
+ *   - **正在执行中的**：挂到同一次执行上，等它出结果再一起回
+ *
+ * ⚠️ 第二种才是真正会出事的那种。一次 create 要跑几百毫秒到几秒
+ * （生成密钥 + 签名 + 写服务端），而重发是每 250ms 一次 —— 中间会挤进来
+ * 好几次。它们各自独立执行，于是同一个条目被并发写了两遍、同一个 challenge
+ * 被签了两次。服务端那边表现为「Cipher doesn't exist」这类莫名其妙的错，
+ * 而本地完全看不出是并发造成的。
  */
 const answered = new Map<number, unknown>();
+const inFlight = new Map<number, Promise<Record<string, unknown>>>();
 
 /** 只留最近几十条 —— 页面开一整天的话，这个表不该无限长下去 */
 function remember(id: number, reply: unknown): void {
   answered.set(id, reply);
   if (answered.size > 64) answered.delete(answered.keys().next().value as number);
+}
+
+function send(id: number, payload: Record<string, unknown>): void {
+  window.postMessage({ tag: 'coffer:webauthn-reply', id, ...payload }, window.location.origin);
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
@@ -206,10 +220,16 @@ window.addEventListener('message', (event: MessageEvent) => {
   if (!data || data.tag !== 'coffer:webauthn' || typeof data.id !== 'number') return;
   const { id } = data;
 
-  // 已经处理过 —— 再把同一个答案发一次。页面那边可能只是没收到上一条回复
+  // 已经回过 —— 再把同一个答案发一次。页面那边可能只是没收到上一条回复
   if (answered.has(id)) {
-    window.postMessage({ tag: 'coffer:webauthn-reply', id, ...(answered.get(id) as object) },
-      window.location.origin);
+    send(id, answered.get(id) as Record<string, unknown>);
+    return;
+  }
+
+  // 正在跑 —— 挂到同一次执行上。**不能**再发一遍给 background
+  const running = inFlight.get(id);
+  if (running) {
+    void running.then((r) => send(id, r));
     return;
   }
 
@@ -219,16 +239,17 @@ window.addEventListener('message', (event: MessageEvent) => {
    * 这条消息的载荷是页面说了算的 —— 它也可能是**别的 frame** 发过来的。
    * 但无论来自谁，能到达的都是 window 自己，所以回给 window 是对的。
    */
-  chrome.runtime.sendMessage({ type: 'coffer:webauthn', payload: data })
-    .then((reply: unknown) => {
-      remember(id, reply);
-      window.postMessage({ tag: 'coffer:webauthn-reply', id, ...(reply as object) }, window.location.origin);
-    })
-    .catch((e: unknown) => {
-      const reply = { ok: false, error: e instanceof Error ? e.message : '扩展没有响应' };
-      remember(id, reply);
-      window.postMessage({ tag: 'coffer:webauthn-reply', id, ...reply }, window.location.origin);
-    });
+  const work: Promise<Record<string, unknown>> = chrome.runtime
+    .sendMessage({ type: 'coffer:webauthn', payload: data })
+    .then((reply: unknown) => (reply ?? { ok: false, error: '扩展没有返回结果' }) as Record<string, unknown>)
+    .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : '扩展没有响应' }));
+
+  inFlight.set(id, work);
+  void work.then((r) => {
+    inFlight.delete(id);
+    remember(id, r);
+    send(id, r);
+  });
 });
 
 /**
