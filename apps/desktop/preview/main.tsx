@@ -11,6 +11,7 @@ import { createRoot } from 'react-dom/client';
 import { SecurityReportView } from '../src/screens/SecurityReport';
 import { VaultView } from '../src/screens/VaultView';
 import { QuickAccess } from '../src/screens/QuickAccess';
+import { ImportScreen } from '../src/screens/Import';
 import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
 import './preview.css';
 
@@ -71,7 +72,9 @@ const which = new URLSearchParams(location.search).get('screen') ?? 'messy';
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    {which === 'quick' ? (
+    {which === 'import' ? (
+      <ImportScreen client={fakeClient} onImported={() => {}} />
+    ) : which === 'quick' ? (
       <div style={{ width: 620, height: 400 }}>
         <QuickAccess
           items={[

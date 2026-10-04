@@ -19,7 +19,7 @@ import {
 import type { CipherDto } from '../packages/api/src/index';
 import { deriveMasterKey, hashMasterPassword, stretchMasterKey, decryptBytes, encryptString, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID } from '../packages/crypto/src/index';
 import type { SymmetricKey } from '../packages/crypto/src/index';
-import { decryptCipher, decryptFolder, searchItems, totpCode, hasTotp, writeTotpSecret, encryptCipher } from '../packages/vault/src/index';
+import { decryptCipher, decryptFolder, searchItems, totpCode, hasTotp, writeTotpSecret, encryptCipher, parseBitwardenCsv, VaultClient } from '../packages/vault/src/index';
 import type { VaultItem } from '../packages/vault/src/index';
 
 const BASE = process.env.COFFER_APP_URL ?? 'http://127.0.0.1:8080';
@@ -206,6 +206,78 @@ async function main() {
     survivor === undefined ? '条目被一起删掉了 —— 界面上那句承诺是假的' : `folderId=${survivor.folderId}`);
 
   await hardDeleteCipher(http, inFolder.id);
+
+  // ── CSV 导入 ──
+  //
+  // 走**完整的那条路**（VaultClient.importItems），而不是绕开它直接调 API：
+  // 导入的价值全在「用户选一个文件、条目就进去了」这一整条链上，
+  // 只验解析等于没验。
+  console.log('\n6. CSV 导入');
+
+  const tag = Date.now().toString(36);
+  const csv = [
+    'folder,favorite,type,name,notes,fields,reprompt,login_uri,login_username,login_password,login_totp',
+    `导入测试-${tag},1,login,站点A,备注A,"PIN: 4321",0,https://a.test,userA,pwA,`,
+    `导入测试-${tag},0,login,站点B,,"含引号的密码",0,https://b.test,userB,"p@ss,""word"",1",`,
+    `,0,note,笔记C,"第一行\n第二行",,0,,,,`,
+    `,0,login,,,,,,,,`,          // 没有名称 —— 必须被跳过并报出来
+  ].join('\n');
+
+  const parsed = parseBitwardenCsv(csv);
+  check('解析出 3 条（第 4 行没有名称，跳过）', parsed.items.length === 3,
+    `实际 ${parsed.items.length} 条，跳过 ${parsed.skipped.length} 条`);
+  check('跳过的行带行号与原因', parsed.skipped[0]?.rowNumber === 5 && Boolean(parsed.skipped[0]?.reason),
+    JSON.stringify(parsed.skipped));
+
+  const vc = new VaultClient({
+    fetchImpl: fetch,
+    deviceStore: { get: () => 'e2e-import', set: () => {}, clear: () => {} },
+  });
+  await vc.connect({ serverUrl: BASE, email: EMAIL, masterPassword: PASSWORD });
+
+  const before = vc.getSession().items.length;
+  const imported = await vc.importItems(parsed.items);
+  check('导入 3 条全部成功', imported.created === 3 && imported.failed.length === 0,
+    JSON.stringify(imported));
+  check('会话里多了 3 条', vc.getSession().items.length === before + 3);
+
+  const importedNames = vc.getSession().items.map((i) => i.name);
+  check('三条中文名都完整往返',
+    ['站点A', '站点B', '笔记C'].every((n) => importedNames.includes(n)),
+    JSON.stringify(importedNames.slice(-5)));
+
+  // 从**服务端**再拉一次确认真的落库了，而不是只在本地会话里
+  const synced2 = await sync(http, '');
+  // 站点A 与 站点B 在 CSV 里写的是同一个文件夹名 —— 必须**复用**同一个文件夹，
+  // 而不是各建一个（几十条同文件夹的导出会变成几十个同名文件夹）
+  const siteA = vc.getSession().items.find((i) => i.name === '站点A');
+  const siteB = vc.getSession().items.find((i) => i.name === '站点B');
+  check('同名的文件夹被复用而不是各建一个',
+    siteA?.folderId !== null && siteA?.folderId === siteB?.folderId,
+    `A=${siteA?.folderId} B=${siteB?.folderId}`);
+
+  const folderOnServer = (await listFolders(http)).find((f) => f.id === siteA?.folderId);
+  check('文件夹建到了服务端', folderOnServer !== undefined, '没找到导入时建的文件夹');
+  if (folderOnServer) {
+    check('文件夹名解密后与 CSV 里的一致',
+      (await decryptFolder(folderOnServer, userKey)).name === `导入测试-${tag}`);
+  }
+
+  const bOnServer = synced2.ciphers.find((c) => c.id === vc.getSession().items.find((i) => i.name === '站点B')?.id);
+  check('含引号的密码在服务端解出来仍然完整',
+    bOnServer !== undefined
+    && (await decryptCipher(bOnServer, userKey)).login?.password === 'p@ss,"word",1');
+
+  // 清理：导入的条目 + 那两个文件夹
+  for (const i of vc.getSession().items.filter((x) => ['站点A', '站点B', '笔记C'].includes(x.name))) {
+    await hardDeleteCipher(http, i.id).catch(() => {});
+  }
+  for (const f of await listFolders(http)) {
+    if ((await decryptFolder(f, userKey).catch(() => ({ name: '' }))).name === `导入测试-${tag}`) {
+      await deleteFolder(http, f.id).catch(() => {});
+    }
+  }
+
   await hardDeleteCipher(http, created.id);
   check('清理测试条目', true);
 

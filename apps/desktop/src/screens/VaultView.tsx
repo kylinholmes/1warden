@@ -4,6 +4,7 @@ import type { VaultClient } from '@coffer/vault';
 import { SecretField } from '../components/SecretField';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';
+import { ImportScreen } from './Import';
 import { ItemEditor } from './ItemEditor';
 
 interface Props {
@@ -15,7 +16,8 @@ type Category =
   | { kind: 'all' }
   | { kind: 'favorites' }
   | { kind: 'folder'; id: string }
-  | { kind: 'security' };
+  | { kind: 'security' }
+  | { kind: 'import' };
 
 type Mode = { kind: 'browse' } | { kind: 'edit'; item: VaultItem } | { kind: 'new' };
 
@@ -148,6 +150,10 @@ export function VaultView({ client, onLock }: Props) {
       {category.kind === 'security' ? (
         <div className="flex-1 overflow-y-auto">
           <SecurityReportView items={items} />
+        </div>
+      ) : category.kind === 'import' ? (
+        <div className="flex-1 overflow-y-auto">
+          <ImportScreen client={client} onImported={() => setBump((n) => n + 1)} />
         </div>
       ) : (
       <>
@@ -325,6 +331,11 @@ function Sidebar(props: {
           label="安全报告"
           active={props.category.kind === 'security'}
           onClick={() => props.onSelect({ kind: 'security' })}
+        />
+        <NavItem
+          label="导入"
+          active={props.category.kind === 'import'}
+          onClick={() => props.onSelect({ kind: 'import' })}
         />
         {/*
           ⚠️ 这一行**始终显示**，不再以「已有文件夹」为前提。

@@ -21,6 +21,27 @@ import { SyncEngine } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
 import type { AccountInfo, SessionStatus } from './session';
 import type { VaultFolder, VaultItem } from './model';
+import type { ImportedItem } from './import';
+import { emptyLogin, emptyCard, emptyIdentity } from './model';
+
+/** 导入的类型名 → Bitwarden 的数字类型 */
+const RAW_TYPE: Record<ImportedItem['type'], number> = {
+  login: 1, secureNote: 2, card: 3, identity: 4,
+};
+
+/** 导入用的空白条目骨架 */
+function blankImportItem(): VaultItem {
+  return {
+    id: '', type: 'login', rawType: 1, name: '', nameFailed: false,
+    notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
+    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
+    login: emptyLogin(),
+    card: emptyCard(),
+    identity: emptyIdentity(),
+    secureNote: null,
+    customFields: [], passwordHistory: [], attachments: [],
+  };
+}
 
 export interface ConnectParams {
   serverUrl: string;
@@ -358,6 +379,82 @@ export class VaultClient {
     this.session.logout();
     void this.deviceStore.clear();
     this.deviceId = null;
+  }
+
+  // ── 导入 ──
+
+  /**
+   * 批量导入（目前来自 CSV）。
+   *
+   * ## 三条设计取向
+   *
+   * 1. **文件夹按名字复用**。同一份导出里几十条都在「工作」下 —— 建 47 个
+   *    同名文件夹不是用户想要的。
+   * 2. **单条失败不中断整批**。第 30 条因为某种原因写不进去，不该让后面
+   *    170 条也进不来；失败的那几条要**逐条报出来**，而不是给一个总数。
+   * 3. **有序写入**。并发几十个请求会把服务端和进度条都搞乱，
+   *    而导入本来就是一次性的事，慢一点无妨。
+   */
+  async importItems(
+    items: readonly ImportedItem[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<{ created: number; failed: { name: string; reason: string }[] }> {
+    const key = this.requireKey();
+    const userId = this.requireUserId();
+
+    // 文件夹：已有的按名字复用，缺的建出来
+    const folderIdByName = new Map(this.session.folders.map((f) => [f.name, f.id]));
+    const wanted = [...new Set(items.map((i) => i.folderName).filter((n): n is string => n !== null))];
+    for (const name of wanted) {
+      if (folderIdByName.has(name)) continue;
+      try {
+        const created = await this.createFolder(name);
+        folderIdByName.set(name, created.id);
+      } catch {
+        // 建文件夹失败不该让整批停下 —— 这些条目会变成「无文件夹」，
+        // 内容还在，用户之后能自己归类
+      }
+    }
+
+    let created = 0;
+    const failed: { name: string; reason: string }[] = [];
+
+    for (let i = 0; i < items.length; i++) {
+      const src = items[i]!;
+      try {
+        const item: VaultItem = {
+          ...blankImportItem(),
+          name: src.name,
+          type: src.type,
+          rawType: RAW_TYPE[src.type],
+          folderId: src.folderName === null ? null : folderIdByName.get(src.folderName) ?? null,
+          favorite: src.favorite,
+          notes: src.notes,
+          notesFailed: false,
+          login: src.login === null ? null : {
+            username: src.login.username,
+            password: src.login.password,
+            totp: src.login.totp,
+            uris: src.login.uri === null ? [] : [{ uri: src.login.uri, match: null }],
+            passwordRevisionDate: null,
+          },
+          customFields: src.customFields.map((f) => ({
+            name: f.name, value: f.value, type: f.type, linkedId: null,
+          })),
+        };
+        const body = await encryptCipher(item, key, {});
+        const dto = await createCipher(this.http, userId, body);
+        // 直接解回来入会话，省掉一次整库同步
+        const saved = await decryptCipher(dto, key);
+        this.session.replaceData([...this.session.items, saved], this.session.folders.slice());
+        created++;
+      } catch (e) {
+        failed.push({ name: src.name, reason: e instanceof Error ? e.message : '写入失败' });
+      }
+      onProgress?.(i + 1, items.length);
+    }
+
+    return { created, failed };
   }
 
   /** 手动锁定后重新解锁，不需要重新走完整登录 */
