@@ -1,10 +1,11 @@
-import { useMemo, useReducer, useCallback, Component, type ErrorInfo } from 'react';
+import { useMemo, useReducer, useCallback, useEffect, Component, type ErrorInfo } from 'react';
 import { VaultClient, type SessionStatus } from '@coffer/vault';
 import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
 import { screenFor } from './screens/screen-for';
 import { useQuickBridge } from './use-quick-bridge';
+import { listen } from '@tauri-apps/api/event';
 import { tauriFetch } from './transport';
 
 export function App() {
@@ -29,6 +30,16 @@ export function App() {
     client.lock();
     forceRender();
   }, [client]);
+
+  // 菜单栏的「锁定保险库」。
+  //
+  // ⚠️ 为什么要绕一圈由前端来做：密钥和明文都在 WebView 的内存里，
+  // Rust 侧没有东西可清 —— 壳唯一能做的是告诉前端「用户要求锁定」。
+  useEffect(() => {
+    let un: (() => void) | undefined;
+    void listen('coffer:tray-lock', () => { handleLock(); }).then((u) => { un = u; });
+    return () => un?.();
+  }, [handleLock]);
 
   const session = client.getSession();
 

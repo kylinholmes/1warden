@@ -23,6 +23,7 @@
 mod http;
 mod autotype;
 mod hotkey;
+mod tray;
 
 use tauri::Manager;
 
@@ -95,6 +96,12 @@ pub fn run() {
 
             // 开发期打开 devtools 会方便很多；发布版刻意没有这个入口 ——
             // 密码管理器不该在正式版里留一个能看到内存中明文的调试器。
+            // 菜单栏图标。密码管理器大部分时间不在前台，用户需要它的时候
+            // 正在别处登录一个网站 —— 常驻入口比主窗口重要。
+            if let Err(e) = tray::install(app.handle()) {
+                eprintln!("[coffer] 菜单栏图标不可用：{e}");
+            }
+
             // 全局快捷键（⌘⇧\）：在别的应用里也能呼出 Coffer。
             // 注册失败**不影响启动** —— 组合键被占用是很常见的情况，
             // 为了这个让应用起不来是本末倒置。
