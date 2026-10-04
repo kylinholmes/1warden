@@ -1,0 +1,120 @@
+import type { HttpClient } from './http';
+import type { CipherDto } from './types';
+
+export interface CipherWriteBody {
+  type: number;
+  name: string;
+  notes: string | null;
+  folderId: string | null;
+  organizationId: string | null;
+  favorite: boolean;
+  reprompt: number;
+  key?: string | null;
+  login?: unknown;
+  card?: unknown;
+  identity?: unknown;
+  secureNote?: unknown;
+  sshKey?: unknown;
+  fields?: unknown;
+  passwordHistory?: unknown;
+  lastKnownRevisionDate?: string | null;
+  archivedDate?: string | null;
+}
+
+/** 只有调用方显式提供的可选字段才会被序列化 */
+const OPTIONAL_KEYS = [
+  'key', 'login', 'card', 'identity', 'secureNote', 'sshKey',
+  'fields', 'passwordHistory', 'lastKnownRevisionDate', 'archivedDate',
+] as const;
+
+/**
+ * 组装请求体。两个必须显式处理的字段：
+ *
+ * ⚠️ **`encryptedFor` 必填**，且必须等于当前用户 uuid。
+ * 缺失导致的是**反序列化失败**（不是校验错误）；不等会导致 422 "Invalid user cipher"。
+ *
+ * ⚠️ **`folderId` 必须总是发送**。省略会让服务端把条目**移出文件夹** ——
+ * `folder_id` 是 `Option<FolderId>`，缺省得到 `None`，进而删除 `folders_ciphers` 关联行。
+ *
+ * ⚠️ **`archivedDate` 的语义是反的**：`Some(date)` = 归档，`None` = **取消归档**。
+ * 因此只在调用方显式提供时才带上 —— 否则一次普通的改名会把已归档条目悄悄"取消归档"。
+ */
+function buildBody(userId: string, b: CipherWriteBody): Record<string, unknown> {
+  const out: Record<string, unknown> = {
+    encryptedFor: userId,
+    type: b.type,
+    name: b.name,
+    notes: b.notes,
+    folderId: b.folderId,
+    organizationId: b.organizationId,
+    favorite: b.favorite,
+    reprompt: b.reprompt,
+  };
+  for (const k of OPTIONAL_KEYS) {
+    if (k in b) out[k] = b[k];
+  }
+  return out;
+}
+
+export async function createCipher(
+  http: HttpClient, userId: string, body: CipherWriteBody,
+): Promise<CipherDto> {
+  return http.request<CipherDto>('POST', '/api/ciphers', { json: buildBody(userId, body) });
+}
+
+export async function updateCipher(
+  http: HttpClient, id: string, userId: string, body: CipherWriteBody,
+): Promise<CipherDto> {
+  return http.request<CipherDto>('PUT', `/api/ciphers/${id}`, { json: buildBody(userId, body) });
+}
+
+/**
+ * 软删除 —— 条目进入回收站，**可恢复**。
+ *
+ * ⚠️ 对应的是 **`PUT /delete`**。这与直觉相反：
+ * `POST /delete` 与 `DELETE /{id}` 都是**永久删除**。
+ * 写反了用户会永久丢失数据，且没有撤销。
+ */
+export async function softDeleteCipher(http: HttpClient, id: string): Promise<void> {
+  await http.request<void>('PUT', `/api/ciphers/${id}/delete`);
+}
+
+/**
+ * 硬删除 —— **永久，不可恢复**。会级联删除附件文件、密码历史与收藏记录。
+ *
+ * ⚠️ 对应的是 **`DELETE /{id}`**。
+ * UI 上必须在调用此函数前做二次确认，且要明确告诉用户「无法恢复」。
+ */
+export async function hardDeleteCipher(http: HttpClient, id: string): Promise<void> {
+  await http.request<void>('DELETE', `/api/ciphers/${id}`);
+}
+
+export async function restoreCipher(http: HttpClient, id: string): Promise<void> {
+  await http.request<void>('PUT', `/api/ciphers/${id}/restore`);
+}
+
+export async function setArchived(http: HttpClient, id: string, archived: boolean): Promise<void> {
+  await http.request<void>('PUT', `/api/ciphers/${id}/${archived ? 'archive' : 'unarchive'}`);
+}
+
+export async function moveCiphers(
+  http: HttpClient, folderId: string | null, ids: string[],
+): Promise<void> {
+  // 空列表没有意义，且服务端会返回一个令人困惑的错误 —— 直接短路
+  if (ids.length === 0) return;
+  await http.request<void>('POST', '/api/ciphers/move', { json: { folderId, ids } });
+}
+
+/**
+ * 局部更新：只改 folderId 与 favorite。
+ *
+ * 这是**唯一能作用于只读条目**的更新路径 —— 服务端对这条路由只校验可读性，
+ * 不校验可写性。也因此它**不做** `lastKnownRevisionDate` 的乐观并发检查。
+ */
+export async function updateCipherPartial(
+  http: HttpClient, id: string, p: { folderId?: string | null; favorite: boolean },
+): Promise<void> {
+  const body: Record<string, unknown> = { favorite: p.favorite };
+  if ('folderId' in p) body['folderId'] = p.folderId;
+  await http.request<void>('PUT', `/api/ciphers/${id}/partial`, { json: body });
+}
