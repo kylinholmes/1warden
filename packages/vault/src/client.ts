@@ -8,12 +8,12 @@
  */
 import {
   HttpClient, prelogin, loginWithPassword, refreshToken, DEVICE_TYPE,
-  refreshAttachmentUrl, downloadAttachment,
+  refreshAttachmentUrl, downloadAttachment, createAttachmentV2, uploadAttachmentBytes,
   type DeviceInfo, type TokenResponse,
 } from '@coffer/api';
 import {
   deriveMasterKey, hashMasterPassword, stretchMasterKey, decryptBytes,
-  encryptString,
+  encryptString, makeUserKey,
   KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
@@ -21,6 +21,7 @@ import { VaultSession, restoreSession } from './session';
 import { SyncEngine } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
 import { unwrapAttachmentKey, decryptAttachmentContent } from './attachments';
+import { encryptBytes } from '@coffer/crypto';
 import type { AccountInfo, SessionStatus, StoredSession } from './session';
 import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
@@ -329,6 +330,76 @@ export class VaultClient {
     }
     if (raw.length !== 64) throw new Error('这条条目的独立密钥长度不对，为避免写坏数据已中止');
     return { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
+  }
+
+  /**
+   * 给一条条目加一个附件。
+   *
+   * ## 三步，顺序不能换
+   *
+   * 1. 生成一把**这条附件自己的** 64 字节密钥（不重用用户密钥 ——
+   *    附件是唯一会被单独分享出去的东西）
+   * 2. 用它加密文件内容
+   * 3. 把**它自己**用条目密钥包装后，连同加密后的文件名一起登记到服务端
+   *
+   * ⚠️ 第 3 步的 `key` 是「包装后的附件密钥」，不是文件内容 ——
+   * 两者都叫 key，混了的话上传会成功但谁也解不开。
+   */
+  async uploadAttachment(
+    itemId: string, fileName: string, bytes: Uint8Array,
+  ): Promise<{ attachmentId: string }> {
+    const item = this.session.items.find((i) => i.id === itemId);
+    if (!item) throw new Error('找不到这条条目');
+    const wrappingKey = await this.keyFor(item);
+    const userId = this.requireUserId();
+
+    // 1 + 2：这条附件自己的密钥，用它加密内容
+    const attachmentKey = makeUserKey();
+    const encrypted = await encryptBytes(bytes, attachmentKey);
+
+    const ticket = await createAttachmentV2(this.http, itemId, {
+      // 包装后的附件密钥 —— 按**字节**包装，和用户密钥一样
+      key: await encryptBytes(
+        new Uint8Array([...attachmentKey.encKey, ...attachmentKey.macKey]), wrappingKey,
+      ),
+      fileName: await encryptString(fileName, wrappingKey),
+      fileSize: encrypted.length,
+    });
+
+    /*
+     * 3：把加密后的字节 POST 上去。
+     *
+     * ⚠️ **Vaultwarden 返回的是相对路径**（`/ciphers/{id}/attachment/{aid}`），
+     * 而且不带 `/api` 前缀 —— 实测出来的。直接丢给 fetch 只有一句
+     * "fetch() URL is invalid"，看不出是相对路径的问题。
+     * 绝对地址（官方云端那种指向对象存储的）原样用。
+     */
+    /*
+     * ⚠️ **这一步还没打通，所以明确报错，不做半通的事。**
+     *
+     * 登记那一步是好的 —— Vaultwarden 真的建了附件记录并返回了下载地址。
+     * 但把字节送上去这一步走不通，实测：
+     *
+     *   - 它返回 `fileUploadType: 0` 和一个相对地址
+     *     `/ciphers/{cid}/attachment/{aid}`
+     *   - 那条地址在 `/api` 下是 404、在服务根下也是 404
+     *     （用**存在**的条目试的，不是条目不存在导致的 404）
+     *   - 老的 multipart 端点 `/api/ciphers/{cid}/attachment` 同样是 404
+     *   - 唯一存在的是 `/api/ciphers/{cid}/attachment/v2`（无认证时回 401）
+     *
+     * 也就是说 Vaultwarden 只提供 v2 登记这一条路由，而它返回的上传地址
+     * 指向一个它自己没提供的路径。下一件该做的事：翻 Vaultwarden 的源码
+     * 确认 v2 之后字节到底该发到哪里（大概率是某个我没试到的动词或前缀），
+     * 或者退回 multipart 并确认那条路由在当前版本里的真实形态。
+     *
+     * 宁可在这里停住，也不要发一个「上传成功但文件是坏的 / 根本没传上去」的版本。
+     */
+    throw new Error('附件上传暂时不可用（服务端上传地址对不上，见 client.ts 里的说明）');
+    void ticket;
+    // 服务端把附件挂到了条目上 —— 重新同步一次，本地才看得到它
+    await this.refresh();
+    void userId;
+    return { attachmentId: ticket.attachmentId };
   }
 
   /** 重新同步（用户手动刷新、或收到服务器变更通知时调用） */

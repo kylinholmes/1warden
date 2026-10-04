@@ -67,6 +67,51 @@ export class HttpClient {
    *
    * token 在 URL 里，所以这条请求不需要 Authorization 头。
    */
+  /**
+   * 绝对 URL 的**写**请求 —— 附件上传用。
+   *
+   * 单独一个方法而不是给 `request` 加个开关：绝对 URL 与二进制体
+   * 都不是常规路径，混在一起会让「什么时候拼 baseUrl」变成一个要读注释才知道的事。
+   */
+  async requestAbsolute(
+    method: string, url: string, opts: { raw?: Uint8Array } = {},
+  ): Promise<Response> {
+    const headers: Record<string, string> = {
+      Accept: '*/*',
+      ...this.headerFn?.(),
+    };
+    if (opts.raw !== undefined) headers['Content-Type'] = 'application/octet-stream';
+
+    // ⚠️ 绝对 URL 的接口要**自己检查**它是不是绝对的。
+    // 服务端给的地址可能是相对路径（版本差异），直接丢给 fetch 只会得到
+    // 一句 "fetch() URL is invalid" —— 完全看不出是哪个地址、也看不出是相对路径的问题
+    if (!/^https?:\/\//i.test(url)) {
+      throw new ApiError('malformedResponse',
+        `服务端给的地址不是绝对 URL：${url.slice(0, 120)}`, {});
+    }
+
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), this.timeoutMs);
+    try {
+      const res = await this.fetchImpl(url, {
+        method,
+        headers,
+        // ⚠️ 传**字节**，不是字符串 —— 传字符串会经 UTF-8 编码把内容改掉
+        ...(opts.raw === undefined ? {} : { body: opts.raw as unknown as BodyInit }),
+        signal: controller.signal,
+      });
+      if (!res.ok) {
+        const kind = res.status === 404 ? 'notFound'
+          : res.status === 401 || res.status === 403 ? 'auth'
+            : res.status === 429 ? 'rateLimited' : 'server';
+        throw new ApiError(kind, `附件上传失败（HTTP ${res.status}）`, { status: res.status });
+      }
+      return res;
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async requestAbsoluteRaw(url: string, opts: RequestOptions = {}): Promise<Response> {
     const headers: Record<string, string> = {
       // 附件是任意二进制，不能要 JSON

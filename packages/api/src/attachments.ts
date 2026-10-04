@@ -37,3 +37,49 @@ export async function downloadAttachment(
   const res = await http.requestAbsoluteRaw(absoluteUrl);
   return new Uint8Array(await res.arrayBuffer());
 }
+
+/**
+ * 建一条附件并拿到上传地址（v2 流程）。
+ *
+ * ## 为什么用 v2 而不是老的 `/attachment`
+ *
+ * 老端点要求 **multipart/form-data** —— 我们要自己拼 boundary、处理转义，
+ * 而轮子底下还得让传输层支持二进制体。v2 是「先登记、拿一个地址、
+ * 再把加密后的字节直接 POST 上去」，全程没有 multipart。
+ *
+ * ## 字段都是密文
+ *
+ * `fileName` 与 `key` 都是 EncString（`key` 是把附件自己的密钥包装后的密文）。
+ * `fileSize` 给的是**加密后**的字节数。
+ */
+export interface AttachmentUploadTicket {
+  attachmentId: string;
+  /** 往这里 POST 加密后的字节 */
+  url: string;
+  /** 0 = 直传到 url；其它值是云存储的分支，Vaultwarden 只用 0 */
+  fileUploadType: number;
+  cipherResponse: unknown;
+}
+
+export async function createAttachmentV2(
+  http: HttpClient, cipherId: string,
+  body: { key: string; fileName: string; fileSize: number; adminRequest?: boolean },
+): Promise<AttachmentUploadTicket> {
+  return http.request<AttachmentUploadTicket>(
+    'POST', `/api/ciphers/${cipherId}/attachment/v2`,
+    { json: { ...body, adminRequest: body.adminRequest ?? false } },
+  );
+}
+
+/**
+ * 把**加密后的**字节 POST 到登记时给的地址。
+ *
+ * ⚠️ 这里发的必须是原始字节。走 `HttpClient` 的常规路径会把它拼成
+ * `{baseUrl}{绝对网址}` 的废地址，而且请求体是二进制 ——
+ * 那条路会经 UTF-8 解码把字节改掉（见 transport.ts 的 `bodyPartsOf`）。
+ */
+export async function uploadAttachmentBytes(
+  http: HttpClient, absoluteUrl: string, encrypted: Uint8Array,
+): Promise<void> {
+  await http.requestAbsolute('POST', absoluteUrl, { raw: encrypted });
+}
