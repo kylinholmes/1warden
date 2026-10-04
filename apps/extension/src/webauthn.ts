@@ -37,6 +37,7 @@ export type WebauthnPayload = CreatePayload | GetPayload;
 
 export interface WebauthnDeps {
   items: () => readonly VaultItem[];
+  isUnlocked: () => boolean;
   /** 诊断追踪。见 background.ts 里 trace 的说明 —— 两个 SW 实例时控制台会丢日志 */
   trace: (line: string) => Promise<void>;
   /**
@@ -147,6 +148,7 @@ async function handleCreate(
   const before = idsOf();
   await deps.refresh();
   await deps.trace(`create 同步：前=${JSON.stringify(before)} 后=${JSON.stringify(idsOf())}`
+    + ` 条目总数=${deps.items().length} 本实例解锁=${deps.isUnlocked()}`
     + ` 新凭据=${created.stored.credentialId.slice(0, 8)}`);
   const target = findTarget(deps.items(), rpId, origin);
   await deps.trace(`create 目标条目=${target?.id ?? '(新建)'} 该条目已有凭据=${
@@ -192,6 +194,18 @@ async function handleGet(
     return fail('缺少 challenge');
   }
 
+  /**
+   * ⚠️ 断言前也要同步 —— 理由和 create 那边一样，但更容易踩：
+   *
+   * 注册与登录经常是**两个不同的 service worker 实例**处理的（SW 重启）。
+   * 注册那个实例把凭据存进了保险库，而登录这个实例用的是它自己那份**过期**的
+   * 会话快照 —— 里面根本没有刚注册的凭据。表现就是「注册明明成功了，
+   * 登录却说没有可用的 passkey」。
+   *
+   * 一次断言本来就要做密码学运算、而且由用户点击触发，多一次同步不心疼；
+   * 拿过期数据去匹配的代价则是这个功能完全不可用。
+   */
+  await deps.refresh();
   const candidates: Candidate[] = pickCredentials(deps.items(), rpId, payload.allowCredentials);
   if (candidates.length === 0) {
     // 用户只看一句话，但排查时需要知道「是库里没有，还是页面指定的 id 对不上」

@@ -284,6 +284,45 @@ async function readDone(key: string): Promise<Record<string, unknown> | null> {
   return map[key] ?? null;
 }
 
+/**
+ * 抢一个「我正在处理这个请求」的认领。
+ *
+ * ⚠️ `chrome.storage` 没有原子的比较并写入 —— 只写不读会有竞态，
+ * 所以**写完再读回来确认赢的是自己**。两个实例同时写时后写的赢，
+ * 先写的那次读回来会发现不是自己，于是让位。
+ */
+async function claim(key: string): Promise<boolean> {
+  const got = await chrome.storage.session.get(WA_CLAIM_KEY);
+  const map = (got[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
+
+  // ⚠️ 认领**必须会过期**。持有它的实例可能半路被杀（这正是我们面对的那个
+  // 场景），认领会永远留着 —— 后来者干等十秒然后报错，比不做互斥还糟。
+  const held = map[key];
+  if (held !== undefined && Date.now() - held < CLAIM_TTL_MS) return false;
+
+  // 只留最近几十个，别让这张表无限长
+  for (const k of Object.keys(map).slice(0, Math.max(0, Object.keys(map).length - 32))) delete map[k];
+  map[key] = Date.now();
+  await chrome.storage.session.set({ [WA_CLAIM_KEY]: map });
+
+  const back = await chrome.storage.session.get(WA_CLAIM_KEY);
+  const after = (back[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
+  // 不是自己写的 → 有人抢先。两个实例同时写时后写的赢，先写的读到不是自己就让位
+  return after[key] === map[key];
+}
+
+async function releaseClaim(key: string): Promise<void> {
+  const got = await chrome.storage.session.get(WA_CLAIM_KEY);
+  const map = (got[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
+  delete map[key];
+  await chrome.storage.session.set({ [WA_CLAIM_KEY]: map });
+}
+
+const WA_CLAIM_KEY = 'coffer.webauthnClaim';
+
+/** 认领的有效期。超过它视为持有者已死，后来者可以接管 */
+const CLAIM_TTL_MS = 30_000;
+
 async function writeDone(key: string, reply: Record<string, unknown>): Promise<void> {
   const got = await chrome.storage.session.get(WA_DONE_KEY);
   const map = (got[WA_DONE_KEY] ?? {}) as Record<string, Record<string, unknown>>;
@@ -308,6 +347,7 @@ async function runWebauthn(payload: unknown, senderOrigin: string | undefined): 
     items: () => c.getSession().items,
     userKey: () => key,
     refresh: () => c.refresh(),
+    isUnlocked: () => c.getSession().isUnlocked(),
     trace,
     persist: async (changed) => {
       for (const item of changed) await c.saveItem(item);
@@ -497,13 +537,35 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       if (typeof reqId !== 'number') return await runWebauthn(req.payload, sender.origin);
 
       const key = waKey(sender, reqId);
+
       const done = await readDone(key);
       if (done) return done;
+
+      /**
+       * ⚠️ **跨实例的互斥。**
+       *
+       * 实测到的：同一个请求会被**两个 service worker 实例并发**处理
+       * （SW 重启期间的交接），各自跑一遍 create。两遍都读到「这条条目还没有
+       * 凭据」（因为第一遍还没落盘），于是都往里写 —— 后者覆盖前者。
+       * 页面拿到第一遍的 credentialId，库里躺着第二遍的。
+       *
+       * 内存里的锁（`createLocks`）跨不了实例，所以「认领」也必须放进存储。
+       * 抢不到的那个**等**对方的结果，而不是自己也跑一遍。
+       */
+      if (!(await claim(key))) {
+        for (let i = 0; i < 40; i++) {
+          await new Promise((r) => setTimeout(r, 250));
+          const r = await readDone(key);
+          if (r) return r;
+        }
+        return { ok: false, error: '另一个 passkey 请求还在处理中，请重试' };
+      }
 
       const result = await runWebauthn(req.payload, sender.origin);
       // ⚠️ 失败**不**记缓存：让页面能重试。成功的才记 ——
       // 而成功的结果不记的话，SW 重启后同一个请求会再跑一遍并覆盖。
       if (result['ok'] === true) await writeDone(key, result);
+      else await releaseClaim(key);
       return result;
     }
 

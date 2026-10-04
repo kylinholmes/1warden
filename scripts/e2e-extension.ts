@@ -815,6 +815,27 @@ async function main(): Promise<void> {
       check('passkey 全流程', false, e instanceof Error ? e.message : String(e));
     }
 
+    // ⚠️ **在这里读追踪，不能放到收尾的 finally 里。**
+    // 收尾阶段那些上下文已经调不动 chrome.storage 了（实测 eval 直接超时），
+    // 在那里读到空值会得出「没写进去」的错误结论 —— 我就在这上面绕了一轮。
+    // 现在趁上下文还健康，从两个连接各读一次。
+    {
+      const dump = async (c: Cdp | undefined): Promise<string[]> => {
+        if (!c) return [];
+        try {
+          return await Promise.race([
+            c.eval<string[]>(`chrome.storage.session.get('coffer.trace')`
+              + `.then((g) => JSON.parse(JSON.stringify(g['coffer.trace'] ?? [])))`),
+            new Promise<string[]>((r) => setTimeout(() => r([]), 3000)),
+          ]);
+        } catch { return []; }
+      };
+      const tr = [...new Set([...await dump(ext), ...await dump(sw)])];
+      console.log('\n── passkey 追踪（跨 SW 实例）──');
+      if (tr.length === 0) console.log('  （空）');
+      for (const line of tr) console.log(`  ${line}`);
+    }
+
     // ── 7. 收尾：删掉这次造的条目 ──
     console.log('\n7. 清理');
     const created = (await ext.eval<{ items: { id: string; name: string }[] }>(
@@ -857,6 +878,26 @@ async function main(): Promise<void> {
           return [];
         }
       };
+      // 先分清是「读不到」还是「没写进去」：
+      //   - 往返探测失败 → 存储本身在这个上下文里不可用
+      //   - 往返成功但 trace 为空 → 是 service worker 那边没写进去
+      let probe = '';
+      try {
+        probe = await Promise.race([
+          ext!.eval<string>(`(async () => {
+            try {
+              await chrome.storage.session.set({ '__probe': 'v' });
+              const g = await chrome.storage.session.get(['__probe', 'coffer.trace', 'coffer.pending']);
+              return '往返=' + (g['__probe'] === 'v') + ' trace键=' + (typeof g['coffer.trace'])
+                + '(' + (Array.isArray(g['coffer.trace']) ? g['coffer.trace'].length : '-') + ')'
+                + ' pending键=' + (typeof g['coffer.pending']);
+            } catch (e) { return 'ERR ' + e.message; }
+          })()`),
+          new Promise<string>((r) => setTimeout(() => r('超时'), 3000)),
+        ]);
+      } catch (e) { probe = 'ERR ' + String(e); }
+      console.log(`\n── 会话存储探测 ── ${probe}`);
+
       const tr = [...await readTrace(ext), ...await readTrace(sw)];
       console.log('\n── passkey 追踪（跨 SW 实例）──');
       if (tr.length === 0) console.log('  （缓冲为空 —— 追踪本身没写进去，或读不出来）');
