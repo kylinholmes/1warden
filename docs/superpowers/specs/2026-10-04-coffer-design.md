@@ -254,7 +254,19 @@ class BitwardenApi {
 **Rust 侧的职责**（前端不该做的事）：
 - 窗口：主窗口、Quick Search 无边框浮窗、系统托盘
 - 全局快捷键（默认 `Cmd+Shift+Space` 呼出快速搜索）
-- **安全存储**：把 refresh token 存进 macOS Keychain（`keyring` crate），实现"记住此设备"
+- **安全存储**：把 refresh token / 设备密钥存进 macOS Keychain，实现"记住此设备"
+
+  > ⚠️ **三个官方插件都不可用于密钥保管**（已读源码核实）：
+  > - `tauri-plugin-biometric` —— **纯 UI 挡板，没有密码学绑定**。
+  >   它的 `authenticate()` 成功时 `invoke.resolve()` **不带任何 payload**，
+  >   整个实现里没有任何 Keychain / `SecAccessControl` 代码。**篡改前端即可绕过。**
+  > - `tauri-plugin-stronghold` —— **已废弃**，官方明确说不会进入 Tauri v3
+  > - `tauri-plugin-store` —— **明文 JSON**，官方文档明说不能存敏感数据
+  >
+  > **正确做法**：把「生物识别通过」作为**解封 Keychain 条目的条件** ——
+  > 用 `SecAccessControl(.userPresence)` 保护的 Keychain item，让**操作系统**
+  > 强制「必须先通过生物识别才能取出密钥」。这样即使绕过 JS gate 也拿不到东西。
+  > 需要自己写一个小的 Swift 插件。详见 `docs/reference/tauri-platform-notes.md`。
 - 锁屏/休眠事件监听 → 触发自动锁定
 - **本地 IPC 服务**：给浏览器扩展用的 loopback WebSocket + 握手密钥
 - 剪贴板写入 + N 秒后清除
