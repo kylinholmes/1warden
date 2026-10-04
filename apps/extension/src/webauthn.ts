@@ -37,6 +37,12 @@ export type WebauthnPayload = CreatePayload | GetPayload;
 
 export interface WebauthnDeps {
   items: () => readonly VaultItem[];
+  /**
+   * 从服务端重新同步一次。
+   *
+   * ⚠️ 注册前**必须**调用，不能省。见 `handleCreate` 里的说明。
+   */
+  refresh: () => Promise<void>;
   userKey: () => SymmetricKey;
   /**
    * 把**改动过的**条目存回服务端，并刷新会话快照。
@@ -117,6 +123,23 @@ async function handleCreate(
   const check = checkClientData(clientData, 'webauthn.create', origin);
   if (!check.ok) return fail(`内部校验失败：${check.reason}`);
 
+  /**
+   * ⚠️ **先同步，再决定往哪条条目上挂。**
+   *
+   * 这里防的是一个真实发生过、且症状极具迷惑性的数据丢失：
+   *
+   * MV3 的 service worker 会在一次 create 处理到一半时被杀。同一个请求被新的
+   * 实例又跑了一遍，而新实例从存储恢复出来的会话是**第一次落盘之前**的快照
+   * （凭据列表还是空的）。于是它整条写回去，把第一次刚存的凭据覆盖掉了。
+   *
+   * 页面拿到的是第一次的 credentialId（它先返回），库里躺着第二次的 ——
+   * 之后用 allowCredentials 登录报「没有可用的 passkey」，看起来像匹配逻辑坏了，
+   * 而匹配逻辑完全正确。为了找到这里绕了很久。
+   *
+   * 内存里的幂等表挡不住这个：第一次执行**没有被记录的机会**，它被杀了。
+   * 唯一可靠的办法是拿服务端的真相来合并 —— 服务端那边两次都存下来了。
+   */
+  await deps.refresh();
   const target = findTarget(deps.items(), rpId, origin);
   const updated: VaultItem = target === null
     ? newPasskeyItem(rpId, created.stored.userName ?? null, origin, created.stored)
@@ -237,6 +260,40 @@ function newPasskeyItem(
   };
 }
 
+/**
+ * 同一个 rpId 的 create **串行**执行。
+ *
+ * ## 为什么
+ *
+ * 观察到的现象：页面只调了一次 create，它却执行了两次。第二次读到的是
+ * **过期快照**（该条目的凭据列表还是空的），写回去就把第一次刚存的凭据
+ * 覆盖掉了 —— 用户看到「注册成功」，下次登录却被告知没有可用的 passkey，
+ * 而 create 返回给页面的那个 ID 在库里根本不存在。
+ *
+ * ## 为什么串行化能修
+ *
+ * 根因尚未确证（已排除：重发、content script 的转发去重、SW 的请求幂等、
+ * 拦截脚本重复求值、base64 编解码）。但无论第二次是怎么来的，
+ * 串行化都让第二个**一定在第一个落盘并刷新会话之后**才读 ——
+ * 于是它读到的是最新的列表，追加而不是覆盖。
+ *
+ * 代价从「静默丢一条凭据」变成「可能多一条重复凭据（用户能删）」。
+ * 这个交换在任何情况下都划算。
+ */
+const createLocks = new Map<string, Promise<unknown>>();
+
+export function serializeCreate<T>(rpId: string, run: () => Promise<T>): Promise<T> {
+  // 前一个无论成功失败都要放行下一个 —— 一次失败不该把这个站点的注册永久卡死
+  const prev = createLocks.get(rpId) ?? Promise.resolve();
+  const next = prev.then(run, run);
+  // 只留一个「尾巴」用于排队；失败不能变成未处理的拒绝
+  const tail = next.then(() => undefined, () => undefined);
+  createLocks.set(rpId, tail);
+  // 队列排空后清掉，别让这张表随着访问过的站点无限长
+  void tail.then(() => { if (createLocks.get(rpId) === tail) createLocks.delete(rpId); });
+  return next;
+}
+
 export async function handleWebauthn(
   payload: WebauthnPayload | undefined,
   senderOrigin: string | undefined,
@@ -255,7 +312,8 @@ export async function handleWebauthn(
 
   try {
     return payload.op === 'create'
-      ? await handleCreate(payload, origin, deps)
+      // 同一个 rpId 的注册串行执行 —— 见 serializeCreate 的说明
+      ? await serializeCreate(payload.rp.id ?? hostOf(origin), () => handleCreate(payload, origin, deps))
       : await handleGet(payload, origin, deps);
   } catch (e) {
     return fail(e instanceof Error ? e.message : 'passkey 操作失败');

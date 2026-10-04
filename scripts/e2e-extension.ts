@@ -732,6 +732,11 @@ async function main(): Promise<void> {
     check('★ 断言签名能用注册时的公钥验过（字节布局正确）', verified);
 
     // 计数必须随断言前进 —— RP 靠它检测同一个凭据被复制到两台设备
+    // ⚠️ 在同一次运行里把两边打出来对比。此前几轮我拿不同运行的日志互相印证，
+    // 那是无效的 —— 凭据 ID 每次运行都是随机新生成的
+    console.log('  [e2e] 即将用 allowCredentials 请求，id=' + pkCreated.credentialId
+      + ' 声明类型=' + Object.prototype.toString.call(pkCreated));
+
     const counter1 = new DataView(authData.buffer).getUint32(33, false);
     const secondAssertion = await page.eval<{ authenticatorData: string }>(`(async () => {
       const b64u = (buf) => { const b = new Uint8Array(buf); let s = '';

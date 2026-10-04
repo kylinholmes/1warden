@@ -235,6 +235,7 @@ async function runWebauthn(payload: unknown, senderOrigin: string | undefined): 
   const result = await handleWebauthn(payload as WebauthnPayload, senderOrigin, {
     items: () => c.getSession().items,
     userKey: () => key,
+    refresh: () => c.refresh(),
     persist: async (changed) => {
       for (const item of changed) await c.saveItem(item);
       // 和 save-capture 一样：存完必须刷一次会话快照，
