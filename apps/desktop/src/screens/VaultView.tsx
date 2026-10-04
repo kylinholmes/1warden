@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { searchItems, totpCode, hasTotp, type VaultItem, type VaultFolder } from '@coffer/vault';
 import type { VaultClient } from '../vault-client';
 import { SecretField } from '../components/SecretField';
+import { ItemEditor } from './ItemEditor';
 
 interface Props {
   client: VaultClient;
@@ -10,11 +11,16 @@ interface Props {
 
 type Category = { kind: 'all' } | { kind: 'favorites' } | { kind: 'folder'; id: string };
 
+type Mode = { kind: 'browse' } | { kind: 'edit'; item: VaultItem } | { kind: 'new' };
+
 export function VaultView({ client, onLock }: Props) {
   const session = client.getSession();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<Category>({ kind: 'all' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [mode, setMode] = useState<Mode>({ kind: 'browse' });
+  const [confirmDelete, setConfirmDelete] = useState<VaultItem | null>(null);
+  const [bump, setBump] = useState(0); // 本地写入后强制重渲染 —— session 不是响应式的
   const searchRef = useRef<HTMLInputElement>(null);
 
   const items = session.items;
@@ -47,8 +53,46 @@ export function VaultView({ client, onLock }: Props) {
     return () => window.removeEventListener('keydown', onKey);
   }, [onLock]);
 
+  // 快捷键：⌘N 新建。放在编辑态下会被输入框抢走，所以只在浏览态生效
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'n' && mode.kind === 'browse') {
+        e.preventDefault();
+        setMode({ kind: 'new' });
+      }
+    }
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [mode.kind]);
+
+  // 编辑器占满右侧，侧栏与列表保持可见 —— 用户在编辑时仍能看到自己在哪个位置
+  if (mode.kind !== 'browse') {
+    return (
+      <div className="flex h-full">
+        <Sidebar
+          folders={folders} category={category}
+          onSelect={(c) => { setCategory(c); setSelectedId(null); setMode({ kind: 'browse' }); }}
+          counts={{ all: items.length, favorites: items.filter((i) => i.favorite).length }}
+          onLock={onLock} account={session.account?.email ?? ''}
+          onNew={() => setMode({ kind: 'new' })}
+        />
+        <div className="flex-1 overflow-hidden">
+          <ItemEditor
+            client={client}
+            item={mode.kind === 'edit' ? mode.item : null}
+            onCancel={() => setMode({ kind: 'browse' })}
+            onDone={(saved) => {
+              setMode({ kind: 'browse' });
+              if (saved) { setSelectedId(saved.id); setBump((n) => n + 1); }
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="flex h-full">
+    <div className="flex h-full" data-bump={bump}>
       <Sidebar
         folders={folders}
         category={category}
@@ -56,16 +100,24 @@ export function VaultView({ client, onLock }: Props) {
         counts={{ all: items.length, favorites: items.filter((i) => i.favorite).length }}
         onLock={onLock}
         account={session.account?.email ?? ''}
+        onNew={() => setMode({ kind: 'new' })}
       />
 
       <div className="flex w-[320px] shrink-0 flex-col border-r border-[var(--border-subtle)]">
-        <div className="border-b border-[var(--border-subtle)] p-3">
+        <div className="flex items-center gap-2 border-b border-[var(--border-subtle)] p-3">
           <input
             ref={searchRef}
             type="search" value={query} onChange={(e) => setQuery(e.target.value)}
             placeholder="搜索…  ⌘F"
-            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-sunken)] px-3 py-1.5 text-[var(--text-sm)] outline-none focus:border-[var(--accent)]"
+            className="min-w-0 flex-1 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-sunken)] px-3 py-1.5 text-[var(--text-sm)] outline-none focus:border-[var(--accent)]"
           />
+          <button
+            onClick={() => setMode({ kind: 'new' })}
+            title="新建条目  ⌘N"
+            className="shrink-0 rounded-[var(--radius-md)] bg-[var(--accent)] px-2.5 py-1.5 text-[var(--text-sm)] font-medium text-[var(--accent-ink)] transition-opacity duration-[var(--dur-fast)] hover:bg-[var(--accent-hover)]"
+          >
+            ＋
+          </button>
         </div>
 
         <ul className="flex-1 overflow-y-auto p-2">
@@ -79,16 +131,91 @@ export function VaultView({ client, onLock }: Props) {
           ))}
           {filtered.length === 0 && (
             <li className="px-3 py-8 text-center text-[var(--text-sm)] text-[var(--ink-tertiary)]">
-              {query ? '没有匹配的条目' : '这里还是空的'}
+              {query ? '没有匹配的条目' : '这里还是空的 —— 点右上角 ＋ 新建一条'}
             </li>
           )}
         </ul>
       </div>
 
       <div className="flex-1 overflow-y-auto">
-        {selected
-          ? <ItemDetail key={selected.id} item={selected} />
-          : <EmptyDetail />}
+        {selected ? (
+          <ItemDetail
+            key={selected.id}
+            item={selected}
+            onEdit={() => setMode({ kind: 'edit', item: selected })}
+            onDelete={() => setConfirmDelete(selected)}
+            onToggleFavorite={() => {
+              void client.toggleFavorite(selected.id).then(() => setBump((n) => n + 1));
+            }}
+          />
+        ) : <EmptyDetail />}
+      </div>
+
+      {confirmDelete && (
+        <DeleteDialog
+          item={confirmDelete}
+          onCancel={() => setConfirmDelete(null)}
+          onTrash={async () => {
+            const target = confirmDelete;
+            setConfirmDelete(null);
+            await client.moveToTrash(target.id);
+            setSelectedId(null);
+            setBump((n) => n + 1);
+          }}
+          onPermanent={async () => {
+            const target = confirmDelete;
+            setConfirmDelete(null);
+            await client.deletePermanently(target.id);
+            setSelectedId(null);
+            setBump((n) => n + 1);
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+/**
+ * 删除确认。
+ *
+ * ⚠️ 两个选项的后果**差别巨大**，所以措辞必须毫不含糊：
+ * 「移到回收站」可以恢复，「永久删除」不能。把两者做得看起来差不多
+ * 是这类界面上最容易造成不可逆损失的设计错误。
+ */
+function DeleteDialog(props: {
+  item: VaultItem;
+  onCancel: () => void;
+  onTrash: () => void;
+  onPermanent: () => void;
+}) {
+  const [ack, setAck] = useState(false);
+  return (
+    <div className="fixed inset-0 z-50 grid place-items-center bg-black/30 p-4" role="dialog" aria-modal>
+      <div className="w-full max-w-sm rounded-[var(--radius-lg)] bg-[var(--surface-overlay)] p-5" style={{ boxShadow: 'var(--elev-3)' }}>
+        <h3 className="mb-1 text-[var(--text-lg)] font-semibold">删除「{props.item.name}」？</h3>
+        <p className="mb-4 text-[var(--text-sm)] text-[var(--ink-secondary)]">
+          移到回收站后仍可恢复。永久删除则<strong>无法撤销</strong>。
+        </p>
+
+        <label className="mb-4 flex items-start gap-2 text-[var(--text-sm)] text-[var(--ink-secondary)]">
+          <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
+          我知道永久删除无法恢复
+        </label>
+
+        <div className="flex flex-col gap-2">
+          <button onClick={props.onTrash}
+            className="w-full rounded-[var(--radius-md)] bg-[var(--accent)] px-4 py-2 text-[var(--text-sm)] font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)]">
+            移到回收站
+          </button>
+          <button onClick={props.onPermanent} disabled={!ack}
+            className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-4 py-2 text-[var(--text-sm)] font-medium text-[var(--risk)] transition-opacity duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] disabled:opacity-40">
+            永久删除
+          </button>
+          <button onClick={props.onCancel}
+            className="w-full rounded-[var(--radius-md)] px-4 py-2 text-[var(--text-sm)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]">
+            取消
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -101,11 +228,19 @@ function Sidebar(props: {
   counts: { all: number; favorites: number };
   onLock: () => void;
   account: string;
+  onNew: () => void;
 }) {
   return (
     <nav className="flex w-[190px] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-sunken)]">
-      <div className="p-3">
+      <div className="flex items-center justify-between p-3">
         <div className="px-2 py-1 text-[var(--text-lg)] font-semibold tracking-tight">Coffer</div>
+        <button
+          onClick={props.onNew}
+          title="新建条目  ⌘N"
+          className="mr-1 rounded-[var(--radius-sm)] px-2 py-1 text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)]"
+        >
+          ＋
+        </button>
       </div>
 
       <ul className="flex-1 space-y-0.5 px-2">
@@ -222,7 +357,12 @@ function EmptyDetail() {
   );
 }
 
-function ItemDetail({ item }: { item: VaultItem }) {
+function ItemDetail({ item, onEdit, onDelete, onToggleFavorite }: {
+  item: VaultItem;
+  onEdit: () => void;
+  onDelete: () => void;
+  onToggleFavorite: () => void;
+}) {
   const [totp, setTotp] = useState<{ code: string; remaining: number; period: number } | null>(null);
 
   const refreshTotp = useCallback(() => {
@@ -248,6 +388,26 @@ function ItemDetail({ item }: { item: VaultItem }) {
             {TYPE_LABEL[item.type] ?? '未知类型'}
             {item.rawType > 5 && '（此类型较新，暂只支持查看）'}
           </p>
+        </div>
+
+        <div className="flex shrink-0 items-center gap-1">
+          <button onClick={onToggleFavorite} title={item.favorite ? '取消收藏' : '加入收藏'}
+            className={`rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-sm)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
+              item.favorite ? 'text-[var(--caution)]' : 'text-[var(--ink-tertiary)]'
+            }`}>
+            {item.favorite ? '★' : '☆'}
+          </button>
+          {/* 未知类型不提供编辑 —— 保存会把它降级成别的类型，等于破坏数据 */}
+          {item.rawType >= 1 && item.rawType <= 5 && (
+            <button onClick={onEdit}
+              className="rounded-[var(--radius-sm)] px-2.5 py-1 text-[var(--text-sm)] text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)]">
+              编辑
+            </button>
+          )}
+          <button onClick={onDelete}
+            className="rounded-[var(--radius-sm)] px-2.5 py-1 text-[var(--text-sm)] text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--risk)]">
+            删除
+          </button>
         </div>
       </header>
 

@@ -173,6 +173,93 @@ export class VaultClient {
 
   getUserId(): string | null { return this.session.account?.userId ?? null; }
 
+  // ── 写入 ──
+  //
+  // 策略：**先乐观更新本地，再触发同步**。
+  // 直接等同步会让每次保存都卡住 UI 一两秒；而只改本地不同步则会让
+  // 服务端与本地悄悄分叉。乐观更新 + 后台同步两头都占。
+
+  /** 新建或更新一条。`item.id` 为空串表示新建。 */
+  async saveItem(item: VaultItem): Promise<VaultItem> {
+    const key = this.requireKey();
+    const userId = this.requireUserId();
+    const isNew = item.id === '';
+
+    // 已有条目：带上服务端的 revisionDate 做乐观并发控制。
+    // 不带的话，两端同时修改会静默覆盖 —— 服务端不会拦
+    const opts: Parameters<typeof encryptCipher>[2] = isNew
+      ? {}
+      : { lastKnownRevisionDate: item.updatedAt };
+    const body = await encryptCipher(item, key, opts);
+
+    const dto = isNew
+      ? await createCipher(this.http, userId, body)
+      : await updateCipher(this.http, item.id, userId, body);
+
+    const saved = await decryptCipher(dto, key);
+    this.applyLocally(saved, isNew);
+    return saved;
+  }
+
+  /** 软删除 —— 进回收站，**可恢复**。UI 上的「移到回收站」走这条。 */
+  async moveToTrash(id: string): Promise<void> {
+    await softDeleteCipher(this.http, id);
+    this.removeLocally(id);
+    void this.refresh().catch(() => { /* 后台同步失败不影响用户已经看到的删除 */ });
+  }
+
+  /**
+   * 硬删除 —— **永久，不可恢复**。
+   * UI 上必须先做二次确认，并且要明确告诉用户无法恢复。
+   */
+  async deletePermanently(id: string): Promise<void> {
+    await hardDeleteCipher(this.http, id);
+    this.removeLocally(id);
+  }
+
+  async toggleFavorite(id: string): Promise<void> {
+    const item = this.session.items.find((i) => i.id === id);
+    if (!item) return;
+    // 收藏是局部更新 —— 不需要重新加密整条记录
+    await updateCipherPartial(this.http, id, { favorite: !item.favorite });
+    this.applyLocally({ ...item, favorite: !item.favorite }, false);
+  }
+
+  async setArchived(id: string, archived: boolean): Promise<void> {
+    await setArchivedApi(this.http, id, archived);
+    this.removeLocally(id);
+    void this.refresh().catch(() => {});
+  }
+
+  private requireKey(): SymmetricKey {
+    if (!this.userKey) throw new Error('保险库未解锁');
+    return this.userKey;
+  }
+
+  private requireUserId(): string {
+    const id = this.session.account?.userId;
+    if (!id) throw new Error('没有已登录的账户');
+    return id;
+  }
+
+  /** 局部更新会话里的条目列表 —— 不触发整库重解 */
+  private applyLocally(item: VaultItem, isNew: boolean): void {
+    if (!this.session.isUnlocked()) return;
+    const current = this.session.items;
+    const next = isNew
+      ? [...current, item]
+      : current.map((i) => (i.id === item.id ? item : i));
+    this.session.replaceData(next, this.session.folders.slice());
+  }
+
+  private removeLocally(id: string): void {
+    if (!this.session.isUnlocked()) return;
+    this.session.replaceData(
+      this.session.items.filter((i) => i.id !== id),
+      this.session.folders.slice(),
+    );
+  }
+
   lock(): void {
     this.userKey = null;
     this.masterKey = null;
@@ -235,7 +322,14 @@ function clearDeviceIdentifier(): void {
   localStorage.removeItem(DEVICE_KEY);
 }
 
-// 这两个薄封装让依赖注入的签名保持简单
-import { sync as apiSync, getRevisionDate as apiRevisionDate } from '@coffer/api';
+// 这些薄封装让依赖注入与调用点的签名保持简单
+import {
+  sync as apiSync, getRevisionDate as apiRevisionDate,
+  createCipher, updateCipher, softDeleteCipher, hardDeleteCipher,
+  setArchived as setArchivedApi, updateCipherPartial,
+} from '@coffer/api';
+import { encryptCipher, decryptCipher as decryptCipherExport } from '@coffer/vault';
+import type { VaultItem } from '@coffer/vault';
+
 function syncVia(http: HttpClient) { return apiSync(http, ''); }
 function getRevisionDateVia(http: HttpClient) { return apiRevisionDate(http, ''); }
