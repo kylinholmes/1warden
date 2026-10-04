@@ -14,6 +14,7 @@ export * from './import-csv';
 export * from './import-json';
 export * from './zip';
 export * from './import-1pux';
+export * from './import-dispatch';
 export * from './cbor';
 export * from './passkey';
 export * from './passkey-match';

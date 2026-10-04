@@ -19,7 +19,7 @@ import {
 import type { CipherDto } from '../packages/api/src/index';
 import { deriveMasterKey, hashMasterPassword, stretchMasterKey, decryptBytes, encryptString, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID } from '../packages/crypto/src/index';
 import type { SymmetricKey } from '../packages/crypto/src/index';
-import { decryptCipher, decryptFolder, searchItems, totpCode, hasTotp, writeTotpSecret, encryptCipher, parseBitwardenCsv, VaultClient } from '../packages/vault/src/index';
+import { decryptCipher, decryptFolder, searchItems, totpCode, hasTotp, writeTotpSecret, encryptCipher, parseBitwardenCsv, parseImport, VaultClient } from '../packages/vault/src/index';
 import type { VaultItem } from '../packages/vault/src/index';
 
 const BASE = process.env.COFFER_APP_URL ?? 'http://127.0.0.1:8080';
@@ -286,12 +286,153 @@ async function main() {
   }
 
   await hardDeleteCipher(http, created.id);
+  // ── 1PUX / JSON 导入：无损格式必须真的无损 ──
+  console.log('\n7. 结构化格式导入（1PUX / Bitwarden JSON）');
+
+  /*
+   * ⚠️ 这一段验证的是**无损**，不是「能解析」。
+   *
+   * CSV 只有那几列，卡片有效期、身份邮箱在它里面没有地方放。
+   * 结构化格式的意义就在于这些字段能过来 —— 所以断言必须落在
+   * 「有效期是不是 9/2028」「邮箱是不是完整」上，
+   * 而不是「导入了 N 条」。后者在字段全丢的情况下照样通过。
+   */
+  const structuredTag = `结构化-${tag}`;
+  const puxItem = (categoryUuid: string, title: string, details: unknown, tags: string[] = []) => ({
+    uuid: `u-${title}`, categoryUuid, favIndex: 0,
+    overview: { title, urls: categoryUuid === '001' ? [{ url: 'https://pux.test' }] : [], tags },
+    details,
+  });
+
+  const puxBytes = make1Pux({ accounts: [{ attrs: {}, vaults: [{ attrs: { name: structuredTag }, items: [
+    puxItem('001', `登录-${tag}`, {
+      loginFields: [
+        { name: 'username', value: 'puxuser', designation: 'username', fieldType: 'T' },
+        { name: 'password', value: 'puxpass', designation: 'password', fieldType: 'P' },
+      ], notesPlain: '来自 1PUX', sections: [],
+    }),
+    puxItem('002', `卡片-${tag}`, { notesPlain: '', sections: [{ title: '银行卡', fields: [
+      { id: 'cardholder', title: '持卡人', value: '张三', fieldType: 'T' },
+      { id: 'number', title: '号码', value: '4111111111111111', fieldType: 'C' },
+      { id: 'expiry', title: '有效期', value: '202809', fieldType: 'M' },
+      { id: 'verificationNumber', title: '安全码', value: '123', fieldType: 'T' },
+    ] }] }),
+    puxItem('004', `身份-${tag}`, { notesPlain: '', sections: [{ title: '', fields: [
+      { id: 'firstname', title: '名', value: '三', fieldType: 'T' },
+      { id: 'email', title: '邮箱', value: 'pux@example.com', fieldType: 'E' },
+    ] }] }),
+  ] }] }] });
+
+  const puxParsed = await parseImport(puxBytes);
+  check('1PUX 解析出 3 条', puxParsed.items.length === 3, JSON.stringify(puxParsed.skipped));
+  check('1PUX 的类型分对了（登录/卡片/身份）',
+    puxParsed.items.map((i) => i.type).join(',') === 'login,card,identity',
+    puxParsed.items.map((i) => i.type).join(','));
+
+  await vc.refresh();
+  const beforeStructured = (await sync(http, '')).ciphers.length;
+  const puxImported = await vc.importItems(puxParsed.items);
+  check('1PUX 导入成功', puxImported.created === 3, JSON.stringify(puxImported.failed));
+
+  const card = await byName(http, userKey, `卡片-${tag}`);
+  check('★ 卡片的有效期完整过来了（CSV 做不到这件事）',
+    card?.card?.expMonth === '9' && card?.card?.expYear === '2028',
+    JSON.stringify(card?.card));
+  check('卡片的卡号与安全码也完整', card?.card?.number === '4111111111111111' && card?.card?.code === '123');
+
+  const identity = await byName(http, userKey, `身份-${tag}`);
+  check('★ 身份的邮箱完整过来了', identity?.identity?.email === 'pux@example.com',
+    JSON.stringify(identity?.identity));
+
+  const puxLogin = await byName(http, userKey, `登录-${tag}`);
+  check('1PUX 的登录条目带上用户名与密码',
+    puxLogin?.login?.username === 'puxuser' && puxLogin?.login?.password === 'puxpass');
+
+  // Bitwarden JSON —— 同样是无损格式，走同一个落库路径
+  const bwJson = JSON.stringify({ encrypted: false, folders: [], items: [
+    { id: 'j1', type: 3, name: `JSON卡片-${tag}`, favorite: false,
+      card: { cardholderName: '李四', brand: 'Mastercard', number: '5555555555554444',
+        expMonth: '3', expYear: '2030', code: '456' } },
+  ] });
+  const jsonParsed = await parseImport(new TextEncoder().encode(bwJson));
+  const jsonImported = await vc.importItems(jsonParsed.items);
+  check('Bitwarden JSON 导入成功', jsonImported.created === 1, JSON.stringify(jsonImported.failed));
+
+  const jsonCard = await byName(http, userKey, `JSON卡片-${tag}`);
+  check('★ JSON 里的卡片有效期与品牌也完整',
+    jsonCard?.card?.expMonth === '3' && jsonCard?.card?.expYear === '2030' && jsonCard?.card?.brand === 'Mastercard',
+    JSON.stringify(jsonCard?.card));
+
+  // 收尾：把这些结构化条目也删掉
+  const structuredIds = (await sync(http, '')).ciphers.slice(beforeStructured).map((c) => c.id!);
+  for (const id of structuredIds) { try { await hardDeleteCipher(http, id); } catch { /* 已经没了 */ } }
+  await vc.refresh();
+  check('清理结构化测试条目', true);
+
   check('清理测试条目', true);
 
   console.log(failures === 0
     ? '\n✅ 端到端全部通过 —— 桌面 App 的核心链路是通的\n'
     : `\n❌ ${failures} 项失败\n`);
   process.exit(failures === 0 ? 0 : 1);
+}
+
+/**
+ * 造一个最小的 1PUX（ZIP + export.data）。
+ *
+ * 条目用「原样存储」（压缩方式 0）—— 这里要验的是 1PUX 的**结构**，
+ * 不是 ZIP 的解压（那条有单独的单元测试，含 deflate）。
+ */
+function make1Pux(data: unknown): Uint8Array {
+  const enc = new TextEncoder();
+  const entries = [
+    { name: 'export.data', body: enc.encode(JSON.stringify(data)) },
+    { name: 'export.attributes', body: enc.encode('{"version":1}') },
+  ];
+  const parts: Uint8Array[] = [];
+  const central: Uint8Array[] = [];
+  let offset = 0;
+
+  for (const e of entries) {
+    const nb = enc.encode(e.name);
+    const local = new Uint8Array(30 + nb.length + e.body.length);
+    const lv = new DataView(local.buffer);
+    lv.setUint32(0, 0x04034b50, true); lv.setUint16(4, 20, true); lv.setUint16(8, 0, true);
+    lv.setUint32(18, e.body.length, true); lv.setUint32(22, e.body.length, true);
+    lv.setUint16(26, nb.length, true);
+    local.set(nb, 30); local.set(e.body, 30 + nb.length);
+    parts.push(local);
+
+    const cd = new Uint8Array(46 + nb.length);
+    const cv = new DataView(cd.buffer);
+    cv.setUint32(0, 0x02014b50, true); cv.setUint16(4, 20, true); cv.setUint16(6, 20, true);
+    cv.setUint16(10, 0, true); cv.setUint32(20, e.body.length, true);
+    cv.setUint32(24, e.body.length, true); cv.setUint16(28, nb.length, true);
+    cv.setUint32(42, offset, true);
+    cd.set(nb, 46);
+    central.push(cd);
+    offset += local.length;
+  }
+
+  const cs = central.reduce((n, c) => n + c.length, 0);
+  const eocd = new Uint8Array(22);
+  const ev = new DataView(eocd.buffer);
+  ev.setUint32(0, 0x06054b50, true);
+  ev.setUint16(8, entries.length, true); ev.setUint16(10, entries.length, true);
+  ev.setUint32(12, cs, true); ev.setUint32(16, offset, true);
+
+  const all = [...parts, ...central, eocd];
+  const out = new Uint8Array(all.reduce((n, q) => n + q.length, 0));
+  let at = 0;
+  for (const q of all) { out.set(q, at); at += q.length; }
+  return out;
+}
+
+/** 把整库解密出来按名字找 —— 比按「同步结果里的位置」找可靠得多 */
+async function byName(http: Parameters<typeof sync>[0], userKey: Parameters<typeof decryptCipher>[1], name: string) {
+  const all = await sync(http, '');
+  const items = await Promise.all(all.ciphers.map((c) => decryptCipher(c, userKey)));
+  return items.find((i) => i.name === name);
 }
 
 main().catch((e) => { console.error(e); process.exit(1); });

@@ -1,8 +1,11 @@
 import { useRef, useState } from 'react';
-import { parseBitwardenCsv, type VaultClient, type ImportResult } from '@coffer/vault';
+import {
+  parseImport, detectImportFormat, IMPORT_FORMATS,
+  type VaultClient, type ImportResult, type ImportFormatId,
+} from '@coffer/vault';
 
 /**
- * 从 CSV 导入。
+ * 从别处导入。
  *
  * ## 为什么这一步必须做得让人放心
  *
@@ -11,13 +14,25 @@ import { parseBitwardenCsv, type VaultClient, type ImportResult } from '@coffer/
  *
  * 所以这里有三条硬要求：
  *   1. **先看后导**。解析完先给预览，让人确认条数对得上再动手。
- *   2. **跳过的行逐条说清楚**，含行号与原因 —— 「导入了 187 条」不说
+ *   2. **跳过的逐条说清楚**，含行号与原因 —— 「导入了 187 条」不说
  *      「跳过了 3 条」，等于没报。
  *   3. **导完再说一次结果**，失败的逐条列出。
+ *
+ * ## 为什么按字节读文件
+ *
+ * 1PUX 是 ZIP，二进制。用 `text()` 读它字节就毁了，而且毁得看不出来 ——
+ * 报出来的是一句「这不是 ZIP」，用户以为文件坏了。所以统一读 `arrayBuffer()`，
+ * 由解析层自己决定怎么解码。
+ *
+ * ## 为什么格式可以手动选
+ *
+ * 1Password 与 Chrome 的 CSV 都是 `...,url,username,password,...`，
+ * 光看列名分不开。所以自动识别只是**预选**，用户永远能自己改 ——
+ * 而改完之后会用同一份字节重新解析，不需要重新选文件。
  */
 type Phase =
   | { kind: 'pick' }
-  | { kind: 'preview'; fileName: string; parsed: ImportResult }
+  | { kind: 'preview'; fileName: string; parsed: ImportResult; format: ImportFormatId }
   | { kind: 'importing'; done: number; total: number }
   | { kind: 'done'; created: number; failed: { name: string; reason: string }[] };
 
@@ -27,24 +42,42 @@ export function ImportScreen({ client, onImported }: {
 }) {
   const [phase, setPhase] = useState<Phase>({ kind: 'pick' });
   const [error, setError] = useState<string | null>(null);
+  /** 原始字节留着 —— 换格式时重新解析不用再让用户选一次文件 */
+  const [raw, setRaw] = useState<{ name: string; data: Uint8Array } | null>(null);
   const fileRef = useRef<HTMLInputElement>(null);
 
-  async function pick(file: File) {
+  async function parse(data: Uint8Array, fileName: string, format: ImportFormatId): Promise<void> {
     setError(null);
     try {
-      const text = await file.text();
-      const parsed = parseBitwardenCsv(text);
+      const parsed = await parseImport(data, format);
       if (parsed.items.length === 0) {
         setError(parsed.skipped[0]?.reason ?? '这个文件里没有可导入的条目');
+        // 还留在选择阶段 —— 用户可以直接换一个格式再试，不用重新选文件
+        setPhase({ kind: 'pick' });
         return;
       }
-      setPhase({ kind: 'preview', fileName: file.name, parsed });
+      setPhase({ kind: 'preview', fileName, parsed, format });
     } catch (e) {
       setError(e instanceof Error ? e.message : '读不了这个文件');
+      setPhase({ kind: 'pick' });
     }
   }
 
-  async function run(parsed: ImportResult) {
+  async function pick(file: File): Promise<void> {
+    setError(null);
+    // ⚠️ 按字节读，不按文本读 —— 1PUX 是 ZIP，读成文本字节就毁了
+    const data = new Uint8Array(await file.arrayBuffer());
+    setRaw({ name: file.name, data });
+    await parse(data, file.name, 'auto');
+  }
+
+  /** 换格式：用同一份字节重解析 */
+  async function changeFormat(format: ImportFormatId): Promise<void> {
+    if (raw === null) return;
+    await parse(raw.data, raw.name, format);
+  }
+
+  async function run(parsed: ImportResult): Promise<void> {
     setPhase({ kind: 'importing', done: 0, total: parsed.items.length });
     try {
       const r = await client.importItems(parsed.items, (done, total) => {
@@ -58,13 +91,16 @@ export function ImportScreen({ client, onImported }: {
     }
   }
 
+  const detected = raw === null ? null : detectImportFormat(raw.data);
+
   return (
     <div className="mx-auto max-w-2xl p-8">
       <h2 className="mb-2 text-[var(--text-xl)] font-semibold tracking-tight">导入</h2>
       <p className="mb-6 text-[var(--text-sm)] leading-relaxed text-[var(--ink-secondary)]">
-        支持 Bitwarden 格式的 CSV —— Bitwarden 官方导出、KeePass 的转换插件、
-        1Password 的转换器都能产出它。数据只在本地解析，<strong className="font-medium">
-        文件不会上传到任何地方</strong>。
+        支持 1Password（.1pux / .1pif / CSV）、Bitwarden（JSON / CSV）、
+        Chrome、Edge、Firefox、Safari、LastPass、Dashlane 等常见导出，
+        以及 Excel 存出来的 CSV。数据只在本地解析，
+        <strong className="font-medium">文件不会上传到任何地方</strong>。
       </p>
 
       {error && (
@@ -76,7 +112,7 @@ export function ImportScreen({ client, onImported }: {
       <input
         ref={fileRef}
         type="file"
-        accept=".csv,text/csv"
+        accept=".csv,.json,.1pux,.1pif,.txt,text/csv,application/json"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];
@@ -87,12 +123,37 @@ export function ImportScreen({ client, onImported }: {
       />
 
       {phase.kind === 'pick' && (
-        <button
-          onClick={() => fileRef.current?.click()}
-          className="rounded-[var(--radius-md)] bg-[var(--accent)] px-4 py-2 text-[var(--text-sm)] font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)]"
-        >
-          选择 CSV 文件…
-        </button>
+        <>
+          <button
+            onClick={() => fileRef.current?.click()}
+            className="rounded-[var(--radius-md)] bg-[var(--accent)] px-4 py-2 text-[var(--text-sm)] font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)]"
+          >
+            {raw === null ? '选择文件…' : '换一个文件'}
+          </button>
+
+          {/*
+            ⚠️ 格式选择器在**解析失败之后**也要在。
+            否则用户选错了格式、看到一句「认不出」，却没有任何办法告诉他
+            「你可以自己指定」—— 那他就只能换文件，而文件是对的。
+          */}
+          {raw !== null && (
+            <div className="mt-4">
+              <label className="mb-1.5 block text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+                格式{detected === null ? '（自动识别不了，请手动选）' : '（已自动识别，可手动改）'}
+              </label>
+              <select
+                value={phase.kind === 'preview' ? phase.format : (detected ?? 'auto')}
+                onChange={(e) => { void changeFormat(e.target.value as ImportFormatId); }}
+                className="w-full rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-raised)] px-3 py-2 text-[var(--text-sm)]"
+              >
+                {IMPORT_FORMATS.map((f) => (
+                  <option key={f.id} value={f.id}>{f.label}</option>
+                ))}
+              </select>
+              <p className="mt-1.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">{raw.name}</p>
+            </div>
+          )}
+        </>
       )}
 
       {phase.kind === 'preview' && (
@@ -137,7 +198,7 @@ export function ImportScreen({ client, onImported }: {
             </>
           )}
           <button
-            onClick={() => setPhase({ kind: 'pick' })}
+            onClick={() => { setRaw(null); setPhase({ kind: 'pick' }); }}
             className="rounded-[var(--radius-md)] border border-[var(--border-subtle)] px-3 py-1.5 text-[var(--text-sm)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]"
           >
             再导入一份
@@ -148,45 +209,55 @@ export function ImportScreen({ client, onImported }: {
   );
 }
 
+/** 条目类型的分布 —— 让人一眼看出「我的卡是不是也进来了」 */
+function summarise(parsed: ImportResult): string {
+  const byType = new Map<string, number>();
+  for (const i of parsed.items) byType.set(i.type, (byType.get(i.type) ?? 0) + 1);
+
+  const LABEL: Record<string, string> = {
+    login: '登录', secureNote: '笔记', card: '卡片', identity: '身份',
+  };
+  const parts = [...byType].map(([t, n]) => `${LABEL[t] ?? t} ${n}`);
+  const folders = new Set(parsed.items.map((i) => i.folderName).filter(Boolean)).size;
+  if (folders > 0) parts.push(`${folders} 个文件夹`);
+  return parts.join(' · ');
+}
+
 function Preview({ fileName, parsed, onRun, onCancel }: {
   fileName: string;
   parsed: ImportResult;
   onRun: () => void;
   onCancel: () => void;
 }) {
-  const logins = parsed.items.filter((i) => i.type === 'login').length;
-  const folders = new Set(parsed.items.map((i) => i.folderName).filter(Boolean)).size;
-
   return (
     <div className="rounded-[var(--radius-lg)] bg-[var(--surface-raised)] p-4" style={{ boxShadow: 'var(--elev-1)' }}>
       <p className="mb-3 truncate text-[var(--text-sm)]" title={fileName}>
         <span className="text-[var(--ink-tertiary)]">{fileName}</span>
         <span className="ml-2 text-[var(--ink-secondary)]">
           {parsed.items.length} 条可导入
-          {logins > 0 && ` · 其中登录 ${logins} 条`}
-          {folders > 0 && ` · ${folders} 个文件夹`}
+          <span className="text-[var(--ink-tertiary)]"> —— {summarise(parsed)}</span>
         </span>
       </p>
 
       {/*
-        ⚠️ 跳过的行必须逐条列出来。
+        ⚠️ 跳过的必须逐条列出来。
         「导入了 187 条」而不说「跳过了 3 条」，用户不会发现少了什么 ——
         直到某天要登录某个网站。
       */}
       {parsed.skipped.length > 0 && (
         <div className="mb-3 rounded-[var(--radius-md)] bg-[var(--surface-sunken)] p-3">
           <p className="mb-1.5 text-[var(--text-xs)] text-[var(--caution)]">
-            有 {parsed.skipped.length} 行不会被导入：
+            有 {parsed.skipped.length} 条不会被导入：
           </p>
           <ul className="space-y-0.5">
             {parsed.skipped.slice(0, 8).map((s) => (
               <li key={s.rowNumber} className="text-[var(--text-xs)] text-[var(--ink-tertiary)]">
-                第 {s.rowNumber} 行 —— {s.reason}
+                第 {s.rowNumber} 条 —— {s.reason}
               </li>
             ))}
             {parsed.skipped.length > 8 && (
               <li className="text-[var(--text-xs)] text-[var(--ink-tertiary)]">
-                …还有 {parsed.skipped.length - 8} 行
+                …还有 {parsed.skipped.length - 8} 条
               </li>
             )}
           </ul>
