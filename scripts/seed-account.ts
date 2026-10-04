@@ -11,7 +11,7 @@ import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
 import {
   deriveMasterKey, hashMasterPassword, stretchMasterKey, makeUserKey,
-  encryptBytes, KDF_TYPE_PBKDF2,
+  encryptBytes, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
 } from '../packages/crypto/src/index';
 import { toBase64, concatBytes } from '../packages/crypto/src/bytes';
 
@@ -21,15 +21,31 @@ const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
 const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 const ITERATIONS = 600_000;
 
+/**
+ * KDF 可选，用于验证两种 KDF 都正确。
+ * Argon2id 尤其重要：它的盐是 **SHA-256(邮箱)** 而 PBKDF2 用邮箱原文 ——
+ * 搞错的话 PBKDF2 账户一切正常、Argon2 账户永远「密码错误」，且毫无线索。
+ *
+ *   bun run seed                                   # PBKDF2（默认）
+ *   COFFER_KDF=argon2 COFFER_TEST_EMAIL=a@e.com bun run seed
+ */
+const KDF_KIND = process.env.COFFER_KDF ?? 'pbkdf2';
+const ARGON2 = { iterations: 3, memory: 64, parallelism: 4 };
+const kdfConfig = KDF_KIND === 'argon2'
+  ? { kdf: KDF_TYPE_ARGON2ID as const, ...ARGON2 }
+  : { kdf: KDF_TYPE_PBKDF2 as const, iterations: ITERATIONS };
+
 async function main() {
   console.log(`→ 目标服务器: ${BASE}`);
   console.log(`→ 测试账户:   ${EMAIL}`);
 
+  console.log(`→ KDF:     ${KDF_KIND}${KDF_KIND === 'argon2' ? ` ${JSON.stringify(ARGON2)}` : ` ${ITERATIONS} 轮`}`);
+
   // 1. 派生密钥
-  const masterKey = await deriveMasterKey(PASSWORD, EMAIL, { kdf: KDF_TYPE_PBKDF2, iterations: ITERATIONS });
+  const masterKey = await deriveMasterKey(PASSWORD, EMAIL, kdfConfig);
   const masterPasswordHash = await hashMasterPassword(masterKey, PASSWORD);
   const stretched = await stretchMasterKey(masterKey);
-  console.log('✓ 密钥派生完成（PBKDF2 600k → masterKey → masterPasswordHash + 拉伸主密钥）');
+  console.log('✓ 密钥派生完成（masterKey → masterPasswordHash + 拉伸主密钥）');
 
   // 2. 生成用户对称密钥（64 字节 = 32 enc + 32 mac），用拉伸主密钥包起来
   const userKey = makeUserKey();
@@ -60,10 +76,10 @@ async function main() {
       masterPasswordHint: null,
       key: protectedKey,
       keys: { publicKey: toBase64(publicKeyDer), encryptedPrivateKey },
-      kdfType: KDF_TYPE_PBKDF2,
-      kdfIterations: ITERATIONS,
-      kdfMemory: null,
-      kdfParallelism: null,
+      kdfType: kdfConfig.kdf,
+      kdfIterations: kdfConfig.iterations,
+      kdfMemory: KDF_KIND === 'argon2' ? ARGON2.memory : null,
+      kdfParallelism: KDF_KIND === 'argon2' ? ARGON2.parallelism : null,
       emailVerificationToken: null,
       organizationUserId: null,
       orgInviteToken: null,
@@ -89,9 +105,10 @@ async function main() {
   const bwRun = (args: string[]): string =>
     execFileSync('bw', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
 
-  bwRun(['config', 'server', BASE]);
-  // 先登出：已登录状态下 `bw login` 会直接报错，让脚本变成不可重复运行
+  // 顺序不能反：CLI 要求「先登出才能改服务器地址」，而「已登录时不能再次 login」。
+  // 两个约束合起来意味着每次都得：登出 → 配置服务器 → 登录。
   try { bwRun(['logout']); } catch { /* 本来就没登录 */ }
+  bwRun(['config', 'server', BASE]);
 
   let session: string;
   try {
