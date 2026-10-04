@@ -12,5 +12,6 @@ export * from './csv';
 export * from './import';
 export * from './cbor';
 export * from './passkey';
+export * from './passkey-match';
 export * from './credential-capture';
 export * from './totp';
