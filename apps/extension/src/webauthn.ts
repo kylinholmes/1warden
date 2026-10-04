@@ -37,6 +37,8 @@ export type WebauthnPayload = CreatePayload | GetPayload;
 
 export interface WebauthnDeps {
   items: () => readonly VaultItem[];
+  /** 诊断追踪。见 background.ts 里 trace 的说明 —— 两个 SW 实例时控制台会丢日志 */
+  trace: (line: string) => Promise<void>;
   /**
    * 从服务端重新同步一次。
    *
@@ -139,8 +141,16 @@ async function handleCreate(
    * 内存里的幂等表挡不住这个：第一次执行**没有被记录的机会**，它被杀了。
    * 唯一可靠的办法是拿服务端的真相来合并 —— 服务端那边两次都存下来了。
    */
+  const idsOf = (): string[] => deps.items()
+    .flatMap((i) => i.login?.fido2Credentials ?? [])
+    .filter((c) => c.rpId === rpId).map((c) => c.credentialId.slice(0, 8));
+  const before = idsOf();
   await deps.refresh();
+  await deps.trace(`create 同步：前=${JSON.stringify(before)} 后=${JSON.stringify(idsOf())}`
+    + ` 新凭据=${created.stored.credentialId.slice(0, 8)}`);
   const target = findTarget(deps.items(), rpId, origin);
+  await deps.trace(`create 目标条目=${target?.id ?? '(新建)'} 该条目已有凭据=${
+    target?.login?.fido2Credentials.length ?? 0}`);
   const updated: VaultItem = target === null
     ? newPasskeyItem(rpId, created.stored.userName ?? null, origin, created.stored)
     : { ...target, login: withCredential(target, created.stored) };

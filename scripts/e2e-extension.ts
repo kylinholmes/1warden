@@ -836,6 +836,19 @@ async function main(): Promise<void> {
       const all = await listTargets().catch(() => []);
       console.log('\n── 浏览器里的目标 ──');
       for (const t of all) console.log(`  [${t.type}] ${t.url}`);
+
+      // ⚠️ passkey 的追踪缓冲。MV3 的 service worker 会被杀又被唤醒，
+      // 一次运行里可能有两个实例，而 CDP 只连得上其中一个 ——
+      // 另一个实例的 console 输出根本收不到，会得出
+      // 「这个请求像是没被处理过」这种误导性的结论。
+      // 追踪写在 chrome.storage.session 里，任意扩展上下文都能读到。
+      const tr = await ext?.eval<string[]>(
+        `chrome.storage.session.get('coffer.trace').then((g) => g['coffer.trace'] ?? [])`,
+      ).catch(() => []);
+      if (tr && tr.length > 0) {
+        console.log('\n── passkey 追踪（跨 SW 实例）──');
+        for (const line of tr) console.log(`  ${line}`);
+      }
       for (const [name, c] of [['页面', page], ['扩展页', ext], ['service worker', sw]] as const) {
         if (!c) { console.log(`\n── ${name}：没有连接 ──`); continue; }
         console.log(`\n── ${name}的日志（${c.logs.length} 条）──`);
