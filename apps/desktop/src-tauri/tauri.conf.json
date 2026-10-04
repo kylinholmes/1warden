@@ -19,7 +19,15 @@
         "minHeight": 560,
         "resizable": true,
         "center": true,
-        "titleBarStyle": "Transparent",
+        "transparent": true,
+        "windowEffects": {
+          "effects": [
+            "liquidGlassRegular",
+            "sidebar"
+          ],
+          "state": "active"
+        },
+        "titleBarStyle": "Overlay",
         "hiddenTitle": true
       },
       {
