@@ -668,6 +668,11 @@ async function main(): Promise<void> {
 
     // ⚠️ 这条是整段的高潮：用**注册时发出去的公钥**验证断言签名。
     // 只断言「拿到了一个 64 字节的东西」是自证 —— 布局错了照样是 64 字节。
+    // ⚠️ 先**不带** allowCredentials 取一次。
+    //
+    // 这样能把「保险库里到底有没有这条凭据」和「allowCredentials 的过滤对不对」
+    // 分成两个独立的结论。混在一起测的话，失败时根本不知道是哪一边错了 ——
+    // 而这正是第一版踩的坑：两条路都通到同一句「没有可用的 passkey」。
     const asserted = await page.eval<{
       credentialId: string; authenticatorData: string; signature: string;
       clientDataJSON: string; clientDataType: string; sigLen: number;
@@ -675,10 +680,14 @@ async function main(): Promise<void> {
       const b64u = (buf) => { const b = new Uint8Array(buf); let s = '';
         for (const x of b) s += String.fromCharCode(x);
         return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); };
+      const idOf = (b64) => { const p = b64.replace(/-/g,'+').replace(/_/g,'/');
+        const bin = atob(p.padEnd(Math.ceil(p.length / 4) * 4, '='));
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out; };
       const cred = await navigator.credentials.get({ publicKey: {
         challenge: crypto.getRandomValues(new Uint8Array(32)),
         rpId: '127.0.0.1',
-        allowCredentials: [{ type: 'public-key', id: Uint8Array.from(atob(${JSON.stringify(pkCreated.credentialId)}.replace(/-/g,'+').replace(/_/g,'/')), c => c.charCodeAt(0)) }],
       }});
       return {
         credentialId: b64u(cred.rawId),
@@ -690,7 +699,9 @@ async function main(): Promise<void> {
       };
     })()`);
 
-    check('get 拿回的是同一条凭据', asserted.credentialId === pkCreated.credentialId);
+    check('get 能取到刚注册的凭据（不限 allowCredentials）',
+      asserted.credentialId === pkCreated.credentialId,
+      `拿到 ${asserted.credentialId}，期望 ${pkCreated.credentialId}`);
     check('断言的 ceremony 类型是 webauthn.get', asserted.clientDataType === 'webauthn.get');
     check('签名是裸的 64 字节 r||s（不是 DER）', asserted.sigLen === 64, `${asserted.sigLen} 字节`);
 
@@ -717,6 +728,26 @@ async function main(): Promise<void> {
     })()`);
     const counter2 = new DataView(b64uToBuf(secondAssertion.authenticatorData).buffer).getUint32(33, false);
     check('计数在递增', counter2 > counter1 && counter1 > 0, `${counter1} → ${counter2}`);
+
+    // 页面指定凭据 ID 时也要找得到 —— 上面那次是不限定的
+    const narrowed = await page.eval<string>(`(async () => {
+      const b64u = (buf) => { const b = new Uint8Array(buf); let s = '';
+        for (const x of b) s += String.fromCharCode(x);
+        return btoa(s).replace(/\\+/g, '-').replace(/\\//g, '_').replace(/=+$/, ''); };
+      const idOf = (b64) => { const p = b64.replace(/-/g,'+').replace(/_/g,'/');
+        const bin = atob(p.padEnd(Math.ceil(p.length / 4) * 4, '='));
+        const out = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+        return out; };
+      const cred = await navigator.credentials.get({ publicKey: {
+        challenge: crypto.getRandomValues(new Uint8Array(32)),
+        rpId: '127.0.0.1',
+        allowCredentials: [{ type: 'public-key', id: idOf(${JSON.stringify(pkCreated.credentialId)}) }],
+      }});
+      return b64u(cred.rawId);
+    })()`);
+    check('指定 allowCredentials 时找得到对应的凭据',
+      narrowed === pkCreated.credentialId, `拿到 ${narrowed}`);
 
     // allowCredentials 里没列出的凭据不能给
     const unknown = await page.eval<string>(`(async () => {

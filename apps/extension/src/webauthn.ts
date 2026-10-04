@@ -161,6 +161,12 @@ async function handleGet(
 
   const candidates: Candidate[] = pickCredentials(deps.items(), rpId, payload.allowCredentials);
   if (candidates.length === 0) {
+    // 用户只看一句话，但排查时需要知道「是库里没有，还是页面指定的 id 对不上」
+    const inVault = deps.items().flatMap((i) => i.login?.fido2Credentials ?? [])
+      .filter((c) => c.rpId === rpId).map((c) => c.credentialId);
+    console.warn('[coffer] passkey 无候选：库里 ' + inVault.length + ' 条 [' + inVault.join(',') + ']'
+      + '，页面指定 ' + (payload.allowCredentials === null ? '（未限定）'
+        : payload.allowCredentials.length + ' 个 [' + payload.allowCredentials.map((a) => a.id).join(',') + ']'));
     return fail(`保险库里没有可用于 ${relyingPartyOf({ rpId })} 的 passkey`);
   }
   const chosen = candidates[0]!;

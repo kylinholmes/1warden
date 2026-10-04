@@ -16,10 +16,10 @@ import {
   KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
-import { VaultSession } from './session';
+import { VaultSession, restoreSession } from './session';
 import { SyncEngine } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
-import type { AccountInfo, SessionStatus } from './session';
+import type { AccountInfo, SessionStatus, StoredSession } from './session';
 import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
 import { emptyLogin, emptyCard, emptyIdentity } from './model';
@@ -41,6 +41,19 @@ function blankImportItem(): VaultItem {
     secureNote: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
+}
+
+/**
+ * 恢复一个已解锁的客户端所需要的**全部**状态。
+ *
+ * ⚠️ 传输层（`token`）也在里面，而且**必须**在。
+ * 只恢复会话的话，读操作正常、写操作全部失败 —— 因为 baseUrl 与 token
+ * 是客户端自己的状态，不在会话里。失败还报「连不上服务器」，
+ * 让人往网络方向查，完全跑偏。
+ */
+export interface VaultClientState extends StoredSession {
+  /** 访问令牌。null = 未曾登录过；`chrome.storage.session` 是内存存储，适合放它 */
+  token: TokenResponse | null;
 }
 
 export interface ConnectParams {
@@ -183,13 +196,7 @@ export class VaultClient {
 
     this.masterKey = masterKey;
     this.token = token;
-    this.http = this.makeHttp(params.serverUrl, () => ({
-      Authorization: `Bearer ${this.token?.accessToken ?? ''}`,
-      'Device-Type': String(this.device.type),
-      'Bitwarden-Client-Name': 'desktop',
-      // 发一个较新的版本号：服务端在版本过旧时会过滤掉 SSH key 类条目
-      'Bitwarden-Client-Version': '2026.10.0',
-    }));
+    this.http = this.makeHttp(params.serverUrl, this.authHeaders());
 
     // 从 JWT 的 sub 取用户 uuid —— 写入条目时 encryptedFor 需要它，
     // 而 api 层会自己填，我们只需要传给 createCipher
@@ -206,6 +213,61 @@ export class VaultClient {
 
     await this.doSync(userKey);
     this.session.completeUnlock(userKey);
+  }
+
+  /**
+   * 认证头。`connect` 与 `restore` **共用同一份** ——
+   * 两处各写一遍的话，改了一处忘了另一处，恢复出来的客户端会缺头或少头，
+   * 而表现只是「某些请求 401」，很难联想到是这里。
+   */
+  private authHeaders(): () => Record<string, string> {
+    return () => ({
+      Authorization: `Bearer ${this.token?.accessToken ?? ''}`,
+      'Device-Type': String(this.device.type),
+      'Bitwarden-Client-Name': 'desktop',
+      // 发一个较新的版本号：服务端在版本过旧时会过滤掉 SSH key 类条目
+      'Bitwarden-Client-Version': '2026.10.0',
+    });
+  }
+
+  /**
+   * 导出「恢复这个客户端所需要的全部东西」。
+   *
+   * ⚠️ **恢复所需的状态必须只有一个来源。**
+   *
+   * 这个项目里已经因为「同一个事实有两个来源」栽过两次：客户端缓存了一份
+   * 和会话重复的密钥（写操作全废）、恢复时机在模块加载时求值一次
+   * （解锁早于恢复就永远恢复不了）。传输层是第三个 —— baseUrl 与 token
+   * 存在客户端自己身上，恢复会话时不会跟着回来，于是所有需要网络的写操作
+   * 都报「连不上服务器」。
+   *
+   * 让客户端自己说清楚它需要什么，而不是让调用方照着字段列表抄一遍。
+   */
+  exportState(): VaultClientState {
+    const key = this.session.getKey();
+    const account = this.session.account;
+    if (!key || !account) throw new Error('保险库未解锁，没有可导出的状态');
+    return {
+      account,
+      userKey: key,
+      items: this.session.items.slice(),
+      folders: this.session.folders.slice(),
+      token: this.token,
+    };
+  }
+
+  /**
+   * 从 `exportState()` 的结果恢复 —— **进程重启后的路径**。
+   *
+   * ⚠️ 除了会话，还要把**传输层**一起接回去。少了这一步，读操作全都正常
+   * （它们在内存里的数据上跑），而**写操作全部失败**，报的还是「连不上服务器」
+   * 这种指向网络、让人去查 DNS 的错。
+   */
+  restore(state: VaultClientState): void {
+    restoreSession(this.session, state);
+    if (state.token === null) return;
+    this.token = state.token;
+    this.http = this.makeHttp(state.account.serverUrl, this.authHeaders());
   }
 
   /** 重新同步（用户手动刷新、或收到服务器变更通知时调用） */

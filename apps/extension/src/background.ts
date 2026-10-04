@@ -19,7 +19,7 @@
  * storage 里**，模块变量随时可能归零。
  */
 import {
-  VaultClient, classifyFields, matchItemsByUrl, decideCapture, restoreSession,
+  VaultClient, classifyFields, matchItemsByUrl, decideCapture,
   type AccountInfo, type FieldDescriptor, type VaultItem,
   type CaptureDecision,
   totpCode,
@@ -90,7 +90,9 @@ async function restoreFromStorage(): Promise<VaultClient> {
   const c = getClient();
   if (c.getSession().getKey() !== null) return c;   // 已经解锁，别动它
   const stored = await sessions.load();
-  if (stored) restoreSession(c.getSession(), stored);
+  // ⚠️ 走 `restore()` 而不是只灌会话 —— 它会把传输层（baseUrl + token）
+  // 一起接回去。只灌会话的话读操作正常、写操作全部报「连不上服务器」
+  if (stored) c.restore(stored);
   return c;
 }
 
@@ -232,12 +234,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const session = c.getSession();
       const key = session.getKey();
       if (!key) throw new Error('解锁后拿不到密钥');
-      await sessions.save({
-        account: session.account as AccountInfo,
-        userKey: key,
-        items: session.items.slice(),
-        folders: session.folders.slice(),
-      });
+      await sessions.save(getClient().exportState());
       // 解锁之后要把角标补上 —— 见 refreshBadges 的说明
       await refreshBadges();
       return { ok: true, itemCount: session.items.length };
@@ -351,16 +348,9 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       }
 
       // 保存后同步一次会话快照，否则下次读到的还是旧的
-      const s2 = c.getSession();
-      const key = s2.getKey();
-      if (key) {
-        await sessions.save({
-          account: s2.account as AccountInfo,
-          userKey: key,
-          items: s2.items.slice(),
-          folders: s2.folders.slice(),
-        });
-      }
+      // ⚠️ 用客户端的 `exportState()`，不是自己照着字段列表拼一份 ——
+      // 拼的时候漏掉传输层，恢复出来就是一个「读得了、写不了」的客户端
+      if (c.getSession().getKey()) await sessions.save(c.exportState());
 
       await setPending(null, tabId);
       await chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
@@ -401,16 +391,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
             for (const item of changed) await c.saveItem(item);
             // 和 save-capture 一样：存完必须刷一次会话快照，
             // 否则下一次读到的还是旧的，第二次断言会拿着过期的计数去存
-            const s2 = c.getSession();
-            const k2 = s2.getKey();
-            if (k2) {
-              await sessions.save({
-                account: s2.account as AccountInfo,
-                userKey: k2,
-                items: s2.items.slice(),
-                folders: s2.folders.slice(),
-              });
-            }
+            if (c.getSession().getKey()) await sessions.save(c.exportState());
           },
         },
       );

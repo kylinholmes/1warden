@@ -51,7 +51,7 @@ describe('SessionStore —— 往返', () => {
 
   it('round-trips the account, the key and the items', async () => {
     const key = makeUserKey();
-    await store.save({ account, userKey: key, items: [item('1'), item('2')], folders: [] });
+    await store.save({ account, userKey: key, items: [item('1'), item('2')], folders: [], token: null });
 
     const loaded = await store.load();
     expect(loaded).not.toBeNull();
@@ -66,7 +66,7 @@ describe('SessionStore —— 往返', () => {
    */
   it('preserves the key byte for byte through storage', async () => {
     const key = makeUserKey();
-    await store.save({ account, userKey: key, items: [], folders: [] });
+    await store.save({ account, userKey: key, items: [], folders: [], token: null });
 
     const loaded = await store.load();
     expect(Array.from(loaded!.userKey.encKey)).toEqual(Array.from(key.encKey));
@@ -77,7 +77,7 @@ describe('SessionStore —— 往返', () => {
     const encKey = new Uint8Array(32);
     encKey[0] = 0; encKey[1] = 255; encKey[31] = 0;
     const macKey = new Uint8Array(32).fill(255);
-    await store.save({ account, userKey: { encKey, macKey }, items: [], folders: [] });
+    await store.save({ account, userKey: { encKey, macKey }, items: [], folders: [], token: null });
 
     const loaded = await store.load();
     expect(loaded!.userKey.encKey[0]).toBe(0);
@@ -86,15 +86,15 @@ describe('SessionStore —— 往返', () => {
   });
 
   it('overwrites a previous session rather than merging', async () => {
-    await store.save({ account, userKey: makeUserKey(), items: [item('old')], folders: [] });
-    await store.save({ account, userKey: makeUserKey(), items: [item('new')], folders: [] });
+    await store.save({ account, userKey: makeUserKey(), items: [item('old')], folders: [], token: null });
+    await store.save({ account, userKey: makeUserKey(), items: [item('new')], folders: [], token: null });
     expect((await store.load())!.items.map((i) => i.id)).toEqual(['new']);
   });
 });
 
 describe('SessionStore —— 清理', () => {
   it('clear removes everything', async () => {
-    await store.save({ account, userKey: makeUserKey(), items: [item('1')], folders: [] });
+    await store.save({ account, userKey: makeUserKey(), items: [item('1')], folders: [], token: null });
     await store.clear();
     expect(await store.load()).toBeNull();
     expect(Object.keys(area.dump())).toEqual([]);
@@ -102,7 +102,7 @@ describe('SessionStore —— 清理', () => {
 
   it('locking leaves no key material behind', async () => {
     const key = makeUserKey();
-    await store.save({ account, userKey: key, items: [item('1')], folders: [] });
+    await store.save({ account, userKey: key, items: [item('1')], folders: [], token: null });
     await store.clear();
 
     // 存储区里不该再出现密钥的任何一段
@@ -193,7 +193,7 @@ describe('SessionStore —— 只写内存区', () => {
    */
   it('writes only through the area it was given', async () => {
     const setSpy = vi.spyOn(area, 'set');
-    await store.save({ account, userKey: makeUserKey(), items: [], folders: [] });
+    await store.save({ account, userKey: makeUserKey(), items: [], folders: [], token: null });
 
     expect(setSpy).toHaveBeenCalled();
     // 扩展不该碰全局的 chrome.storage —— 拿不到就说明只用了注入的那一份

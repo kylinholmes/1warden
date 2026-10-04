@@ -24,7 +24,7 @@
  * 而不是散落在代码里的一行 `chrome.storage.local`。
  */
 import { fromBase64, toBase64, type SymmetricKey } from '@coffer/crypto';
-import type { AccountInfo, VaultFolder, VaultItem } from '@coffer/vault';
+import type { AccountInfo, VaultFolder, VaultItem, VaultClientState } from '@coffer/vault';
 
 /** 存储键。带前缀，避免与其他扩展数据撞名 */
 const KEY = 'coffer.session';
@@ -37,19 +37,21 @@ export interface StorageArea {
   clear(): Promise<void>;
 }
 
-export interface UnlockedSession {
-  account: AccountInfo;
-  userKey: SymmetricKey;
-  items: VaultItem[];
-  folders: VaultFolder[];
-}
+/**
+ * ⚠️ 存的是**恢复一个客户端所需要的全部东西**，不只是会话。
+ *
+ * 早先这里只有 `{account, userKey, items, folders}`，于是恢复出来的客户端
+ * 缺了传输层（baseUrl + token）—— 读操作一切正常，**写操作全部失败**，
+ * 还报「连不上服务器」这种让人去查网络的错。
+ *
+ * 形状直接复用 `VaultClientState`，而不是在这里再抄一份字段列表：
+ * 抄一份就多一个会漂移的地方，而漂移的表现正是上面那种「一半能用」。
+ */
+export type UnlockedSession = VaultClientState;
 
-/** 落进存储区的形状 —— 密钥是 base64 字符串 */
-interface StoredShape {
-  account: AccountInfo;
+/** 落进存储区的形状 —— 密钥是 base64 字符串，token 原样 */
+interface StoredShape extends Omit<VaultClientState, 'userKey'> {
   userKey: { encKey: string; macKey: string };
-  items: VaultItem[];
-  folders: VaultFolder[];
 }
 
 const KEY_BYTES = 32;
@@ -99,7 +101,17 @@ function revive(raw: unknown): UnlockedSession | null {
     userKey: { encKey, macKey },
     items: items as VaultItem[],
     folders: folders as VaultFolder[],
+    // ⚠️ token 读不出来**不算致命** —— 装作没登录（返回 null）比整个会话作废好：
+    // 用户重新解锁一次即可，而作废会让他连密码都看不到
+    token: reviveToken(raw['token']),
   };
+}
+
+/** 令牌的宽松还原：认不出来就当没有。它只是个凭据，丢了重新解锁即可 */
+function reviveToken(raw: unknown): VaultClientState['token'] {
+  if (!isObject(raw)) return null;
+  if (typeof raw['accessToken'] !== 'string' || raw['accessToken'].length === 0) return null;
+  return raw as unknown as VaultClientState['token'];
 }
 
 export class SessionStore {
@@ -114,6 +126,8 @@ export class SessionStore {
       },
       items: session.items,
       folders: session.folders,
+      // ⚠️ 必须一起存。少了它，恢复出来的客户端读得了、**写不了**
+      token: session.token,
     };
     await this.area.set({ [KEY]: stored });
   }
