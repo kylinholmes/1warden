@@ -66,6 +66,20 @@ describe('EncString parsing', () => {
     try { parseEncString(`9.${toBase64(new Uint8Array(4))}`); expect.unreachable(); }
     catch (e) { expect((e as DecryptError).kind).toBe('unsupportedType'); }
   });
+
+  // ⚠️ Bitwarden 的字段大量是 null / 缺失（没填的用户名、空的 notes）。
+  // 解密循环一定会遇到 null。若这里抛的是 TypeError 而不是 DecryptError，
+  // 调用方无法按类型分流，一个字段就能让整条条目（甚至整个保险库）解密中断。
+  it('throws DecryptError (not TypeError) for null / undefined / non-string input', () => {
+    for (const bad of [null, undefined, 42, {}, []]) {
+      expect(() => parseEncString(bad as unknown as string), `输入 ${JSON.stringify(bad)}`)
+        .toThrow(DecryptError);
+    }
+  });
+
+  it('throws DecryptError for an empty string', () => {
+    expect(() => parseEncString('')).toThrow(DecryptError);
+  });
 });
 
 describe('AES-CBC + HMAC primitives', () => {

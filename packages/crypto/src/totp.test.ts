@@ -135,10 +135,35 @@ describe('parseOtpauthUri', () => {
     expect(u.account).toBe('Someone@Example.com');
   });
 
-  it('clamps out-of-range digits and period', () => {
+  // 官方实现只在参数 **> 0** 时才采纳，否则保留默认值：
+  //   const d = parseInt(...); if (d > 10) digits = 10; else if (d > 0) digits = d;
+  //   if (p > 0) period = p;
+  // 若写成「钳制到 0」，?digits=0 会让我们输出单字符 "0"，而官方输出正常的 6 位码 ——
+  // 正是 R5 想避免的「同一账号两边算出不同码」。
+  it('keeps the default when digits/period are not positive (matches official)', () => {
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&digits=0').digits).toBe(6);
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&digits=-5').digits).toBe(6);
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&digits=').digits).toBe(6);
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&period=0').period).toBe(30);
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&period=-1').period).toBe(30);
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&period=').period).toBe(30);
+  });
+
+  it('clamps digits above the maximum but below the minimum', () => {
     expect(parseOtpauthUri('otpauth://totp/x?secret=AB&digits=999').digits).toBe(10);
-    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&digits=-5').digits).toBe(0);
-    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&period=0').period).toBe(1);
+    expect(parseOtpauthUri('otpauth://totp/x?secret=AB&digits=7').digits).toBe(7);
+  });
+
+  it('throws a descriptive error for a malformed percent-escape in the label', () => {
+    // decodeURIComponent('100%discount') 会抛 URIError —— 那是实现细节，不该泄漏给调用方
+    expect(() => parseOtpauthUri('otpauth://totp/100%discount?secret=AB'))
+      .toThrow(/百分号|转义/);
+  });
+
+  it('still produces a usable code for those degenerate URIs', async () => {
+    const r = await generateTotp('otpauth://totp/x?secret=WQIQ25BRKZYCJVYP&digits=0', Date.UTC(2023, 0, 1));
+    expect(r.code).toBe('194506');
+    expect(r.code).toHaveLength(6);
   });
 
   it('falls back to SHA-1 for an unknown algorithm', () => {

@@ -14,6 +14,11 @@ import {
   encryptBytes, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
 } from '../packages/crypto/src/index';
 import { toBase64, concatBytes } from '../packages/crypto/src/bytes';
+import { BW_BIN, assertBwVersion, prepareBwEnv } from './bw-cli';
+
+// 必须在任何 fetch 之前备好环境（跳过自签证书校验 + CLI 状态目录）。
+// 官方 CLI 拒绝明文 HTTP，所以本地服务也走 HTTPS —— 详见 scripts/dev-env.sh。
+prepareBwEnv();
 
 // 默认与 scripts/dev-env.sh 保持一致（HTTPS + 自签证书：官方 CLI 拒绝明文 HTTP）
 const BASE = process.env.VW_URL ?? 'https://localhost:8443';
@@ -100,10 +105,15 @@ async function main() {
 
   // 5. 让官方 CLI 登录 —— 这是第一道互操作证明
   console.log('\n→ 用官方 Bitwarden CLI 登录同一个账户…');
+  assertBwVersion();
   // 三个流都 pipe：execFileSync 才会把 stdout 作为返回值交出来。
   // 若把 stdout 设为 inherit，返回值是空的，看起来像「命令没输出」，极难排查。
   const bwRun = (args: string[]): string =>
-    execFileSync('bw', args, { encoding: 'utf8', stdio: ['pipe', 'pipe', 'pipe'] }).trim();
+    execFileSync(BW_BIN, args, {
+      encoding: 'utf8',
+      stdio: ['pipe', 'pipe', 'pipe'],
+      env: { ...process.env, NODE_TLS_REJECT_UNAUTHORIZED: '0' },
+    }).trim();
 
   // 顺序不能反：CLI 要求「先登出才能改服务器地址」，而「已登录时不能再次 login」。
   // 两个约束合起来意味着每次都得：登出 → 配置服务器 → 登录。

@@ -24,6 +24,11 @@ import {
 } from '../packages/crypto/src/index';
 import { toBase64, concatBytes, utf8Encode } from '../packages/crypto/src/bytes';
 import type { SymmetricKey } from '../packages/crypto/src/keys';
+import { BW_BIN, assertBwVersion, prepareBwEnv } from './bw-cli';
+
+// 必须在任何 fetch 之前备好环境（跳过自签证书校验 + CLI 状态目录）。
+// 官方 CLI 拒绝明文 HTTP，所以本地服务也走 HTTPS —— 详见 scripts/dev-env.sh。
+prepareBwEnv();
 
 // 默认与 scripts/dev-env.sh 保持一致（HTTPS + 自签证书：官方 CLI 拒绝明文 HTTP）
 const BASE = process.env.VW_URL ?? 'https://localhost:8443';
@@ -114,12 +119,13 @@ let session: string | undefined;
  * 报错信息还完全指不到真正的原因。
  */
 function bw(args: string[]): string {
+  assertBwVersion();
   session ??= readSession();
-  return execFileSync('bw', [...args, '--session', session], {
+  return execFileSync(BW_BIN, [...args, '--session', session], {
     encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
     // 禁止交互：缺凭据时直接失败，而不是弹提示
-    env: { ...process.env, BW_NOINTERACTION: 'true' },
+    env: { ...process.env, BW_NOINTERACTION: 'true', NODE_TLS_REJECT_UNAUTHORIZED: '0' },
   });
 }
 

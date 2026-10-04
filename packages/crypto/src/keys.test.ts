@@ -124,6 +124,25 @@ describe('symmetric encrypt/decrypt', () => {
     const wrong = { encKey: new Uint8Array(32).fill(9), macKey: new Uint8Array(32).fill(9) };
     await expect(decryptString(await encryptString('secret', key), wrong)).rejects.toThrow();
   });
+
+  // WebCrypto 对非法密钥长度抛的是 DOMException。统一成 DecryptError，
+  // 否则同一个 API 会漏出两种错误类型，调用方没法只 catch 一种。
+  it('throws DecryptError (not DOMException) for a wrong-size key', async () => {
+    const valid = await encryptString('x', key);
+    for (const [enc, mac] of [[31, 32], [32, 31], [16, 32], [0, 0]] as Array<[number, number]>) {
+      const bad = { encKey: new Uint8Array(enc).fill(1), macKey: new Uint8Array(mac).fill(2) };
+      await expect(decryptString(valid, bad), `encKey=${enc} macKey=${mac}`)
+        .rejects.toBeInstanceOf(DecryptError);
+    }
+  });
+
+  // Bitwarden 的字段大量是 null / 缺失，解密循环一定会遇到
+  it('throws DecryptError (not TypeError) for null / undefined input', async () => {
+    for (const bad of [null, undefined, 42, {}]) {
+      await expect(decryptString(bad as unknown as string, key), `输入 ${JSON.stringify(bad)}`)
+        .rejects.toBeInstanceOf(DecryptError);
+    }
+  });
 });
 
 describe('zeroizeKey', () => {

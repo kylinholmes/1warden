@@ -43,6 +43,16 @@ const SHAPE: Record<number, { iv: number; mac: number }> = {
 };
 
 export function parseEncString(s: EncString): ParsedEncString {
+  // ⚠️ Bitwarden 的字段大量是 null / 缺失（没填的用户名、空的 notes）。
+  // 这里必须抛 DecryptError 而不是把 TypeError 漏出去 —— 否则调用方无法按类型分流，
+  // 一个空字段就能中断整条条目、甚至整个保险库的解密。
+  if (typeof s !== 'string' || s.length === 0) {
+    throw new DecryptError(
+      'malformed',
+      `EncString 必须是非空字符串，收到 ${s === null ? 'null' : typeof s}`,
+    );
+  }
+
   const dot = s.indexOf('.');
   if (dot <= 0) throw new DecryptError('malformed', 'EncString 缺少类型前缀');
 
@@ -99,11 +109,19 @@ export function serializeEncString(
 
 // ── 底层算法 ──
 
+const AES_KEY_SIZES = new Set([16, 24, 32]);
+
 async function importAesKey(raw: Uint8Array, usage: KeyUsage): Promise<CryptoKey> {
+  // 长度不合法时 WebCrypto 抛的是 DOMException。密钥损坏/传错属于调用方能处理的
+  // 失败，统一成 DecryptError，别让两种错误类型从同一个 API 漏出去。
+  if (!AES_KEY_SIZES.has(raw.length)) {
+    throw new DecryptError('malformed', `AES 密钥长度必须是 16/24/32 字节，收到 ${raw.length}`);
+  }
   return globalThis.crypto.subtle.importKey('raw', raw as BufferSource, { name: 'AES-CBC' }, false, [usage]);
 }
 
 async function importHmacKey(raw: Uint8Array, hash: 'SHA-256' | 'SHA-1' | 'SHA-512' = 'SHA-256'): Promise<CryptoKey> {
+  if (raw.length === 0) throw new DecryptError('malformed', 'HMAC 密钥不能为空');
   return globalThis.crypto.subtle.importKey(
     'raw', raw as BufferSource, { name: 'HMAC', hash }, false, ['sign'],
   );

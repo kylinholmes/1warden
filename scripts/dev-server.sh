@@ -56,7 +56,10 @@ stop() {
 reset() {
   stop
   rm -rf "$VW_DATA"
-  echo "✓ 数据已清空（下次 start 得到全新实例）"
+  # 同时清掉 CLI 侧的状态。只删服务端数据的话，.dev/bw-session 里还留着
+  # 一个指向「已不存在的账户」的会话，互操作测试会以像是密码学错误的方式失败。
+  rm -rf "${BITWARDENCLI_APPDATA_DIR:-$ROOT/.dev/bw-cli}" "$ROOT/.dev/bw-session"
+  echo "✓ 数据已清空（服务端 + CLI 状态；下次 start 得到全新实例）"
 }
 
 status() { is_up && echo "● 运行中: $VW_URL" || echo "○ 未运行"; }

@@ -165,16 +165,27 @@ export function parseOtpauthUri(input: string): ParsedOtpauth {
   const secret = get('secret');
   if (!secret) throw new Error('otpauth URI 缺少 secret 参数');
 
-  const label = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  let label: string;
+  try {
+    label = decodeURIComponent(url.pathname.replace(/^\//, ''));
+  } catch {
+    // decodeURIComponent 对 '100%discount' 这类标签会抛 URIError —— 那是实现细节，
+    // 不该作为错误类型泄漏给调用方
+    throw new Error(`otpauth URI 的标签含非法的百分号转义: ${input.slice(0, 40)}`);
+  }
   const sep = label.indexOf(':');
   const labelIssuer = sep >= 0 ? label.slice(0, sep) : undefined;
   const labelAccount = sep >= 0 ? label.slice(sep + 1) : label;
 
-  // digits 钳制到 0..10（10**10 会溢出 32 位），period 至少 1
-  const rawDigits = Number(get('digits') ?? 6);
-  const digits = Math.min(10, Math.max(0, Number.isFinite(rawDigits) ? rawDigits : 6));
-  const rawPeriod = Number(get('period') ?? 30);
-  const period = Math.max(1, Number.isFinite(rawPeriod) ? rawPeriod : 30);
+  // ⚠️ 官方实现只在参数 **> 0** 时才采纳，否则保留默认值：
+  //   const d = parseInt(...); if (d > 10) digits = 10; else if (d > 0) digits = d;
+  //   if (p > 0) period = p;
+  // 若写成「钳制到 0」，`?digits=0` 会让我们输出单字符 "0"、官方输出 6 位码 ——
+  // 正是 R5 要避免的「同一账号两边算出不同码」。上限 10 是因为 10**10 会溢出 32 位。
+  const rawDigits = Number(get('digits'));
+  const digits = Number.isFinite(rawDigits) && rawDigits > 0 ? Math.min(10, rawDigits) : 6;
+  const rawPeriod = Number(get('period'));
+  const period = Number.isFinite(rawPeriod) && rawPeriod > 0 ? rawPeriod : 30;
 
   return {
     secret,
