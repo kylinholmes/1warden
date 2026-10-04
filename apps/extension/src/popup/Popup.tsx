@@ -24,6 +24,19 @@ interface Status {
   itemCount: number;
 }
 
+/**
+ * 待确认的「保存 / 更新」。
+ *
+ * ⚠️ **不含密码** —— background 只回展示需要的字段，明文在保存那一刻
+ * 才由 background 自己取用。弹窗没有任何理由看到它。
+ */
+interface Pending {
+  url: string;
+  username: string | null;
+  action: 'save' | 'update';
+  itemId: string | null;
+}
+
 /** 与 background 约定的调用方式 */
 async function send<T>(msg: Record<string, unknown>): Promise<T> {
   const res = await chrome.runtime.sendMessage(msg) as T & { error?: string };
@@ -39,6 +52,7 @@ export function Popup() {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [pending, setPending] = useState<Pending | null>(null);
 
   const refresh = useCallback(async () => {
     const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
@@ -48,7 +62,12 @@ export function Popup() {
 
     const st = await send<Status>({ type: 'coffer:status' });
     setStatus(st);
-    if (!st.unlocked || !tab?.url) { setItems([]); return; }
+    if (!st.unlocked || !tab?.url) { setItems([]); setPending(null); return; }
+
+    const { pending: p } = await send<{ pending: Pending | null }>({
+      type: 'coffer:pending', ...(tab.id === undefined ? {} : { tabId: tab.id }),
+    });
+    setPending(p);
 
     // ⚠️ 匹配交给 background 做：它手里是**完整的**条目（含每个网址的
     // `match` 类型），而列表接口刻意只回摘要。把匹配放在这边就得先把
@@ -74,6 +93,28 @@ export function Popup() {
 
       {error && <Note tone="risk">{error}</Note>}
       {notice && <Note tone="accent">{notice}</Note>}
+
+      {status.unlocked && pending && (
+        <SavePrompt
+          pending={pending}
+          busy={busy}
+          onSave={async () => {
+            setBusy(true); setError(null);
+            try {
+              await send({ type: 'coffer:save-capture', ...(tabId === undefined ? {} : { tabId }) });
+              setPending(null);
+              setNotice(pending.action === 'update' ? '已更新' : '已保存');
+              window.close();
+            } catch (e) {
+              setError(e instanceof Error ? e.message : '保存失败');
+            } finally { setBusy(false); }
+          }}
+          onDismiss={async () => {
+            await send({ type: 'coffer:dismiss-capture', ...(tabId === undefined ? {} : { tabId }) });
+            setPending(null);
+          }}
+        />
+      )}
 
       {!status.unlocked ? (
         <ConnectForm busy={busy} onSubmit={async (p) => {
@@ -108,6 +149,45 @@ export function Popup() {
           <Generator />
         </>
       )}
+    </div>
+  );
+}
+
+/**
+ * 「要保存这条登录吗？」
+ *
+ * 放在最上面 —— 它是当前唯一需要用户做决定的东西。列表只是备选。
+ * 措辞上明确说出是**哪个账号**：用户在同一个站点可能有多个账号，
+ * 一句笼统的「保存密码？」会让他不知道该不该点。
+ */
+function SavePrompt({ pending, busy, onSave, onDismiss }: {
+  pending: Pending;
+  busy: boolean;
+  onSave: () => void;
+  onDismiss: () => void;
+}) {
+  let host = pending.url;
+  try { host = new URL(pending.url).host; } catch { /* 原样显示 */ }
+
+  return (
+    <div className="rounded-[var(--radius-md)] border border-[var(--accent)] bg-[var(--surface-raised)] p-3">
+      <p className="mb-0.5 text-[var(--text-sm)] font-medium">
+        {pending.action === 'update' ? '更新这条登录？' : '保存这条登录？'}
+      </p>
+      <p className="mb-3 truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]" title={pending.url}>
+        {host}
+        {pending.username ? ` · ${pending.username}` : ''}
+      </p>
+      <div className="flex gap-2">
+        <button onClick={onSave} disabled={busy}
+          className="flex-1 rounded-[var(--radius-md)] bg-[var(--accent)] px-3 py-1.5 text-[var(--text-sm)] font-medium text-[var(--accent-ink)] hover:bg-[var(--accent-hover)] disabled:opacity-50">
+          {busy ? '保存中…' : pending.action === 'update' ? '更新' : '保存'}
+        </button>
+        <button onClick={onDismiss} disabled={busy}
+          className="rounded-[var(--radius-md)] px-3 py-1.5 text-[var(--text-sm)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] disabled:opacity-50">
+          不用
+        </button>
+      </div>
     </div>
   );
 }

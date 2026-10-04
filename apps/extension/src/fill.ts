@@ -89,3 +89,22 @@ export function focusField(index: number): boolean {
   el.focus();
   return true;
 }
+
+/**
+ * 按下标读出输入框的当前值 —— 表单提交后用，用来捕获用户输入的凭据。
+ *
+ * ⚠️ 与 `fillFields` 一样必须**完全自包含**（`executeScript` 会 toString 后注入）。
+ *
+ * 由 background 在**收到提交通知之后**才注入，读到的值直接回到 background ——
+ * content script 全程不接触这些值。这和填充走的是同一条路径，
+ * 只是方向相反。
+ */
+export function readFieldValues(indices: number[]): (string | null)[] {
+  const inputs = Array.from(
+    document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'),
+  );
+  return indices.map((i) => {
+    const el = inputs[i];
+    return el ? el.value : null;
+  });
+}

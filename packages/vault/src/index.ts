@@ -7,4 +7,6 @@ export * from './sync-engine';
 export * from './search';
 export * from './url-match';
 export * from './form-fields';
+export * from './health';
+export * from './credential-capture';
 export * from './totp';

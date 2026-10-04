@@ -116,6 +116,42 @@ maybeReport();
 setInterval(maybeReport, 1000);
 
 /**
+ * 表单提交检测。
+ *
+ * ⚠️ **这里读不到也不上报任何值** —— 只发一个「某个登录表单被提交了」的信号。
+ * 真正的取值由 background 收到信号后注入一次性的读取函数完成（看 fill.ts），
+ * 值从页面直达 background，不经过这份常驻代码。
+ *
+ * 用捕获阶段监听：很多站点在冒泡阶段就 `preventDefault()` 了，
+ * 那时候再监听就晚了。
+ */
+function onFormSubmit(event: Event): void {
+  const form = event.target;
+  if (!(form instanceof HTMLFormElement)) return;
+  if (window.top !== window.self) return;
+
+  // 只关心含密码框的表单 —— 搜索框、订阅框提交时不该触发保存提示
+  if (!form.querySelector('input[type="password"]')) return;
+
+  chrome.runtime.sendMessage({ type: 'coffer:submitted', url: location.href })
+    .catch(() => { /* 没有接收方是正常情况 */ });
+}
+
+document.addEventListener('submit', onFormSubmit, true);
+
+/**
+ * 有些站点不用 submit 事件，而是给按钮绑 click 后自己发请求。
+ * 这种情况靠 Enter 键兜底 —— 覆盖面不如 submit，但聊胜于无。
+ */
+document.addEventListener('keydown', (e) => {
+  if (e.key !== 'Enter' || window.top !== window.self) return;
+  const el = e.target;
+  if (!(el instanceof HTMLInputElement)) return;
+  if (el.type !== 'password' && el.form?.querySelector('input[type="password"]') === null) return;
+  chrome.runtime.sendMessage({ type: 'coffer:submitted', url: location.href }).catch(() => {});
+}, true);
+
+/**
  * popup 点击填充时，background 需要知道「现在这份字段列表」——
  * 页面可能已经变了。这里按需重新读一遍再回。
  */
