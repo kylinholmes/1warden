@@ -43,6 +43,55 @@ describe('bodyOf', () => {
   });
 });
 
+/**
+ * ⚠️ **二进制体必须走 base64，不能拿 TextDecoder 转字符串。**
+ *
+ * 早先这里对 `ArrayBuffer` / 类型化数组做的是 `new TextDecoder().decode(raw)` ——
+ * 那不是「转错」，是**静默改字节**：不合法的 UTF-8 序列会被替换成 U+FFFD。
+ * 附件上传走的就是这条路，传上去的文件会损坏，
+ * 而**上传会成功** —— 用户要等下载回来才发现。
+ *
+ * Tauri 的 IPC 本身就是 JSON，二进制只能编码过去。
+ * 用一个**独立字段**而不是在字符串前面加魔法前缀：前缀要靠双方都记得检查，
+ * 而独立字段是类型层面的区分，忘了处理会直接是 undefined。
+ */
+describe('toNativeRequest —— 二进制体', () => {
+  const bytes = new Uint8Array([0x00, 0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00]);
+  const b64 = Buffer.from(bytes).toString('base64');
+
+  it('base64-encodes an ArrayBuffer instead of mangling it', async () => {
+    const req = await toNativeRequest('https://a.test', { method: 'POST', body: bytes.buffer.slice(0) as ArrayBuffer });
+    expect(req.bodyBase64).toBe(b64);
+    expect(req.body).toBeUndefined();
+  });
+
+  it('base64-encodes a typed array', async () => {
+    expect((await toNativeRequest('https://a.test', { method: 'POST', body: bytes })).bodyBase64).toBe(b64);
+  });
+
+  it('base64-encodes a Blob', async () => {
+    expect((await toNativeRequest('https://a.test', { method: 'POST', body: new Blob([bytes as BlobPart]) })).bodyBase64).toBe(b64);
+  });
+
+  /** 文本路径不能被碰到 —— 绝大多数请求走的是它 */
+  it('still sends a plain string as text', async () => {
+    const req = await toNativeRequest('https://a.test', { method: 'POST', body: '{"a":1}' });
+    expect(req.body).toBe('{"a":1}');
+    expect(req.bodyBase64).toBeUndefined();
+  });
+
+  /** 中文是多字节但**合法** UTF-8 —— 该按文本走，不是 base64 */
+  it('keeps valid UTF-8 text in a Blob as text', async () => {
+    expect((await toNativeRequest('https://a.test', { method: 'POST', body: new Blob(['中文']) })).body).toBe('中文');
+  });
+
+  /** 0x89 是 PNG 的魔数首字节，在 UTF-8 里非法 —— 必须走 base64 才不会被改 */
+  it('does not let a binary body survive as text', async () => {
+    const req = await toNativeRequest('https://a.test', { method: 'POST', body: bytes });
+    expect(req.body).toBeUndefined();
+  });
+});
+
 describe('toNativeRequest', () => {
   it('uppercases the method and defaults to GET', async () => {
     expect((await toNativeRequest('https://a.test', { method: 'post' })).method).toBe('POST');

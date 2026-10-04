@@ -28,6 +28,8 @@
 //!
 //! 也就是说，中间人即使能伪造证书，也过不了指纹这一关。
 
+use base64::Engine as _;
+use base64::engine::general_purpose::STANDARD as B64;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::collections::HashMap;
@@ -45,6 +47,15 @@ pub struct HttpRequest {
     pub headers: HashMap<String, String>,
     #[serde(default)]
     pub body: Option<String>,
+    /// 二进制体（base64）。与 `body` 二选一，同时给就以这个为准。
+    ///
+    /// Tauri 的 IPC 是 JSON，二进制只能编码过来。附件上传走的就是这条路。
+    ///
+    /// ⚠️ 另一条路（把二进制 `TextDecoder` 成字符串再发）**不能走** ——
+    /// 那不是转错，是**静默改字节**：不合法的 UTF-8 序列会被替换成 U+FFFD，
+    /// 传上去的文件损坏而上传会「成功」，用户要等下载回来才发现。
+    #[serde(default)]
+    pub body_base64: Option<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
 }
@@ -399,7 +410,14 @@ pub async fn execute(state: &HttpState, req: HttpRequest) -> Result<HttpResponse
     for (k, v) in &req.headers {
         builder = builder.header(k, v);
     }
-    if let Some(body) = req.body {
+    // 二进制优先。两者同时给说明调用方有问题，但按约定以 base64 为准，
+    // 并且**解码失败要当场报错** —— 静默降级成空体会发出一个内容缺失的请求
+    if let Some(encoded) = req.body_base64 {
+        let bytes = B64.decode(encoded.as_bytes()).map_err(|e| {
+            HttpError::new("invalidRequest", format!("bodyBase64 不是合法的 base64：{e}"))
+        })?;
+        builder = builder.body(bytes);
+    } else if let Some(body) = req.body {
         builder = builder.body(body);
     }
 
@@ -593,6 +611,27 @@ mod tests {
         assert!(fp.starts_with("2C:F2:4D:BA:5F:B0:A3:0E:26:E8:3B:2A:C5:B9:E2:9E"));
     }
 
+    /// ⚠️ `bodyBase64` 要走**字节**，不是把它当字符串发。
+    ///
+    /// 附件上传靠这条 —— 二进制经 `TextDecoder` 转字符串会被静默改字节
+    /// （非法 UTF-8 序列变成 U+FFFD），传上去的文件损坏而上传「成功」。
+    #[test]
+    fn body_base64_decodes_to_the_original_bytes() {
+        let original: Vec<u8> = vec![0x00, 0x89, 0x50, 0x4e, 0x47, 0xff, 0xfe, 0x00];
+        let encoded = B64.encode(&original);
+        let decoded = B64.decode(encoded.as_bytes()).expect("应当能解回来");
+        assert_eq!(decoded, original);
+
+        // 这几个字节**不是**合法 UTF-8 —— 正是它们会被 TextDecoder 改掉
+        assert!(std::str::from_utf8(&original).is_err(), "这组字节本来就该不是合法 UTF-8");
+    }
+
+    #[test]
+    fn invalid_base64_is_rejected_rather_than_silently_dropped() {
+        // 静默降级成空体会发出一个内容缺失的请求 —— 那比报错糟得多
+        assert!(B64.decode(b"not base64!!").is_err());
+    }
+
     #[test]
     fn fingerprint_differs_for_different_certs() {
         assert_ne!(fingerprint_of(b"cert-a"), fingerprint_of(b"cert-b"));
@@ -704,6 +743,7 @@ mod tests {
                 url: url.into(),
                 headers: HashMap::new(),
                 body: None,
+                body_base64: None,
                 timeout_ms: Some(10_000),
             }
         }

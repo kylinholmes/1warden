@@ -387,6 +387,7 @@ name = "coffer"
 version = "0.0.0"
 dependencies = [
  "accessibility-sys",
+ "base64 0.22.1",
  "core-graphics",
  "reqwest 0.12.28",
  "rustls",

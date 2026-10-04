@@ -38,7 +38,10 @@ export interface NativeRequest {
   method: string;
   url: string;
   headers: Record<string, string>;
+  /** 文本体。与 `bodyBase64` 二选一 */
   body?: string;
+  /** 二进制体（base64）。附件上传走这条 —— Rust 侧解回字节 */
+  bodyBase64?: string;
   timeoutMs?: number;
 }
 
@@ -92,15 +95,58 @@ export function headersOf(input: RequestInfo | URL, init?: RequestInit): Record<
  * `@coffer/api` 只发字符串（JSON 或 urlencoded），所以常见路径就是原样返回。
  * 其余形态（FormData/Blob/URLSearchParams）走 text() 兜底，宁可转错也不要静默丢 body。
  */
-export async function bodyOf(input: RequestInfo | URL, init?: RequestInit): Promise<string | undefined> {
+/**
+ * 取出请求体，**分成文本与二进制两条路**。
+ *
+ * ⚠️ 二进制必须走 base64，不能拿 `TextDecoder` 转字符串 ——
+ * 那不是转错，是**静默改字节**：不合法的 UTF-8 序列会被替换成 U+FFFD。
+ * 附件上传走的就是这条路，传上去的文件会损坏，而**上传会成功**，
+ * 用户要等下载回来才发现。Tauri 的 IPC 是 JSON，二进制只能编码过去。
+ *
+ * 用**独立字段**而不是在字符串前面加魔法前缀：前缀要靠双方都记得检查，
+ * 而独立字段是类型层面的区分，忘了处理会直接是 undefined。
+ */
+export async function bodyPartsOf(
+  input: RequestInfo | URL, init?: RequestInit,
+): Promise<{ body?: string; bodyBase64?: string }> {
   const raw = init?.body ?? (typeof input === 'object' && 'body' in input ? input.body : null);
-  if (raw === null || raw === undefined) return undefined;
-  if (typeof raw === 'string') return raw;
-  if (raw instanceof URLSearchParams) return raw.toString();
-  if (typeof Blob !== 'undefined' && raw instanceof Blob) return raw.text();
-  if (raw instanceof ArrayBuffer) return new TextDecoder().decode(raw);
-  if (ArrayBuffer.isView(raw)) return new TextDecoder().decode(raw);
-  return String(raw);
+  if (raw === null || raw === undefined) return {};
+
+  if (typeof raw === 'string') return { body: raw };
+  if (raw instanceof URLSearchParams) return { body: raw.toString() };
+
+  const bytes = await bytesOf(raw);
+  if (bytes === null) return { body: String(raw) };
+
+  const text = decodeIfUtf8(bytes);
+  // 是合法 UTF-8 就当文本走（中文也是），否则当二进制
+  return text === undefined ? { bodyBase64: toBase64(bytes) } : { body: text };
+}
+
+/** 兼容旧调用点：只要文本那一半 */
+export async function bodyOf(input: RequestInfo | URL, init?: RequestInit): Promise<string | undefined> {
+  return (await bodyPartsOf(input, init)).body;
+}
+
+async function bytesOf(raw: unknown): Promise<Uint8Array | null> {
+  if (typeof Blob !== 'undefined' && raw instanceof Blob) {
+    return new Uint8Array(await raw.arrayBuffer());
+  }
+  if (raw instanceof ArrayBuffer) return new Uint8Array(raw);
+  if (ArrayBuffer.isView(raw)) return new Uint8Array(raw.buffer, raw.byteOffset, raw.byteLength);
+  return null;
+}
+
+/** 能**无损**当文本读就返回文本，否则 undefined —— 出现替换字符就说明原本不是文本 */
+function decodeIfUtf8(bytes: Uint8Array): string | undefined {
+  const text = new TextDecoder('utf-8', { fatal: false }).decode(bytes);
+  return text.includes('\uFFFD') ? undefined : text;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  let s = '';
+  for (let i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]!);
+  return btoa(s);
 }
 
 export async function toNativeRequest(
@@ -108,14 +154,14 @@ export async function toNativeRequest(
 ): Promise<NativeRequest> {
   const method = (init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET') ?? 'GET')
     .toUpperCase();
-  const body = await bodyOf(input, init);
+  const parts = await bodyPartsOf(input, init);
   return {
     method,
     url: urlOf(input),
     headers: headersOf(input, init),
     // 无 body 时不要传 `body: undefined` —— serde 的 Option 收到 null 与收到
     // 缺失字段行为不同，少传更干净
-    ...(body === undefined ? {} : { body }),
+    ...parts,
     timeoutMs,
   };
 }
