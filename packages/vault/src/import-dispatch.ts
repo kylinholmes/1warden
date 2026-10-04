@@ -19,6 +19,7 @@ import { parseBitwardenCsv } from './import';
 import { parseGenericCsv, detectCsvFormat } from './import-csv';
 import { parseBitwardenJson, parse1Pif, detectJsonFormat } from './import-json';
 import { parse1Pux, looksLike1Pux } from './import-1pux';
+import { parseKeePassXml, looksLikeKeePassXml } from './import-keepass';
 import type { ImportResult } from './import';
 
 export type ImportFormatId =
@@ -27,6 +28,7 @@ export type ImportFormatId =
   | '1pif'
   | 'bitwarden-json'
   | 'bitwarden-csv'
+  | 'keepass2'
   | 'csv';
 
 export interface ImportFormat {
@@ -48,6 +50,7 @@ export const IMPORT_FORMATS: readonly ImportFormat[] = [
   { id: '1pif', label: '1Password 旧版导出（.1pif）' },
   { id: 'bitwarden-json', label: 'Bitwarden JSON（未加密）' },
   { id: 'bitwarden-csv', label: 'Bitwarden CSV' },
+  { id: 'keepass2', label: 'KeePass 2 XML' },
   { id: 'csv', label: '其它 CSV（Chrome / Edge / LastPass / Excel …）' },
 ];
 
@@ -75,6 +78,9 @@ export function detectImportFormat(data: Uint8Array): ImportFormatId | null {
   if (looksLike1Pux(data)) return '1pux';
 
   const head = utf8(data.subarray(0, Math.min(SNIFF_BYTES, data.byteLength)));
+
+  // XML 要先判 —— 它既不是 JSON 也不是 CSV，落到后面只会得到「认不出」
+  if (looksLikeKeePassXml(head)) return 'keepass2';
 
   const json = detectJsonFormat(head);
   if (json?.id === 'bitwarden') return 'bitwarden-json';
@@ -116,6 +122,8 @@ export async function parseImport(data: Uint8Array, format?: ImportFormatId): Pr
       return parseBitwardenJson(utf8(data));
     case 'bitwarden-csv':
       return parseBitwardenCsv(utf8(data));
+    case 'keepass2':
+      return parseKeePassXml(utf8(data));
     case 'csv':
       return parseGenericCsv(utf8(data));
     default:

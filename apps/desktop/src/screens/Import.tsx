@@ -98,8 +98,9 @@ export function ImportScreen({ client, onImported }: {
       <h2 className="mb-2 text-[var(--text-xl)] font-semibold tracking-tight">导入</h2>
       <p className="mb-6 text-[var(--text-sm)] leading-relaxed text-[var(--ink-secondary)]">
         支持 1Password（.1pux / .1pif / CSV）、Bitwarden（JSON / CSV）、
-        Chrome、Edge、Firefox、Safari、LastPass、Dashlane 等常见导出，
-        以及 Excel 存出来的 CSV。数据只在本地解析，
+        KeePass 2（XML 导出），以及 Chrome、Edge、Firefox、Safari、
+        LastPass、Dashlane 等常见导出与 Excel 存出来的 CSV。
+        数据只在本地解析，
         <strong className="font-medium">文件不会上传到任何地方</strong>。
       </p>
 
@@ -112,7 +113,7 @@ export function ImportScreen({ client, onImported }: {
       <input
         ref={fileRef}
         type="file"
-        accept=".csv,.json,.1pux,.1pif,.txt,text/csv,application/json"
+        accept=".csv,.json,.1pux,.1pif,.xml,.txt,text/csv,application/json,text/xml,application/xml"
         className="hidden"
         onChange={(e) => {
           const f = e.target.files?.[0];

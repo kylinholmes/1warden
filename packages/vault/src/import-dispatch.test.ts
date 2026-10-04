@@ -103,6 +103,11 @@ describe('detectImportFormat', () => {
     expect(detectImportFormat(bytes(CHROME_CSV))).toBe('csv');
   });
 
+  /** ⚠️ XML 要**先于** JSON/CSV 判断 —— 它两者都不是，落到后面只会得到「认不出」 */
+  it('spots a KeePass 2 XML', () => {
+    expect(detectImportFormat(bytes('<?xml version="1.0"?><KeePassFile><Root/></KeePassFile>'))).toBe('keepass2');
+  });
+
   it('returns null for something that is not a password export', () => {
     expect(detectImportFormat(bytes('日期,金额\n2026-01-01,12'))).toBeNull();
   });
@@ -122,6 +127,16 @@ describe('parseImport —— 自动识别', () => {
   it('imports a 1PIF end to end', async () => {
     const r = await parseImport(bytes(PIF));
     expect(r.items[0]!.login?.username).toBe('me');
+  });
+
+  it('imports a KeePass 2 XML end to end', async () => {
+    const x = '<?xml version="1.0"?><KeePassFile><Root><Group><Name>工作</Name>'
+      + '<Entry><String><Key>Title</Key><Value>GitHub</Value></String>'
+      + '<String><Key>UserName</Key><Value>me</Value></String>'
+      + '<String><Key>Password</Key><Value>pw</Value></String></Entry>'
+      + '</Group></Root></KeePassFile>';
+    const r = await parseImport(bytes(x));
+    expect(r.items[0]).toMatchObject({ name: 'GitHub', folderName: '工作', login: { username: 'me', password: 'pw' } });
   });
 
   it('imports a generic CSV end to end', async () => {
