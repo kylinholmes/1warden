@@ -142,6 +142,22 @@ export const IconImport = (p: IconProps) => (
   </Svg>
 );
 
+/**
+ * 生成器 —— 一颗骰子。
+ *
+ * 骰子是「随机」这件事最短的表达，几个密码管理器也都用它。
+ * 点位是实心的：1.75 的描边画 1px 的点会糊成一团，而实心点在这个
+ * 笔画粗细的图标里仍然读得出来。
+ */
+export const IconDice = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="3.5" y="3.5" width="17" height="17" rx="4" />
+    <circle cx="8.6" cy="8.6" r="1.3" fill="currentColor" stroke="none" />
+    <circle cx="12" cy="12" r="1.3" fill="currentColor" stroke="none" />
+    <circle cx="15.4" cy="15.4" r="1.3" fill="currentColor" stroke="none" />
+  </Svg>
+);
+
 export const IconFolder = (p: IconProps) => (
   <Svg {...p}>
     <path d="M3 7.5A2 2 0 0 1 5 5.5h3.6l1.8 2.2H19a2 2 0 0 1 2 2v7.8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z" />

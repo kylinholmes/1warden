@@ -43,12 +43,29 @@ function usePresence(open: boolean): { mounted: boolean; leaving: boolean; onExi
   const [mounted, setMounted] = useState(open);
   const [leaving, setLeaving] = useState(false);
 
+  /*
+   * ⚠️ 「打开」必须在这一帧就把面板挂上去，不能等 effect 里再 setMounted。
+   *
+   * 等 effect 的写法有个安静的后果：open 翻成 true 的那一次渲染，面板
+   * **还没有 DOM**（ref 是 null），而焦点那段代码的依赖是 `open` ——
+   * 它只在那一次提交后跑一遍，于是 `panelRef.current?.focus()` 什么也没抓到。
+   * 焦点留在触发它的按钮上，Tab 从那个按钮继续往**背后的界面**里走：
+   * 焦点陷阱等于不存在。
+   *
+   * 之所以一直没被发现：面板一挂载就是开着的时候（比如预览里写死 open）
+   * 首次渲染 mounted 就是 true，跑得通。**只有「先挂载、后打开」才漏** ——
+   * 而那正是设置面板（⌘,）、生成器、编辑器的真实路径。
+   *
+   * 渲染期直接改状态是 React 对「由 props 推状态」给的正规写法：
+   * 它在提交前就重渲染，面板于是和 open 出现在同一帧里。
+   */
+  if (open && !mounted) {
+    setMounted(true);
+    setLeaving(false);
+  }
+
   useEffect(() => {
-    if (open) {
-      setLeaving(false);
-      setMounted(true);
-      return;
-    }
+    if (open) return;
     if (!mounted) return;
     setLeaving(true);
     const t = setTimeout(() => { setLeaving(false); setMounted(false); }, EXIT_FALLBACK_MS);
@@ -59,10 +76,21 @@ function usePresence(open: boolean): { mounted: boolean; leaving: boolean; onExi
   return { mounted, leaving, onExited };
 }
 
-/** 面板里能拿到焦点的元素。和浏览器自己的 Tab 顺序规则一致。 */
+/**
+ * 面板里能拿到焦点的元素。和浏览器自己的 Tab 顺序规则一致。
+ *
+ * ⚠️ `[tabindex="-1"]` 必须排除，`button` / `input` 这些选择器也不例外。
+ * 显式写了 `tabindex="-1"` 的控件是**故意**不进 Tab 顺序的 ——
+ * 单选组、tab 列表用「roving tabindex」就是这么做的：整组只占一个停留点，
+ * 组内用方向键走。这里如果把它们算进来，Tab 会一个一个穿过组里所有按钮，
+ * roving 就白做了。（面板自身的 tabIndex={-1} 不受影响：Tab 循环只处理
+ * 焦点已经在面板**里面**的情况。）
+ */
 const FOCUSABLE = [
-  'a[href]', 'button:not([disabled])', 'input:not([disabled])',
-  'select:not([disabled])', 'textarea:not([disabled])',
+  'a[href]', 'button:not([disabled]):not([tabindex="-1"])',
+  'input:not([disabled]):not([tabindex="-1"])',
+  'select:not([disabled]):not([tabindex="-1"])',
+  'textarea:not([disabled]):not([tabindex="-1"])',
   '[tabindex]:not([tabindex="-1"])',
 ].join(',');
 

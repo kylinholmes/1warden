@@ -100,7 +100,8 @@ export function ImportScreen({ client, onImported }: {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="band shrink-0 px-8">
+      {/* 顶部的带子就是窗口的标题栏 —— 空白处可拖 */}
+      <header className="band shrink-0 px-8" data-tauri-drag-region="deep">
         <h2 className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold">导入</h2>
       </header>
 

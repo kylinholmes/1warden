@@ -9,6 +9,8 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { QuickAccess } from '../screens/QuickAccess';
+import { initPlatform } from '../platform';
+import { initTheme } from '../theme';
 import {
   askMain, askInitial, askAction, onResults, onActionResult,
   type QuickItem,
@@ -81,6 +83,18 @@ function Quick() {
     />
   );
 }
+
+/*
+ * ⚠️ 这是一个**独立的窗口**，但主题是同一个应用的主题。
+ *
+ * 忘了这一句的症状很难被发现：用户在设置里选了暗色，主窗口是暗的，
+ * 而按 ⌘⇧\ 调出来的快速面板还是亮的 —— 两个窗口像两个产品。
+ * 两个窗口同源，localStorage 是同一份，所以读的就是同一个选择。
+ */
+initTheme();
+// 这个窗口是 decorations: false，没有红绿灯要躲；但两个入口初始化的是
+// **同一套**状态，少调一个就会在别处漏出来（上次主题就是这么漏的）
+initPlatform();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

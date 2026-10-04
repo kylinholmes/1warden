@@ -8,10 +8,12 @@ import { SecurityReportView } from './SecurityReport';
 import { ImportScreen } from './Import';
 import { ItemEditor } from './ItemEditor';
 import { Settings } from './Settings';
+import { Generator } from './Generator';
 import { FloatingPanel } from '../components/FloatingPanel';
+import { CopyButton } from '../components/CopyButton';
 import { useToast } from '../components/Toast';
 import {
-  IconAlert, IconCheck, IconCopy, IconFolder, IconGear, IconImport,
+  IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   IconSearch, IconShield, IconStar, IconTrash, TypeIcon,
 } from '../components/icons';
@@ -40,6 +42,7 @@ export function VaultView({ client, onLock }: Props) {
   const [confirmDelete, setConfirmDelete] = useState<VaultItem | null>(null);
   const [bump, setBump] = useState(0); // 本地写入后强制重渲染 —— session 不是响应式的
   const [settingsOpen, setSettingsOpen] = useState(false);
+  const [generatorOpen, setGeneratorOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
 
@@ -79,32 +82,32 @@ export function VaultView({ client, onLock }: Props) {
     return () => clearInterval(id);
   }, [selected]);
 
-  // ⌘F 聚焦搜索；⌘L 锁定；⌘, 设置 —— 键盘优先是安全工具的基本要求
-  useEffect(() => {
-    function onKey(e: KeyboardEvent) {
-      // 浮层开着时这些快捷键全部让路：焦点在设置面板里，
-      // 而 ⌘F 会把焦点抢到背后的搜索框上 —— 那就是焦点跑到模态外面去了
-      if (settingsOpen) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === 'f') { e.preventDefault(); searchRef.current?.focus(); }
-      if ((e.metaKey || e.ctrlKey) && e.key === 'l') { e.preventDefault(); onLock(); }
-      if ((e.metaKey || e.ctrlKey) && e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
-    }
-    window.addEventListener('keydown', onKey);
-    return () => window.removeEventListener('keydown', onKey);
-  }, [onLock, settingsOpen]);
+  /**
+   * 有没有浮层压在上面。
+   *
+   * ⚠️ 判断的是**所有**浮层，不是某一个。之前这里只挡了设置面板 ——
+   * 于是在编辑器里按 ⌘, 会在它上面再压一层设置：两层都监听 document 的
+   * Esc，而 `stopPropagation` 拦不住挂在同一个节点上的另一个监听器，
+   * 一次按键把两层一起关掉。多出来的那个浮层还会抢走焦点陷阱。
+   * 「浮层开着的时候，键盘属于浮层」是一条规则，不是每个面板一条。
+   */
+  const overlayOpen = settingsOpen || generatorOpen || confirmDelete !== null || mode.kind !== 'browse';
 
-  // 快捷键：⌘N 新建。放在编辑态下会被输入框抢走，所以只在浏览态生效
+  // ⌘F 聚焦搜索；⌘L 锁定；⌘N 新建；⌘, 设置 —— 键盘优先是安全工具的基本要求
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      if (settingsOpen) return;
-      if ((e.metaKey || e.ctrlKey) && e.key === 'n' && mode.kind === 'browse') {
-        e.preventDefault();
-        setMode({ kind: 'new' });
-      }
+      // 浮层开着时这些快捷键全部让路：焦点在浮层里，
+      // 而 ⌘F 会把焦点抢到背后的搜索框上 —— 那就是焦点跑到模态外面去了
+      if (overlayOpen) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
+      if (e.key === 'f') { e.preventDefault(); searchRef.current?.focus(); }
+      if (e.key === 'l') { e.preventDefault(); onLock(); }
+      if (e.key === 'n') { e.preventDefault(); setMode({ kind: 'new' }); }
+      if (e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [mode.kind, settingsOpen]);
+  }, [onLock, overlayOpen]);
 
   const sidebar = (
     <Sidebar
@@ -123,33 +126,10 @@ export function VaultView({ client, onLock }: Props) {
         if (category.kind === 'folder' && category.id === id) setCategory({ kind: 'all' });
       })}
       onOpenSettings={() => setSettingsOpen(true)}
+      generatorOpen={generatorOpen}
+      onOpenGenerator={() => setGeneratorOpen(true)}
     />
   );
-
-  // 编辑器占满右侧，侧栏保持可见 —— 用户在编辑时仍能看到自己在哪个位置
-  if (mode.kind !== 'browse') {
-    return (
-      <div className="flex h-full">
-        {sidebar}
-        <div className="flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
-          <ItemEditor
-            client={client}
-            item={mode.kind === 'edit' ? mode.item : null}
-            onCancel={() => setMode({ kind: 'browse' })}
-            onDone={(saved) => {
-              setMode({ kind: 'browse' });
-              if (saved) {
-                setSelectedId(saved.id);
-                setBump((n) => n + 1);
-                // 编辑器一关，界面上就没有「存了没有」的位置了 —— 提示条的典型场景
-                toast.show({ tone: 'success', message: `已保存「${saved.name}」` });
-              }
-            }}
-          />
-        </div>
-      </div>
-    );
-  }
 
   /*
     安全报告与导入占满右侧。刻意**不**保留条目列表这一栏 ——
@@ -173,7 +153,8 @@ export function VaultView({ client, onLock }: Props) {
       ) : (
         <>
           <div className="flex w-[var(--list-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-content)]">
-            <div className="band">
+            {/* 这一条也是标题栏的一部分 —— 整条顶部带子都可以拖窗口 */}
+            <div className="band" data-tauri-drag-region="deep">
               <div className="relative flex min-w-0 flex-1 items-center">
                 <IconSearch size={15} className="pointer-events-none absolute left-1.5 text-[var(--ink-tertiary)]" />
                 <input
@@ -289,6 +270,36 @@ export function VaultView({ client, onLock }: Props) {
         serverUrl={session.account?.serverUrl ?? ''}
         onClose={() => setSettingsOpen(false)}
       />
+
+      {/*
+        生成器 —— 和「导入」「安全报告」并列的一块内容，但它不是一屏：
+        生成密码这件事总是发生在别的上下文里（正在改某条记录、刚打开一个
+        注册页），整屏会把用户从那个上下文里拽出来。浮层压在上面。
+      */}
+      <Generator open={generatorOpen} onClose={() => setGeneratorOpen(false)} />
+
+      {/*
+        新建 / 编辑同一个浮层，只是标题与初始值不同。
+        **一直挂着**，靠 `open` 开合 —— 条件挂载的话，关掉的一瞬间组件就
+        没了，退场动画根本没机会播（FloatingPanel 的 usePresence 要的是
+        「还在，但 open 是 false」）。删除确认框至今还是条件挂载的，
+        所以它关得比这两个「啪」一下；那是既有行为，这次没动它。
+      */}
+      <ItemEditor
+        client={client}
+        open={mode.kind !== 'browse'}
+        item={mode.kind === 'edit' ? mode.item : null}
+        onCancel={() => setMode({ kind: 'browse' })}
+        onDone={(saved) => {
+          setMode({ kind: 'browse' });
+          if (saved) {
+            setSelectedId(saved.id);
+            setBump((n) => n + 1);
+            // 编辑器一关，界面上就没有「存了没有」的位置了 —— 提示条的典型场景
+            toast.show({ tone: 'success', message: `已保存「${saved.name}」` });
+          }
+        }}
+      />
     </div>
   );
 }
@@ -342,6 +353,17 @@ function DeleteDialog(props: {
   );
 }
 
+/**
+ * 侧栏。
+ *
+ * ⚠️ 这一栏是玻璃（见 styles.css 的 --surface-glass），于是它的配色规矩
+ * 和右边两块**不一样**，改这里的文字颜色之前先读那段注释：
+ *
+ *   - 文字最低用**次级墨**。三级墨压在实心面上本来就只有 4.94:1，
+ *     玻璃再一稀释就掉到 3.58:1 —— 计数、账户邮箱、快捷键提示因此都上移一档。
+ *   - 图标可以留三级墨：图形元件按 WCAG 1.4.11 是 3:1。
+ *   - 选中态与悬停态用的是**不透明**的填充，不受壁纸影响，照旧。
+ */
 function Sidebar(props: {
   folders: readonly VaultFolder[];
   category: Category;
@@ -350,6 +372,9 @@ function Sidebar(props: {
   onLock: () => void;
   account: string;
   onOpenSettings: () => void;
+  /** 生成器是浮层，不是一屏 —— 侧栏只负责把它叫出来，选中态跟着它的开合走 */
+  generatorOpen: boolean;
+  onOpenGenerator: () => void;
   onCreateFolder: (name: string) => Promise<void>;
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
@@ -360,9 +385,22 @@ function Sidebar(props: {
   const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   return (
-    <nav className="flex w-[var(--rail-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-chrome)]">
-      {/* 和列表栏、详情栏共用 `.band` 的高度 —— 三个面板的顶部对齐在同一条线上 */}
-      <div className="band">
+    /*
+      唯一的玻璃面。窗口材质是**整窗**的（macOS 的 Liquid Glass / Windows 的
+      mica 都作用于整个窗口，没法只给一栏），所以做法是反过来：窗口透明 +
+      材质，右边两块用不透明的表面盖住，只剩这一条把材质透出来。
+      见 styles.css 的 --surface-glass —— α 是算出来的，不是调出来的。
+    */
+    <nav className="flex w-[var(--rail-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-glass)]">
+      {/*
+        和列表栏、详情栏共用 `.band` 的高度 —— 三个面板的顶部对齐在同一条线上。
+
+        这条带子同时是**自绘标题栏**的那一段：`data-tauri-drag-region="deep"`
+        让整条带子都能拖窗口，而里面的按钮、输入框这些可交互元素自动豁免
+        （Tauri 的 drag.js 会认出 button/input/a/label）。
+        `pl-[var(--traffic-inset)]` 给系统红绿灯让位（只有 macOS 有）。
+      */}
+      <div className="band pl-[var(--traffic-inset)]" data-tauri-drag-region="deep">
         <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
           <IconLock size={13} />
         </span>
@@ -401,6 +439,14 @@ function Sidebar(props: {
             active={props.category.kind === 'security'}
             onClick={() => props.onSelect({ kind: 'security' })}
           />
+          {/* 生成器也是「第二块内容」，但它开的是浮层 —— `active` 跟着浮层的
+              开合走，用户一眼能看到这一层是从哪儿点出来的 */}
+          <NavItem
+            icon={<IconDice size={16} />}
+            label="生成器"
+            active={props.generatorOpen}
+            onClick={props.onOpenGenerator}
+          />
           <NavItem
             icon={<IconImport size={16} />}
             label="导入"
@@ -415,7 +461,7 @@ function Sidebar(props: {
           能建出第一个文件夹 —— 于是它对用户永远不会出现，整套文件夹功能等于不存在。
         */}
         <div className="mt-4 mb-1 flex items-center justify-between pl-2.5 pr-1">
-          <span className="text-[var(--text-xs)] font-medium text-[var(--ink-tertiary)]">文件夹</span>
+          <span className="text-[var(--text-xs)] font-medium text-[var(--ink-secondary)]">文件夹</span>
           <button
             onClick={() => { setCreating(true); setMenuFor(null); }}
             title="新建文件夹"
@@ -512,7 +558,7 @@ function Sidebar(props: {
           <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-[var(--text-2xs)] font-semibold text-[var(--accent)]">
             {props.account.slice(0, 1).toUpperCase() || '?'}
           </span>
-          <span className="truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]" title={props.account}>
+          <span className="truncate text-[var(--text-xs)] text-[var(--ink-secondary)]" title={props.account}>
             {props.account}
           </span>
         </div>
@@ -522,7 +568,7 @@ function Sidebar(props: {
         >
           <IconLock size={15} />
           <span className="flex-1">锁定</span>
-          <kbd className="text-[var(--text-2xs)] text-[var(--ink-tertiary)]">⌘L</kbd>
+          <kbd className="text-[var(--text-2xs)] text-[var(--ink-secondary)]">⌘L</kbd>
         </button>
       </div>
     </nav>
@@ -555,8 +601,9 @@ function NavItem(props: {
           {props.icon}
         </span>
         <span className="min-w-0 flex-1 truncate">{props.label}</span>
+        {/* 计数是字，不是图形 —— 在玻璃上必须用次级墨（理由见 Sidebar 的注释） */}
         {props.count !== undefined && (
-          <span className="shrink-0 text-[var(--text-2xs)] tabular-nums text-[var(--ink-tertiary)]">{props.count}</span>
+          <span className="shrink-0 text-[var(--text-2xs)] tabular-nums text-[var(--ink-secondary)]">{props.count}</span>
         )}
       </button>
       {props.children}
@@ -974,43 +1021,4 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
   );
 }
 
-export { CopyButton, ItemDetail, EmptyDetail };
-
-/** 复制到剪贴板，**N 秒后自动清空**（若期间用户没复制别的东西） */
-function CopyButton({ value }: { value: string }) {
-  const [copied, setCopied] = useState(false);
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  async function copy() {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(async () => {
-        setCopied(false);
-        // 只有剪贴板里还是我们写进去的东西时才清 —— 否则会清掉用户后来复制的内容
-        try {
-          const current = await navigator.clipboard.readText();
-          if (current === value) await navigator.clipboard.writeText('');
-        } catch { /* 读剪贴板可能被拒绝，那就保持原样 */ }
-      }, 30_000);
-    } catch {
-      setCopied(false);
-    }
-  }
-
-  return (
-    <button
-      onClick={copy}
-      title={copied ? '已复制' : '复制（30 秒后自动清空剪贴板）'}
-      aria-label="复制"
-      data-state={copied ? 'ok' : undefined}
-      className="btn btn-ghost shrink-0 gap-1.5"
-    >
-      {copied ? <IconCheck size={13} /> : <IconCopy size={13} />}
-      {copied ? '已复制' : '复制'}
-    </button>
-  );
-}
+export { ItemDetail, EmptyDetail };

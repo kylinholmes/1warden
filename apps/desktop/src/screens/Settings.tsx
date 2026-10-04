@@ -1,12 +1,14 @@
-import { useState, type ReactNode } from 'react';
+import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { FloatingPanel } from '../components/FloatingPanel';
+import { Segmented } from '../components/Segmented';
+import { getThemeMode, setThemeMode, subscribeTheme, type ThemeMode } from '../theme';
 import {
   IconClose, IconGear, IconIdentity, IconInfo, IconKeyboard, IconPalette, IconShield,
 } from '../components/icons';
 
 /**
- * 设置面板 —— 目前是**外壳**：容器、分组、交互都是真的，
- * 里面的控件还没接到任何实现上。
+ * 设置面板 —— 容器、分组、交互是真的；**「外观」这一组已经接入**，
+ * 其余三组仍是外壳。
  *
  * ## 为什么先把外壳做扎实
  *
@@ -14,14 +16,13 @@ import {
  * 键盘怎么进出，这些定下来之后，往里加一条设置就是加一行。
  * 反过来先做实现，等发现分组不对时，设置项已经到处引用了。
  *
- * 所以这一版的重点全在**容器与交互**上，见 `FloatingPanel`：
- * 开合、Esc、点外部关闭、焦点进出与归还、进出动效。
- *
  * ## 占位的诚实
  *
- * 底栏有一句「尚未接入」。控件一律 `disabled`，不做「看着能用、
- * 点了没反应」的样子 —— 密码管理器里最不能容忍的就是开关骗人：
- * 用户以为自己关掉了「已泄露检查」，那是个安全问题，不是体验问题。
+ * 底栏那句「尚未接入」按**分组**说 —— 全部改成「已接入」是撒谎，
+ * 而全局留着那句又会让用户以为刚改的主题也没保存。
+ * 没接的控件一律 `disabled`，不做「看着能用、点了没反应」的样子：
+ * 密码管理器里最不能容忍的就是开关骗人，用户以为自己关掉了
+ * 「已泄露检查」，那是个安全问题，不是体验问题。
  *
  * ## 版面
  *
@@ -56,6 +57,11 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
   initialSection?: SectionId;
 }) {
   const [section, setSection] = useState<SectionId>(initialSection);
+  /*
+   * 主题的真相在 theme.ts（模块级 + localStorage），组件只是它的视图 ——
+   * 用 useState 在这里存一份的话，预览页或别处改了主题，这个控件不会知道。
+   */
+  const theme = useSyncExternalStore(subscribeTheme, getThemeMode);
 
   return (
     <FloatingPanel
@@ -65,7 +71,12 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
       className="h-[min(520px,calc(100vh-32px))] max-w-[640px]"
       footer={
         <>
-          <span className="min-w-0 truncate">外壳预览：控件尚未接入，改动不会保存</span>
+          {/* 底栏按分组说实话：外观那组的主题是真能用的，其余三组还没接 */}
+          <span className="min-w-0 truncate">
+            {section === 'appearance'
+              ? '主题改动立即生效并会记住；这一组其余两项仍是占位'
+              : '这一组仍是外壳：控件尚未接入，改动不会保存'}
+          </span>
           <span className="shrink-0">
             <kbd className="text-[var(--text-2xs)]">esc</kbd> 关闭
           </span>
@@ -161,8 +172,26 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
 
           {section === 'appearance' && (
             <Group title="外观" hint="界面本身的样子">
-              <Row label="主题" hint="当前跟随系统">
-                <Select disabled value="system" options={[['system', '跟随系统'], ['light', '亮色'], ['dark', '暗色']]} />
+              {/*
+                ⚠️ 三态，不是一个开关：「跟随系统」是**独立的一个选项**，
+                不是「关」的意思。做成开关（亮/暗）的话，选过亮色的用户
+                就再也回不到跟随系统了 —— 而「晚上自动变暗」这件事
+                恰恰是很多人对系统主题的唯一用法。
+
+                分段控件而不是下拉框：三个选项一眼全在，而且当前选的是哪个
+                直接看得见（这是设置项，不是表单输入）。
+              */}
+              <Row label="主题" hint="改了立即生效，下次打开还是它">
+                <Segmented<ThemeMode>
+                  label="主题"
+                  value={theme}
+                  onChange={setThemeMode}
+                  options={[
+                    { value: 'system', label: '跟随系统' },
+                    { value: 'light', label: '亮色' },
+                    { value: 'dark', label: '暗色' },
+                  ]}
+                />
               </Row>
               <Row label="列表密度" hint="一行里显示多少条记录">
                 <Select disabled value="comfortable" options={[['comfortable', '标准'], ['compact', '紧凑']]} />

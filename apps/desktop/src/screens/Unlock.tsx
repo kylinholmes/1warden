@@ -57,7 +57,8 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
   }
 
   return (
-    <div className="flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8">
+    /* 整块背景可拖 —— 和连接屏同理，这一屏没有顶部带子（见 Connect.tsx） */
+    <div className="flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
       <div className="screen-in w-full max-w-[380px]">
         <div className="flex flex-col items-center text-center">
           {/* 头像位 —— 用邮箱首字母，不引入外部图片 */}
