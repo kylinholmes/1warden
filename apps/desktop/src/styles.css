@@ -644,6 +644,58 @@ input[type='range'] {
   .tile[data-type='secureNote'] { background: color-mix(in oklab, var(--ink-tertiary) 12%, var(--surface-paper)); color: var(--ink-secondary); }
   .tile[data-type='sshKey'] { background: color-mix(in oklab, var(--risk) 11%, var(--surface-paper)); color: var(--risk); }
 
+  /*
+   * 条目图标 —— 每条有自己的图标，不再按类型共用一个。
+   *
+   * 上面那套 `.tile` 是按**类型**上色的：能分清「这是登录 / 这是卡片」，
+   * 但一列看下去全是同样的形状同样的颜色，**认不出是哪一条**。
+   * 现在按三层来（见 components/ItemIcon.tsx）：
+   * 站点图标 → 彩色字母徽标 → 着色的类型图标。
+   *
+   * 尺寸从 30 提到 34：行里现在是两行文字（名字 + 摘要），
+   * 图标要跟这两行的高度相称。三个类各自就是那个方块，不套外层。
+   */
+  .tile-img,
+  .tile-avatar,
+  .tile-glyph {
+    display: grid;
+    place-items: center;
+    flex: none;
+    width: 34px;
+    height: 34px;
+    border-radius: 9px;
+    overflow: hidden;
+  }
+
+  /* 站点图标：favicon 底色多半是白的，留一点内边距免得贴边裁掉边缘 */
+  .tile-img {
+    object-fit: contain;
+    background: var(--surface-paper);
+    padding: 2px;
+  }
+
+  /*
+   * 彩色字母徽标 / 着色的类型图标。
+   *
+   * ⚠️ 色相 `--h` 由**条目**算出来（见 @coffer/vault 的 avatarOf），
+   * 明度和彩度写死在这里 —— 领域层不该知道当前是什么主题，那是 CSS 的事。
+   *
+   * L=0.58 C=0.14 是挑过的：近白的字压在上面，红到紫每个色相都够对比度，
+   * 而**不随主题变** —— 主题相关的色相意味着同一份值要在亮暗两处各写一遍，
+   * 而这份样式表里暗色令牌本来就写了两份（见上面那段的告示）。
+   */
+  .tile-avatar,
+  .tile-glyph {
+    background: oklch(0.58 0.14 var(--h, 250));
+    color: oklch(0.99 0.005 var(--h, 250));
+  }
+  .tile-avatar {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: -0.01em;
+    line-height: 1;
+  }
+
   /* ── 浮层 ───────────────────────────────────────────── */
 
   /*

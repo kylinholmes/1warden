@@ -1,7 +1,9 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { searchItems, totpCode, hasTotp, type VaultItem, type VaultFolder, type Attachment } from '@coffer/vault';
-import type { VaultClient } from '@coffer/vault';
+import { searchItems, totpCode, hasTotp, summaryOf, type VaultItem, type VaultFolder, type Attachment } from '@coffer/vault';
+import type { VaultClient, IconStore } from '@coffer/vault';
 import { saveFile } from '../save';
+import { iconStoreFor } from '../icon-store';
+import { ItemIcon } from '../components/ItemIcon';
 import { SecretField } from '../components/SecretField';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';
@@ -45,6 +47,15 @@ export function VaultView({ client, onLock }: Props) {
   const [generatorOpen, setGeneratorOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
   const [folderError, setFolderError] = useState<string | null>(null);
+
+  /*
+   * 站点图标的缓存。按服务端地址取 —— 换服务器才重建。
+   *
+   * `iconStoreFor` 内部是模块级单例：每次渲染新建一个的话缓存等于没有，
+   * 滚动一次就要把每个域名重新请求一遍，而服务端首次抓取要 1.5 秒。
+   */
+  const serverUrl = session.account?.serverUrl ?? '';
+  const icons = useMemo(() => (serverUrl === '' ? null : iconStoreFor(serverUrl)), [serverUrl]);
 
   /**
    * 文件夹操作。
@@ -187,6 +198,7 @@ export function VaultView({ client, onLock }: Props) {
                 <ItemRow
                   key={item.id}
                   item={item}
+                  icons={icons}
                   selected={item.id === selectedId}
                   onClick={() => setSelectedId(item.id)}
                 />
@@ -611,35 +623,46 @@ function NavItem(props: {
   );
 }
 
-function ItemRow({ item, selected, onClick }: { item: VaultItem; selected: boolean; onClick: () => void }) {
-  const subtitle = item.login?.username
-    ?? item.login?.uris[0]?.uri
-    ?? (item.type === 'secureNote' ? '安全笔记' : '');
+function ItemRow({ item, selected, onClick, icons }: {
+  item: VaultItem; selected: boolean; onClick: () => void; icons: IconStore | null;
+}) {
+  /*
+   * 第二行取自 `@coffer/vault` 的 `summaryOf`，不是在这里现推。
+   *
+   * 桌面端和浏览器插件显示同一个列表，各推各的迟早会出现
+   * 「同一条在插件里显示 bilibili、在桌面端显示 www.bilibili.com」。
+   * 那里也定了两条硬规则：卡号必须掩码、没有可显示的就返回 null
+   * （不填「登录信息」这种每行都一样的占位词）。
+   */
+  const subtitle = summaryOf(item);
 
   return (
     <li>
       <button
         onClick={onClick}
-        className={`flex w-full items-center gap-2.5 rounded-[var(--radius-md)] px-2 py-1.5 text-left transition-colors duration-[var(--dur-fast)] ${
+        /*
+         * 行高：两行文字（名字 + 摘要）配上 34px 的图标。
+         * `items-start` 而不是 `items-center` —— 有摘要的那几行比没摘要的
+         * 高一截，居中对齐会让图标在列表里上下跳动。
+         */
+        className={`flex w-full items-start gap-2.5 rounded-[var(--radius-md)] px-2 py-1.5 text-left transition-colors duration-[var(--dur-fast)] ${
           selected ? 'bg-[var(--surface-selected)]' : 'hover:bg-[var(--surface-hover)]'
         }`}
       >
-        <span className="tile" data-type={item.type}>
-          <TypeIcon type={item.type} />
-        </span>
-        <span className="min-w-0 flex-1">
+        <ItemIcon item={item} store={icons} />
+        <span className="min-w-0 flex-1 py-0.5">
           <span className={`block truncate text-[var(--text-md)] leading-snug ${
             item.nameFailed ? 'italic text-[var(--ink-tertiary)]' : ''
           }`}>
             {item.nameFailed ? '无法解密' : item.name}
           </span>
-          {subtitle && (
+          {subtitle !== null && (
             <span className="mt-0.5 block truncate text-[var(--text-xs)] leading-snug text-[var(--ink-tertiary)]">
               {subtitle}
             </span>
           )}
         </span>
-        {item.favorite && <IconStar size={13} filled className="shrink-0 text-[var(--caution)]" />}
+        {item.favorite && <IconStar size={13} filled className="mt-1.5 shrink-0 text-[var(--caution)]" />}
       </button>
     </li>
   );

@@ -26,7 +26,7 @@ export function toBase64(bytes: Uint8Array): string {
  * 解码失败（不是合法 base64）时 `atob` 会抛 —— **让它抛**。
  * 静默返回空数组的后果是「下载了一个 0 字节的文件」，而用户看到保存成功。
  */
-export function fromBase64(text: string): Uint8Array {
+export function fromBase64(text: string): Uint8Array<ArrayBuffer> {
   const binary = atob(text);
   const bytes = new Uint8Array(binary.length);
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
