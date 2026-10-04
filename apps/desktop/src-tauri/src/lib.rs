@@ -15,11 +15,14 @@
 //!    走 macOS 辅助功能 API（`AXUIElement`），Rust 后端可以直接调，
 //!    不需要任何 App Extension。
 //!
-//! ⚠️ 写这些时记住两条硬不变量（spec §7.4）：
-//!   I1. AX 读取只在用户按下快捷键后发生一次，**绝不在后台**
-//!   I2. 写入之后必须**读回验证** —— 该 API 有文档记载会静默失败
+//! ⚠️ 两条硬不变量（spec §7.4）：
+//!   I1. **绝不主动读取**其他应用的界面内容。当前实现只往当前焦点**写**。
+//!   I2. 合成按键**没有**读回验证的可能（看不到目标控件），所以界面上
+//!       只能说「按键已发送」，**不能**说「已填充」。
 
 mod http;
+mod autotype;
+mod hotkey;
 
 use tauri::Manager;
 
@@ -37,6 +40,10 @@ pub fn run() {
             http::probe_certificate,
             http::trust_certificate,
             http::forget_certificate,
+            autotype::autotype_status,
+            autotype::autotype_set_enabled,
+            autotype::autotype_open_settings,
+            autotype::autotype_type,
         ])
         .setup(|app| {
             // 证书指纹固定存在应用数据目录里 —— 它属于「这台机器信任了什么」，
@@ -45,6 +52,20 @@ pub fn run() {
             let state = http::HttpState::new(dir.join("trusted-certs.json"))
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             app.manage(state);
+
+            // 开发期打开 devtools 会方便很多；发布版刻意没有这个入口 ——
+            // 密码管理器不该在正式版里留一个能看到内存中明文的调试器。
+            // 全局快捷键（⌘⇧\）：在别的应用里也能呼出 Coffer。
+            // 注册失败**不影响启动** —— 组合键被占用是很常见的情况，
+            // 为了这个让应用起不来是本末倒置。
+            #[cfg(target_os = "macos")]
+            if let Err(e) = hotkey::register(
+                app.handle().clone(),
+                hotkey::DEFAULT_KEYCODE,
+                hotkey::MOD_CMD | hotkey::MOD_SHIFT,
+            ) {
+                eprintln!("[coffer] 全局快捷键不可用：{e}");
+            }
 
             // 开发期打开 devtools 会方便很多；发布版刻意没有这个入口 ——
             // 密码管理器不该在正式版里留一个能看到内存中明文的调试器。

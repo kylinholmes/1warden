@@ -2,6 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { searchItems, totpCode, hasTotp, type VaultItem, type VaultFolder } from '@coffer/vault';
 import type { VaultClient } from '@coffer/vault';
 import { SecretField } from '../components/SecretField';
+import { AutotypeAction } from '../components/AutotypeAction';
 import { ItemEditor } from './ItemEditor';
 
 interface Props {
@@ -416,6 +417,13 @@ function ItemDetail({ item, onEdit, onDelete, onToggleFavorite }: {
           {item.login.username !== null && <SecretField label="用户名" value={item.login.username} />}
           {item.login.password !== null && <SecretField label="密码" value={item.login.password} masked />}
           {totp && <TotpRow code={totp.code} remaining={totp.remaining} period={totp.period} />}
+          {/*
+            原生窗口自动输入（spec §7.4）。放在登录字段这一组的末尾 ——
+            它是「把凭据送出去」的动作，紧跟在被送出去的东西后面最合理。
+          */}
+          <div className="border-t border-[var(--border-subtle)] py-2.5 last:border-0">
+            <AutotypeAction username={item.login.username} password={item.login.password} />
+          </div>
           {item.login.uris.map((u, i) => (
             <SecretField key={i} label={i === 0 ? '网址' : `网址 ${i + 1}`} value={u.uri} />
           ))}

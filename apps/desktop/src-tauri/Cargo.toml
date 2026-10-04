@@ -44,6 +44,15 @@ sha2 = "0.10"
 # 解析证书的签发者/有效期 —— 只给指纹的话，普通用户没法判断该不该信任
 x509-parser = "0.16"
 
+# ── 原生自动输入（spec §7.4）──
+# 只做「往当前焦点合成按键」，不读任何应用的界面内容。
+# 详见 src/autotype.rs 顶部的说明。
+[target.'cfg(target_os = "macos")'.dependencies]
+# 合成按键。注意 CGEventKeyboardSetUnicodeString 在 20 个 UTF-16 码元处截断
+core-graphics = "0.25"
+# AXIsProcessTrusted —— 判断辅助功能授权状态
+accessibility-sys = "0.2"
+
 [features]
 # 生产构建时关掉 devtools —— 密码管理器不该在发布版里留调试入口
 default = ["custom-protocol"]
