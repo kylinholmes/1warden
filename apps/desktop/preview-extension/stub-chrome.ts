@@ -27,6 +27,7 @@
 const which = new URLSearchParams(location.search).get('state') ?? 'matched';
 
 import { avatarOf, iconDomainOf, searchItems, summaryOf, type VaultItem } from '@coffer/vault';
+import type { ReportBrief } from '@coffer/ui';
 import type { ItemSummary } from '../extension/popup/Popup';
 
 /**
@@ -144,14 +145,28 @@ export function stubChrome(): void {
       }
       case 'coffer:import-parse':
         return { format: '1pux', formatLabel: '1Password (.1pux)', folders: 3, items: 42, skipped: 2 };
-      case 'coffer:security':
-        return { report: {
+      /*
+       * ⚠️ 这里的返回类型**显式标注**成 `ReportBrief`。
+       *
+       * 不标的话，报告多一栏（比如新增的 `breached` / `unsecured[].uris`）
+       * 这个桩不会报错，只是**少几个字段** —— 预览照样渲染，界面上少两栏，
+       * 看起来和「产品就是这样」一模一样。这个文件顶上写着「仪器骗人比没有
+       * 仪器更糟」，而刚刚正是这么骗了一次：类型加了两栏，桩没跟上。
+       */
+      case 'coffer:security': {
+        const report: ReportBrief = {
           total: ITEMS.length, score: 72, grade: 'fair',
+          /* 空数组 = 「还没查」，不是「查过了干净」—— 界面上显示「未检查」 */
+          breached: [],
           reused: [{ itemIds: ['1', '2'], count: 2 }],
           weak: [{ itemId: '7', reason: 'digitsOnly' }, { itemId: '8', reason: 'commonWithSuffix' }],
-          expiring: [],
-          unsecured: [{ id: '6', name: 'AWS 生产环境' }],
-        } };
+          expiring: [{ itemId: '9', expiresAt: '2026-11-01T00:00:00Z' }],
+          unsecured: [{ id: '6', name: 'AWS 生产环境', uris: ['http://aws.example.com'] }],
+        };
+        return { report };
+      }
+      case 'coffer:breach-check':
+        return { breached: [{ itemId: '3', count: 12 }] };
       case 'coffer:folders':
         return { folders: [
           { id: 'f1', name: '工作' },

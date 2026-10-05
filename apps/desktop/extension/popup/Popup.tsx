@@ -7,9 +7,11 @@ import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, NavTrigger, Section,
-  GRADE_LABEL, STRENGTH_LABELS, WEAK_REASON, apiMessageOf, countByType, crackSentence,
+  SecurityReportView,
+  STRENGTH_LABELS, apiMessageOf, countByType, crackSentence,
   host, iconStoreFor,
   scheduleClipboardClear, typeDestinations,
+  type BreachState, type ReportBrief,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
@@ -17,19 +19,12 @@ type Destination =
   | 'all' | 'favorites' | 'generator' | 'security' | 'import'
   | `type:${string}` | `folder:${string}`;
 
-/**
- * 安全报告的**展示形态** —— 后台把 `VaultItem` 降级成了 id/名字，
- * 完整条目不出后台（见 `coffer:security` 的说明）。
+/*
+ * 安全报告的展示形态是 `@coffer/ui` 的 `ReportBrief` —— **不是**这里自己的
+ * 一个 interface。这里原本有一份，而它比桌面端那份少了两个字段
+ * （`breached` / `unsecured[].uris`），于是弹窗的界面也就跟着少了两栏。
+ * 一份类型定义写两遍，漂的是**功能**，不只是名字。
  */
-interface ReportBrief {
-  total: number;
-  score: number;
-  grade: 'excellent' | 'good' | 'fair' | 'poor' | 'critical';
-  reused: { itemIds: string[]; count: number }[];
-  weak: { itemId: string; reason: string }[];
-  expiring: { itemId: string; expiresAt: string }[];
-  unsecured: { id: string; name: string }[];
-}
 
 
 
@@ -171,6 +166,29 @@ export function Popup() {
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
   /** 安全报告。只在切到那一项时拉 —— 它要跑一遍全库扫描 */
   const [report, setReport] = useState<ReportBrief | null>(null);
+  /*
+   * 已泄露密码的检查 —— **和 `report` 分开存**。
+   *
+   * 报告每次切过去都重拉（它只是本地算的），而这一项**必须由用户显式开启**
+   * （它是本应用唯一会联系第三方的功能）。放在一起的话，离开再回来就会把
+   * 上次的结果冲掉 —— 用户看到的是「刚查过怎么又要查一遍」。
+   */
+  const [breach, setBreach] = useState<{
+    state: BreachState;
+    found: { itemId: string; count: number }[];
+  }>({ state: 'off', found: [] });
+
+  const enableBreachCheck = useCallback(async () => {
+    setBreach((b) => ({ ...b, state: 'checking' }));
+    try {
+      const r = await send<{ breached: { itemId: string; count: number }[] }>({
+        type: 'coffer:breach-check',
+      });
+      setBreach({ state: 'on', found: r.breached });
+    } catch {
+      setBreach((b) => ({ ...b, state: 'failed' }));
+    }
+  }, []);
   const [openId, setOpenId] = useState<string | null>(null);
 
   // 解锁后拉一次主列表。锁定或登出时清掉 —— 留着的话下次解锁会先闪出旧数据
@@ -436,10 +454,19 @@ export function Popup() {
               {dest === 'import' ? (
                 <ImportScreen onImported={() => { void refresh(); }} />
               ) : dest === 'security' ? (
-                <SecurityReport
-                  report={report}
-                  nameOf={(id) => browse.find((b) => b.id === id)?.name ?? '(已不在列表里)'}
-                />
+                report === null ? (
+                  <p className="px-1 py-6 text-center text-xs text-[var(--ink-tertiary)]">正在检查…</p>
+                ) : (
+                  /*
+                   * ⚠️ 和桌面端**同一个组件、同一个 `ReportBrief`**。
+                   * 这里改动任何显示逻辑之前先想清楚：它同时是 PC 版那一页。
+                   */
+                  <SecurityReportView
+                    report={{ ...report, breached: breach.found }}
+                    nameOf={(id) => browse.find((b) => b.id === id)?.name ?? '(已不在列表里)'}
+                    breach={{ state: breach.state, onEnable: () => { void enableBreachCheck(); } }}
+                  />
+                )
               ) : dest === 'generator' ? (
                 <Generator />
               ) : (
@@ -710,89 +737,6 @@ function ListSection({ label, items, icons, onOpen }: {
         />
       ))}
     </section>
-  );
-}
-
-/**
- * 安全报告 —— 和桌面端**同一份逻辑**（`@coffer/vault` 的 `buildReport`），
- * 只是算在后台、这里只负责显示。
- *
- * ⚠️ 每一项都只列**名字**：报告里的条目引用在后台就降级成了 id/名字，
- * 完整条目（带明文密码）不出后台。
- */
-function SecurityReport({ report, nameOf }: {
-  report: ReportBrief | null;
-  /** 报告里只有 id —— 名字从已经加载的列表里查 */
-  nameOf: (id: string) => string;
-}) {
-  if (report === null) {
-    return <p className="px-1 py-6 text-center text-xs text-[var(--ink-tertiary)]">正在检查…</p>;
-  }
-
-  const risk = report.grade === 'critical' || report.grade === 'poor';
-  const groups: { key: string; title: string; rows: { id: string; label: string; note: string }[] }[] = [
-    {
-      key: 'weak',
-      title: `弱密码（${report.weak.length}）`,
-      rows: report.weak.map((w) => ({
-        id: w.itemId,
-        label: nameOf(w.itemId),
-        note: WEAK_REASON[w.reason] ?? w.reason,
-      })),
-    },
-    {
-      key: 'reused',
-      title: `重复使用（${report.reused.reduce((n, g) => n + g.count, 0)}）`,
-      rows: report.reused.flatMap((g) => g.itemIds.map((id) => ({
-        id, label: nameOf(id), note: `${g.count} 条共用`,
-      }))),
-    },
-    {
-      key: 'unsecured',
-      title: `明文站点（${report.unsecured.length}）`,
-      rows: report.unsecured.map((u) => ({ id: u.id, label: u.name, note: '网址是 http' })),
-    },
-  ].filter((g) => g.rows.length > 0);
-
-  return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-      {/*
-        ⚠️ `shrink-0` 不能省：这是 flex 纵列的子项，而 flex 子项默认
-        `flex-shrink: 1` —— 内容比容器高时它会被**压扁**，加上 `.card`
-        自带的 `overflow: hidden`，分数就被裁掉一半。
-      */}
-      <div className="card shrink-0 p-3.5">
-        <div className="flex items-baseline gap-2">
-          <span className={`text-2xl font-semibold tabular-nums ${risk ? 'text-[var(--risk)]' : 'text-[var(--safe)]'}`}>
-            {report.score}
-          </span>
-          <span className="text-md text-[var(--ink-secondary)]">{GRADE_LABEL[report.grade]}</span>
-          <span className="ml-auto text-xs text-[var(--ink-tertiary)]">{report.total} 条记录</span>
-        </div>
-      </div>
-
-      {groups.length === 0 ? (
-        <p className="px-1 py-6 text-center text-xs text-[var(--ink-tertiary)]">
-          没有发现明显的问题
-        </p>
-      ) : (
-        groups.map((g) => (
-          <Section key={g.key} title={g.title}>
-            {g.rows.map((r, i) => (
-              <div key={`${r.id}-${i}`} className="flex items-center gap-3 border-b border-[var(--border-subtle)] py-2 last:border-b-0">
-                <span className="min-w-0 flex-1 truncate text-md">{r.label}</span>
-                <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">{r.note}</span>
-              </div>
-            ))}
-          </Section>
-        ))
-      )}
-
-      <p className="px-1 text-2xs leading-relaxed text-[var(--ink-tertiary)]">
-        这只是本地检查。已泄露密码的查询（Have I Been Pwned）需要单独开启，
-        因为它是本应用唯一会联系第三方的功能。
-      </p>
-    </div>
   );
 }
 

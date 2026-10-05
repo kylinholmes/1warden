@@ -46,3 +46,4 @@ export * from './strength';
 export * from './report-labels';
 export * from './api-message';
 export * from './NavRail';
+export * from './SecurityReportView';

@@ -22,7 +22,7 @@ import { ext } from './ext-api';
 import { installExtensionHost } from './host-impl';
 import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
-  summaryOf, iconDomainOf, avatarOf, searchItems, buildReport,
+  summaryOf, iconDomainOf, avatarOf, searchItems, buildReport, checkBreaches,
   parseImport, detectImportFormat, IMPORT_FORMATS, type ImportFormatId,
   type AccountInfo, type FieldDescriptor, type VaultItem,
   type CaptureDecision,
@@ -232,6 +232,7 @@ type Request =
   | { type: 'coffer:search'; query: string }
   | { type: 'coffer:folders' }
   | { type: 'coffer:security' }
+  | { type: 'coffer:breach-check' }
   | { type: 'coffer:item'; itemId: string }
   | { type: 'coffer:import-parse'; dataBase64: string; format?: string }
   | { type: 'coffer:import-commit'; dataBase64: string; format?: string }
@@ -567,6 +568,10 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const r = buildReport(session.items, Date.now());
       return {
         unlocked: true,
+        /*
+         * 返回的形状是 `@coffer/ui` 的 `ReportBrief` —— **和桌面端同一个类型**，
+         * 渲染的也是同一个组件。这里只负责把领域对象降级成它。
+         */
         report: {
           total: r.total,
           score: r.score,
@@ -575,14 +580,45 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
           reused: r.reused,
           weak: r.weak,
           expiring: r.expiring,
+          /*
+           * ⚠️ `breached` 恒为空 —— 它要联网查 Have I Been Pwned，必须由用户
+           * 显式开启。这里填一个空数组**不是**「查过了、干净」，而是
+           * 「还没查」；两者的区别由界面上的 `BreachState` 表达（那一栏会
+           * 显示「未检查」而不是「没问题」）。填了结果的是
+           * `coffer:breach-check`，见下面。
+           */
+          breached: [],
           // ⚠️ 只有 `unsecured` 是 `VaultItem[]`（完整条目、带明文密码）。
           // 它是这里**唯一**需要降级成摘要的东西 —— 直接回就破了
-          // 「弹窗拿不到完整条目」那条边界。
+          // 「弹窗拿不到完整条目」那条边界。`uris` 只留 http:// 的，
+          // 那一栏的全部意义就是那个不安全的网址。
           unsecured: r.unsecured.map((i) => ({
-            id: i.id, name: i.nameFailed ? '无法解密' : i.name,
+            id: i.id,
+            name: i.nameFailed ? '无法解密' : i.name,
+            uris: (i.login?.uris ?? [])
+              .map((u) => u.uri)
+              .filter((u) => u.toLowerCase().startsWith('http://')),
           })),
         },
       };
+    }
+
+    /*
+     * 已泄露密码的检查。
+     *
+     * ⚠️ 这是本应用**唯一**会联系第三方的功能（Have I Been Pwned），
+     * 所以它**只能**由用户在报告页显式点「开启检查」触发 —— 不在解锁时跑、
+     * 不在同步时跑、不在这里做任何自动重试。离开设备的是密码 SHA-1 的
+     * 前 5 个字符，候选在本地比对。
+     *
+     * 放在后台而不是弹窗里跑：全库扫描要拿明文密码，而弹窗**刻意**拿不到
+     * 完整条目（spec 不变量 S1），回来的只有 `itemId` + 次数。
+     */
+    case 'coffer:breach-check': {
+      const session = await sessions.load();
+      if (!session) throw new Error('保险库未解锁');
+      const found = await checkBreaches(session.items);
+      return { breached: found.map((f) => ({ itemId: f.itemId, count: f.count })) };
     }
 
     case 'coffer:search': {
