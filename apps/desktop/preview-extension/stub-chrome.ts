@@ -118,11 +118,18 @@ function summarise(item: VaultItem): ItemSummary {
 const MATCH_IDS = new Set(['1', '2']);
 
 export function stubChrome(): void {
-  // `state=locked` 未登录 → 显示连接表单；`state=connect` 是它的别名，
-  // 名字更直白（那个状态在弹窗里就是「还没有账户」）。
-  // `state=2fa` 同样停在未登录 —— 它是连接表单的**下一步**，
-  // 而这一步以前根本没有预览（见本文件顶部「仪器骗人」那段）。
-  const unlocked = which !== 'locked' && which !== 'connect' && which !== '2fa';
+  /*
+   * 哪几个预览状态停在**未登录**。
+   *
+   * `locked` 是主名，`connect` 是它的别名（在弹窗里那个状态就是「还没有账户」）；
+   * `2fa` 和 `pick` / `quick` 都是连接流程里的**下一屏**，同样未登录。
+   *
+   * ⚠️ 这份名单是**手工维护**的，所以每加一个连接流程里的 `?state=`，
+   * 必须同时加到这儿 —— 忘了的话那一屏会连同整个保险库一起渲染出来，
+   * 而截图看起来只是「内容不对」，不会报错。刚踩过一次（`quick`）。
+   */
+  const LOCKED_STATES = ['locked', 'connect', '2fa', 'pick', 'quick'];
+  const unlocked = !LOCKED_STATES.includes(which);
 
   const reply = (msg: Record<string, unknown>): unknown => {
     switch (msg.type) {

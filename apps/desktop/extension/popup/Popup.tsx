@@ -7,9 +7,9 @@ import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, NavTrigger, Section,
-  SecurityReportView, TwoFactorForm,
+  ConnectScreen, SecurityReportView,
   STRENGTH_LABELS, apiMessageOf, countByType, crackSentence,
-  host, iconStoreFor,
+  host, iconStoreFor, rememberAccount, useAccounts,
   scheduleClipboardClear, typeDestinations,
   type BreachState, type ReportBrief,
 } from '@coffer/ui';
@@ -134,6 +134,11 @@ export function Popup() {
    * 根本登不进来。
    */
   const [challenge, setChallenge] = useState<{ providers: number[] } | null>(null);
+  /*
+   * 记住的账户 —— 和桌面端**同一个存储、同一个 hook**（`@coffer/ui/accounts`）。
+   * 弹窗以前完全没有这个功能：每次打开都要重敲服务器地址和邮箱。
+   */
+  const accounts = useAccounts();
 
   /*
    * ── 主列表与搜索
@@ -410,7 +415,12 @@ export function Popup() {
       )}
 
       <div className="vault-content" data-detail={openItem !== null}>
-        {error && (
+        {/*
+          ⚠️ 只在**已解锁**时走这条全局横幅。未解锁时错误由 `ConnectScreen`
+          自己画在表单下面 —— 那边和桌面端同一个位置，两处都画就成了同一条
+          错误显示两遍。
+        */}
+        {error && status.unlocked && (
           <div className="shrink-0 px-3.5 pt-3"><Note tone="risk">{error}</Note></div>
         )}
         {notice && (
@@ -420,12 +430,24 @@ export function Popup() {
         <div className="vault-list">
         {!status.unlocked ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
-            {challenge === null ? (
-              <ConnectForm busy={busy} onSubmit={async (p) => {
+            {/*
+              ⚠️ **和桌面端同一个组件**：账户列表、快速解锁、完整表单、
+              两步验证全在里面。这里以前是一份只有「完整表单 + 两步验证」的
+              简化版 —— 回访用户每次打开弹窗都要重新敲服务器地址和邮箱，
+              而这个自托管客户端上回访是**多数**。
+            */}
+            <ConnectScreen
+              accounts={accounts}
+              busy={busy}
+              error={error}
+              challenge={challenge}
+              /* 扩展端**不传** `cert`：TLS 校验在浏览器手里，没有探测证书
+                 这条路。自签证书只能靠系统信任库解决。 */
+              onSubmit={async (c) => {
                 setBusy(true); setError(null);
                 try {
                   const r = await send<{ ok: boolean; twoFactor?: { providers: number[] } }>({
-                    type: 'coffer:connect', ...p,
+                    type: 'coffer:connect', ...c,
                   });
                   /*
                    * ⚠️ 两步验证**不是错误** —— 是流程的下一步。
@@ -433,30 +455,24 @@ export function Popup() {
                    * 当成一般错误显示，用户永远没有输入验证码的机会。
                    */
                   if (r.twoFactor) { setChallenge(r.twoFactor); return; }
+                  // 只记住服务器与邮箱 —— **绝不**记住主密码
+                  void rememberAccount({ serverUrl: c.serverUrl, email: c.email });
                   await refresh();
                 } catch (e) {
                   setError(apiMessageOf(e));
                 } finally { setBusy(false); }
-              }} />
-            ) : (
-              <>
-                <h1 className="mb-4 text-md font-medium text-[var(--ink-secondary)]">需要两步验证</h1>
-                <TwoFactorForm
-                  providers={challenge.providers}
-                  busy={busy}
-                  onSubmit={async ({ code, provider, remember }) => {
-                    setBusy(true); setError(null);
-                    try {
-                      await send({ type: 'coffer:connect-2fa', code, provider, remember });
-                      setChallenge(null);
-                      await refresh();
-                    } catch (e) {
-                      setError(apiMessageOf(e));
-                    } finally { setBusy(false); }
-                  }}
-                />
-              </>
-            )}
+              }}
+              onTwoFactor={async ({ code, provider, remember }) => {
+                setBusy(true); setError(null);
+                try {
+                  await send({ type: 'coffer:connect-2fa', code, provider, remember });
+                  setChallenge(null);
+                  await refresh();
+                } catch (e) {
+                  setError(apiMessageOf(e));
+                } finally { setBusy(false); }
+              }}
+            />
           </div>
         ) : (
           <>
@@ -923,86 +939,6 @@ function Note({ tone, children }: { tone: 'risk' | 'accent'; children: React.Rea
       {tone === 'risk' && <IconAlert size={14} className="mt-0.5 shrink-0" style={{ color }} />}
       <span className="min-w-0 flex-1" style={{ color }}>{children}</span>
     </p>
-  );
-}
-
-/**
- * 连接表单（还没登录时）。
- *
- * 版面对齐桌面端的 `Connect.tsx` —— 两端是同一个产品，这一屏又是新用户
- * 见到的**第一屏**，两边长得不一样的话「统一」就无从谈起。
- *
- * 和早先相比改了三处，都是那一屏显得「丑」的具体原因：
- *
- * 1. **标签可见**，不再靠 placeholder。placeholder 一打字就没了，
- *    用户回看时不知道那一格原来要填什么；读屏软件也读不到它当标签用。
- * 2. **说明文字挪到最下面**。它是一句安心的脚注（「永不发送到服务器」），
- *    不是操作指引，摆在第一个输入框上面会把表单的起点压下去。
- * 3. **间距分组**：字段之间 `gap-4`、按钮和脚注各自分开，
- *    早先全部 `gap-2.5` 等距 —— 等距等于没有分组。
- */
-function ConnectForm({ busy, onSubmit }: {
-  busy: boolean;
-  onSubmit: (p: { serverUrl: string; email: string; masterPassword: string }) => void;
-}) {
-  const [serverUrl, setServerUrl] = useState('');
-  const [email, setEmail] = useState('');
-  const [masterPassword, setMasterPassword] = useState('');
-
-  return (
-    <form className="flex flex-col gap-4" onSubmit={(e) => {
-      e.preventDefault();
-      onSubmit({ serverUrl: serverUrl.trim(), email: email.trim(), masterPassword });
-    }}>
-      <h1 className="text-md font-medium text-[var(--ink-secondary)]">
-        连接到你的 Vaultwarden
-      </h1>
-
-      <Field label="服务器地址">
-        <input required type="url" value={serverUrl} autoFocus
-          placeholder="https://vault.example.com"
-          onChange={(e) => setServerUrl(e.target.value)}
-          className="field text-sm" />
-      </Field>
-
-      <Field label="邮箱">
-        <input required type="email" value={email}
-          autoFocus={serverUrl !== ''}
-          onChange={(e) => setEmail(e.target.value)}
-          className="field text-sm" />
-      </Field>
-
-      <Field label="主密码">
-        <input required type="password" value={masterPassword} disabled={busy}
-          onChange={(e) => setMasterPassword(e.target.value)}
-          className="field secret text-sm" />
-      </Field>
-
-      <button type="submit" disabled={busy} className="btn btn-primary w-full py-2.5">
-        {busy && <IconSpinner size={15} />}
-        {busy ? '正在解锁…' : '解锁'}
-      </button>
-
-      {/*
-        ⚠️ 这里就是将来放「连接到本地 Coffer 服务」的位置 —— 一个安静按钮，
-        和上面那个主动作分开。现在不放：一个按不动的入口比没有入口更糟。
-      */}
-      <p className="text-xs leading-relaxed text-[var(--ink-tertiary)]">
-        主密码只在本地用于派生密钥，<strong className="font-medium">永不发送到服务器</strong>。
-      </p>
-    </form>
-  );
-}
-
-/** 带可见标签的字段 —— 和桌面端 `Connect.tsx` 里那个一致 */
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-[var(--ink-secondary)]">
-        {label}
-      </span>
-      {children}
-    </label>
   );
 }
 

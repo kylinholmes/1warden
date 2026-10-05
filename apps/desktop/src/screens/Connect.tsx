@@ -1,10 +1,25 @@
-import { useState, useRef, useEffect, type FormEvent } from 'react';
+import { useState } from 'react';
 import type { VaultClient, TwoFactorChallenge } from '@coffer/vault';
 import { probeCertificate, trustCertificate, type CertInfo } from '../trust';
 import {
-  IconAlert, IconArrowLeft, IconChevronDown, IconGlobe, IconLock, IconPlus, IconServer, IconSpinner,
-  TwoFactorForm, apiMessageOf, rememberAccount, useAccounts, type SavedAccount,
+  ConnectScreen, IconLock, IconSpinner, apiMessageOf, rememberAccount, useAccounts,
+  type ConnectCreds,
 } from '@coffer/ui';
+
+/**
+ * 连接 / 解锁 —— **桌面端这里只剩外壳和平台专有的那一屏**。
+ *
+ * 界面本体在 `@coffer/ui` 的 `ConnectScreen`，和扩展弹窗**同一份代码**
+ * （账户列表、快速解锁、表单、两步验证都在那边）。这里负责三件共享组件
+ * 不该知道的事：
+ *
+ * 1. **连接动作**：直接调 `VaultClient`（扩展端是发消息给后台）
+ * 2. **证书确认**：走 Rust 的 `probeCertificate` / `trustCertificate`。
+ *    扩展端**没有**这条路 —— TLS 校验在浏览器手里，自签证书只能靠
+ *    系统信任库解决。所以它是塞进 `ConnectScreen` 的一个插槽。
+ * 3. **窗口拖动**：这一屏没有顶部带子，整块背景就是可拖区域
+ *    （见下面 `data-tauri-drag-region` 的说明）。
+ */
 
 interface Props {
   client: VaultClient;
@@ -20,76 +35,37 @@ function isCertUntrusted(e: unknown): e is { kind: 'certUntrusted'; fingerprint?
 }
 
 export function Connect({ client, onConnected }: Props) {
-  /*
-   * 记住的账户走 `@coffer/ui` 的共享存储 —— **和扩展端同一份**。
-   *
-   * ⚠️ 它是**异步**的（宿主接口统一成 Promise，因为 `chrome.storage.local`
-   * 没有同步读），所以加载中回 `null`。这一屏以前是同步读 `localStorage`，
-   * 一句话就拿到；换过去之后必须把「还没读到」和「一个都没存」分开，
-   * 否则有记住账户的人会先看到一张要填服务器地址的表单，然后它跳成列表 ——
-   * 读起来就是「我明明记住过」。
-   */
   const accounts = useAccounts();
 
-  const [serverUrl, setServerUrl] = useState('');
-  const [email, setEmail] = useState('');
-  const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
-  /* 验证码和「记住这台设备」现在由 `TwoFactorForm` 自己管 —— 那两个状态
-     只活在那一屏里，提到这里没有意义，而提到这里正是扩展端漏掉这一步的原因 */
   const [cert, setCert] = useState<CertInfo | null>(null);
-
   /**
-   * 三档视图：
-   *   pick —— 选一个记住的账户（有记住的账户时从这里开始）
-   *   form —— 填完整的服务器地址 + 邮箱 + 主密码
-   *   quick —— 已选定某个账户，只需要主密码
-   *   null  —— **还没定**，账户还在读
+   * 触发证书确认的那一次凭据。
    *
-   * 这样回访用户是「点一下 + 敲密码」，第一次用的人是完整表单，
-   * 两条路都不别扭。
+   * ⚠️ 必须留一份：用户核对完证书之后要**原样重跑一次连接**，而那时候
+   * 表单已经不在屏幕上了（`cert` 插槽盖住了它），拿不回那两个字段。
    */
-  const [view, setView] = useState<'pick' | 'form' | 'quick' | null>(null);
+  const [pending, setPending] = useState<ConnectCreds | null>(null);
 
-  /*
-   * 账户读到之后再决定从哪一屏开始。
-   *
-   * ⚠️ 不能在这里写提前返回 —— 下面还有 hook（`passwordRef` 那个副作用），
-   * 提前返回就是「有条件地调 hook」。占位放在 JSX 里。
-   */
-  useEffect(() => {
-    if (accounts === null || view !== null) return;
-    const first = accounts[0];
-    if (first) { setServerUrl(first.serverUrl); setEmail(first.email); }
-    setView(first ? 'pick' : 'form');
-  }, [accounts, view]);
-
-  const passwordRef = useRef<HTMLInputElement>(null);
-  // 进到 quick 视图时把焦点放到密码框 —— 用户点完账户就该直接打字
-  useEffect(() => {
-    if (view === 'quick') passwordRef.current?.focus();
-  }, [view]);
-
-  /**
-   * 真正的连接动作。抽出来是因为「信任证书」之后要原样重跑一遍 ——
-   * 而那条路径上没有表单提交事件可用。
-   */
-  async function doConnect() {
+  async function doConnect(c: ConnectCreds) {
     setBusy(true);
     setError(null);
     try {
-      await client.connect({ serverUrl: serverUrl.trim(), email: email.trim(), masterPassword: password });
+      await client.connect({
+        serverUrl: c.serverUrl, email: c.email, masterPassword: c.masterPassword,
+      });
       // 只记住服务器与邮箱 —— **绝不**记住主密码。不 await：它是便利功能，
-      // 而且 `rememberAccount` 自己就不抛（存不下也不该挡住连接）
-      void rememberAccount({ serverUrl: serverUrl.trim(), email: email.trim() });
+      // 而且 `rememberAccount` 自己就不抛
+      void rememberAccount({ serverUrl: c.serverUrl, email: c.email });
       onConnected();
     } catch (err) {
       if (isTwoFactor(err)) {
         setChallenge({ providers: err.providers, providersInfo: err.providersInfo });
       } else if (isCertUntrusted(err)) {
-        await offerCertificate();
+        setPending(c);
+        await offerCertificate(c.serverUrl);
       } else {
         setError(apiMessageOf(err));
       }
@@ -106,17 +82,12 @@ export function Connect({ client, onConnected }: Props) {
    * 客户端这边看不出来，只有用户自己知道那台服务器是不是他的。所以把
    * 证据摆出来，让用户拍板。
    */
-  async function offerCertificate() {
+  async function offerCertificate(url: string) {
     try {
-      setCert(await probeCertificate(serverUrl.trim()));
+      setCert(await probeCertificate(url));
     } catch (e) {
       setError(apiMessageOf(e));
     }
-  }
-
-  async function submit(e: FormEvent) {
-    e.preventDefault();
-    await doConnect();
   }
 
   async function submitCode(code: string, provider: number, remember: boolean) {
@@ -133,10 +104,10 @@ export function Connect({ client, onConnected }: Props) {
   }
 
   async function trustAndRetry() {
-    if (!cert) return;
+    if (!cert || !pending) return;
     setBusy(true);
     try {
-      await trustCertificate(serverUrl.trim(), cert.fingerprint);
+      await trustCertificate(pending.serverUrl, cert.fingerprint);
       setCert(null);
     } catch (e) {
       setError(apiMessageOf(e));
@@ -144,19 +115,8 @@ export function Connect({ client, onConnected }: Props) {
       return;
     }
     setBusy(false);
-    await doConnect();
+    await doConnect(pending);
   }
-
-  function pickAccount(a: SavedAccount) {
-    setServerUrl(a.serverUrl);
-    setEmail(a.email);
-    setPassword('');
-    setError(null);
-    setView('quick');
-  }
-
-  // 两步验证和证书确认都盖过账户选择 —— 那时候连接已经在进行中了
-  const inFlow = cert !== null || challenge !== null;
 
   return (
     /*
@@ -171,200 +131,33 @@ export function Connect({ client, onConnected }: Props) {
     */
     <div className="below-titlebar flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
       <div className="screen-in w-full max-w-[380px]">
-        <div className="mb-7 flex items-center gap-2.5">
-          <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-[var(--accent-ink)]">
-            <IconLock size={17} />
-          </span>
-          <span className="text-xl font-semibold tracking-[-0.01em]">Coffer</span>
-        </div>
-
-        {!inFlow && view !== null && (
-          <h1 className="text-md font-medium text-[var(--ink-secondary)]">
-            {view === 'pick' ? '选择要连接的账户'
-              : challenge ? '需要两步验证'
-              : cert ? '需要确认服务器证书'
-              : '连接到你的 Vaultwarden'}
-          </h1>
-        )}
-
-        <div className="mt-5">
-          {/*
-            ⚠️ 账户还在读时**不渲染表单**，渲染一个占位。
-            先渲染表单再跳成账户列表，读起来就是「我明明记住过」——
-            而这个闪烁只在存储慢的时候出现，本地开发永远看不到。
-          */}
-          {view === null ? (
-            <div className="h-[176px]" aria-hidden />
-          ) : cert ? (
+        <ConnectScreen
+          accounts={accounts}
+          busy={busy}
+          error={error}
+          challenge={challenge}
+          /* 扩展端不传这一项 —— 那条路在浏览器里不存在 */
+          cert={cert ? (
             <CertificatePrompt
               cert={cert}
-              host={hostOf(serverUrl)}
+              host={hostOf(pending?.serverUrl ?? '')}
               busy={busy}
               onCancel={() => setCert(null)}
-              onTrust={trustAndRetry}
+              onTrust={() => { void trustAndRetry(); }}
             />
-          ) : challenge ? (
-            /* 和扩展端**同一个组件** —— 那里以前完全没有这一步（见组件顶部） */
-            <TwoFactorForm
-              providers={challenge.providers}
-              busy={busy}
-              onSubmit={({ code, provider, remember }) => { void submitCode(code, provider, remember); }}
-            />
-          ) : view === 'pick' ? (
-            <AccountPicker
-              /*
-               * `?? []` 只是为了让类型收窄：`view === 'pick'` 只在
-               * `accounts[0]` 存在时才被设上（见上面那个 effect），
-               * 所以这里 `accounts` 一定非空。TS 追不到这条因果。
-               */
-              accounts={accounts ?? []}
-              onPick={pickAccount}
-              onOther={() => { setServerUrl(''); setEmail(''); setPassword(''); setError(null); setView('form'); }}
-            />
-          ) : (
-            <form onSubmit={submit} className="space-y-4">
-              {view === 'quick' && (
-                <AccountChip
-                  email={email}
-                  serverUrl={serverUrl}
-                  onBack={() => { setPassword(''); setError(null); setView('pick'); }}
-                />
-              )}
-
-              {view === 'form' && (
-                <>
-                  <Field label="服务器地址" hint="例如 https://vault.example.com">
-                    <input
-                      type="url" required value={serverUrl} autoFocus
-                      onChange={(e) => setServerUrl(e.target.value)}
-                      placeholder="https://vault.example.com"
-                      className="field"
-                    />
-                  </Field>
-                  <Field label="邮箱">
-                    <input
-                      type="email" required value={email} autoFocus={Boolean(serverUrl)}
-                      onChange={(e) => setEmail(e.target.value)}
-                      className="field"
-                    />
-                  </Field>
-                </>
-              )}
-
-              <Field label="主密码">
-                <input
-                  ref={passwordRef}
-                  type="password" required value={password} disabled={busy}
-                  onChange={(e) => setPassword(e.target.value)}
-                  className="field secret"
-                />
-              </Field>
-
-              <button type="submit" disabled={busy} className="btn btn-primary w-full py-2.5">
-                {busy && <IconSpinner size={15} />}
-                {busy ? '正在解锁…' : '解锁'}
-              </button>
-
-              {view === 'quick' && (
-                <button
-                  type="button"
-                  onClick={() => { setPassword(''); setError(null); setView('form'); }}
-                  className="btn w-full py-2 text-xs text-[var(--ink-tertiary)] hover:text-[var(--ink-secondary)]"
-                >
-                  这台服务器上的其他账户
-                </button>
-              )}
-            </form>
-          )}
-        </div>
-
-        {error && (
-          <p role="alert" className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-sm text-[var(--risk)]">
-            <IconAlert size={15} className="mt-0.5 shrink-0" />
-            <span className="min-w-0 flex-1">{error}</span>
-          </p>
-        )}
-
-        {!cert && !inFlow && (
-          <p className="mt-8 text-xs leading-relaxed text-[var(--ink-tertiary)]">
-            主密码只在本地用于派生密钥，<strong className="font-medium">永不发送到服务器</strong>。
-            {view === 'pick' && '服务器地址和邮箱会留在本机，方便下次连接。'}
-          </p>
-        )}
+          ) : undefined}
+          brand={
+            <>
+              <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-[var(--accent-ink)]">
+                <IconLock size={17} />
+              </span>
+              <span className="text-xl font-semibold tracking-[-0.01em]">Coffer</span>
+            </>
+          }
+          onSubmit={(c) => { void doConnect(c); }}
+          onTwoFactor={({ code, provider, remember }) => { void submitCode(code, provider, remember); }}
+        />
       </div>
-    </div>
-  );
-}
-
-/**
- * 记住的账户列表。
- *
- * 面向的是「自己有服务器」的人 —— 他们最常做的事就是回到同一个地方。
- * 每一项给出**能用来区分的信息**：邮箱、服务器主机名。
- * 只显示邮箱是不够的（同一个人在两个服务器上常用同一个邮箱）。
- */
-function AccountPicker({ accounts, onPick, onOther }: {
-  accounts: SavedAccount[];
-  onPick: (a: SavedAccount) => void;
-  onOther: () => void;
-}) {
-  return (
-    <div>
-      <ul className="space-y-1.5">
-        {accounts.map((a) => (
-          <li key={`${a.serverUrl}|${a.email}`}>
-            <button
-              type="button"
-              onClick={() => onPick(a)}
-              className="group flex w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-paper)] px-3 py-2.5 text-left transition-colors duration-[var(--dur-fast)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
-            >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-md font-semibold text-[var(--accent)]">
-                {a.email.slice(0, 1).toUpperCase()}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-md">{a.email}</span>
-                <span className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
-                  <IconGlobe size={12} className="shrink-0" />
-                  <span className="truncate">{hostOf(a.serverUrl)}</span>
-                </span>
-              </span>
-              <IconChevronDown size={15} className="-rotate-90 shrink-0 text-[var(--ink-tertiary)]" />
-            </button>
-          </li>
-        ))}
-      </ul>
-
-      <button type="button" onClick={onOther} className="btn btn-quiet mt-3 w-full gap-2 py-2.5">
-        <IconPlus size={14} />
-        连接其他服务器
-      </button>
-    </div>
-  );
-}
-
-/** 已选定账户时的摘要 —— 替代两个已经不需要再填的输入框 */
-function AccountChip({ email, serverUrl, onBack }: {
-  email: string; serverUrl: string; onBack: () => void;
-}) {
-  return (
-    <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-well)] px-3 py-2.5">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-md font-semibold text-[var(--accent)]">
-        {email.slice(0, 1).toUpperCase()}
-      </span>
-      <span className="min-w-0 flex-1">
-        <span className="block truncate text-md">{email}</span>
-        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
-          <IconServer size={12} className="shrink-0" />
-          <span className="truncate">{hostOf(serverUrl)}</span>
-        </span>
-      </span>
-      <button
-        type="button" onClick={onBack}
-        className="btn btn-ghost shrink-0 gap-1.5" title="换一个账户"
-      >
-        <IconArrowLeft size={13} />
-        更换
-      </button>
     </div>
   );
 }
@@ -432,16 +225,6 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
   );
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <label className="block">
-      <span className="mb-1.5 block text-xs font-medium text-[var(--ink-secondary)]">{label}</span>
-      {children}
-      {hint && <span className="mt-1.5 block text-xs text-[var(--ink-tertiary)]">{hint}</span>}
-    </label>
-  );
-}
-
 /** 只用于展示的主机名 —— 真正的 host:port 解析在 Rust 侧，这里不参与逻辑 */
 function hostOf(url: string): string {
   try { return new URL(url).host; } catch { return url; }
@@ -452,6 +235,3 @@ function shortDate(value: string): string {
   const t = Date.parse(value);
   return Number.isNaN(t) ? value : new Date(t).toLocaleDateString('zh-CN');
 }
-
-/* `messageOf` 搬到 `@coffer/ui` 的 `apiMessageOf` 了 —— 扩展端也要用
-   同一套措辞（它以前直接把服务端的英文原文显示给用户）。 */

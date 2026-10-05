@@ -20,7 +20,41 @@ import './stub-chrome';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { Popup } from '../extension/popup/Popup';
+import { installHost } from '@coffer/ui';
 import './preview.css';
+
+/*
+ * ⚠️ 预览也要装宿主，否则「记住的账户」在预览里恒为空。
+ *
+ * 账户存储走 `host().storage`；宿主没装时 `readAccounts()` 会抛、被那个
+ * 函数吞掉、回 `[]`（对产品是对的：存储坏了不该挡住连接）—— 于是预览里
+ * **永远停在「一个都没存」那一屏**，账户列表截不到，而症状只是
+ * 「截图里少了几行」。
+ *
+ * ⚠️ `stub-chrome` 那份 `import` 必须排在最前面（见文件顶部的说明），
+ * 但这块要排在它**后面** —— `ext-api` 是在模块求值时抓命名空间的。
+ * 这里用 `localStorage` 而不是桩里的 chrome.storage：预览是静态页面，
+ * localStorage 够用，而且它让 `?accounts=1` 能在渲染前把数据种进去。
+ */
+installHost({
+  fetch: (...args) => fetch(...args),
+  storage: {
+    get: async (k) => localStorage.getItem(k),
+    set: async (k, v) => localStorage.setItem(k, v),
+    remove: async (k) => localStorage.removeItem(k),
+  },
+});
+
+/*
+ * `?accounts=1` 种几个记住的账户 —— 无头浏览器每次都是全新 profile，
+ * 不种的话连接屏只截得到空白表单那一态。和桌面端预览同一个做法。
+ */
+if (new URLSearchParams(location.search).has('accounts')) {
+  localStorage.setItem('coffer.accounts', JSON.stringify([
+    { serverUrl: 'https://vault.example.com', email: 'me@example.com' },
+    { serverUrl: 'https://vault.acme-corp.internal', email: 'zhang@acme.example' },
+  ]));
+}
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
@@ -104,4 +138,21 @@ if (new URLSearchParams(location.search).get('state') === '2fa') {
 if (new URLSearchParams(location.search).get('state') === 'import') {
   setTimeout(() => [...document.querySelectorAll('button')]
     .find((b) => b.textContent?.trim() === '导入')?.click(), 500);
+}
+
+/*
+ * `?state=quick`：点第一个记住的账户，核对**快速解锁**那一屏
+ * （账户摘要 + 只要主密码）。配合 `?accounts=1` 用。
+ */
+if (new URLSearchParams(location.search).get('state') === 'quick') {
+  setTimeout(() => {
+    /*
+     * ⚠️ 按**文字**找，不能用 `querySelector('ul button')`。
+     * 未登录时导航抽屉也会渲染（它自己有一套 `<ul><button>`），
+     * 而它在 DOM 里排在前面 —— 选择器会点中那个，界面毫无变化，
+     * 截图看起来只是「点了没反应」。
+     */
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('me@example.com'))?.click();
+  }, 500);
 }
