@@ -85,7 +85,6 @@ export class VaultClient {
   private readonly syncCache: SyncCache | undefined;
   private readonly unlockCache: UnlockCache | undefined;
   private readonly onPhase: ((label: string, ms: number) => void) | undefined;
-  private readonly onDisconnected: (() => void) | undefined;
   /** 连接起点。只给 `mark` 用 —— 诊断用，不参与任何逻辑 */
   private connectT0 = 0;
 
@@ -130,20 +129,11 @@ export class VaultClient {
     onSync?: (syncing: boolean) => void;
     /** 连接各阶段的耗时。只用于诊断「登录慢」这类问题，不参与任何逻辑 */
     onPhase?: (label: string, ms: number) => void;
-    /**
-     * 离线解锁之后，后台补登录**彻底失败**了。
-     *
-     * 界面此时是「已经解锁、数据是缓存那一版」，看起来完全正常 ——
-     * 但客户端手上没有令牌，**所有写操作都会失败**。
-     * 调用方该据此提示用户「当前离线」。
-     */
-    onDisconnected?: () => void;
   }) {
     this.fetchImpl = opts.fetchImpl;
     this.syncCache = opts.syncCache;
     this.unlockCache = opts.unlockCache;
     this.onPhase = opts.onPhase;
-    this.onDisconnected = opts.onDisconnected;
     this.deviceStore = opts.deviceStore ?? localStorageDeviceStore;
     this.device = {
       // 用桌面端的值而不是 CLI —— 服务端日志里能看出这是我们的应用
@@ -842,63 +832,45 @@ export class VaultClient {
 
   /** 手动锁定后重新解锁，不需要重新走完整登录 */
   /**
-   * 解锁。
+   * 解锁 —— **服务端验证是必需的**。
    *
-   * ## 两条路，先试**本地的**那条
+   * ## ⚠️ 这里曾经有一条「离线解锁」的捷径，已经删掉
    *
-   * 拿到用户密钥要走两次网络往返（prelogin 取 KDF 参数、login 取被加密的
-   * 用户密钥）。实测用户的链路 7~70 秒一轮 —— 而这两次往返的结果
-   * **几乎不变**，所以它们被缓存在本地（见 `UnlockCache`）。
+   * 那条路是：用本地缓存的 KDF 参数派生主密钥 → 解开本地缓存的用户密钥
+   * → 直接解锁。省掉两次网络往返，快了一个数量级。
    *
-   *     输入主密码 → 用缓存的 KDF 参数派生（约 1.2s，纯 CPU）
-   *               → 本地解出缓存的用户密钥 → 解锁 → 从密文缓存出数据
-   *               → 后台补登录 + 同步
+   * **但它有一个不能接受的洞**：本地的 `wrappedUserKey` 是**旧密码**包装的
+   * 那一份。用户在别处改了主密码，服务端会重新包装，而本地那份不会跟着变 ——
+   * 于是**旧密码仍然能打开本地缓存**。密码轮换在本地不生效，
+   * 而密码轮换恰恰是「怀疑泄露了」时唯一的补救动作。
    *
-   * 关键路径上**一次网络都不走**。这也顺带解决了一个体验问题：
-   * 密码错了在本地就解得失败，不用等一轮网络才知道。
+   * 本地那个 MAC 校验确实能证明「这个密码解得开我本地这份数据」，
+   * 但它证明不了「这个密码现在还是对的」。后者只有服务端知道。
    *
-   * ## 落回网络那条路的两种情况
+   * ## 缓存只用在不影响鉴权的地方
    *
-   * · 没有缓存（第一次在这台机器上解锁）
-   * · 缓存的用户密钥解不开 —— 密码错了，**或者用户改过主密码**
-   *   （服务端会重新包装用户密钥，本地那份就过期了）
-   *
-   * 第二种情况不该给出「密码错误」这种确定性的说法：两种原因在本地
-   * 区分不了，所以说「本地记录对不上」，然后走网络去问个准的。
+   * `prelogin` 那一次往返可以省 —— 它只是去问「迭代次数是多少」，
+   * 那是个公开参数，不参与任何鉴权。而 `login` 那一次往返**必须走**，
+   * 它就是验证本身。
    */
   async unlock(masterPassword: string): Promise<void> {
     const account = this.session.account;
     if (!account) throw new Error('没有已保存的账户');
 
-    const entry = await this.unlockCache?.load(account.serverUrl, account.email).catch(() => null);
-    if (entry) {
-      try {
-        const masterKey = await deriveMasterKey(masterPassword, account.email, entry.kdf);
-        const stretched = await stretchMasterKey(masterKey);
-        const raw = await decryptBytes(entry.wrappedUserKey, stretched);
-        if (raw.length !== 64) throw new Error(`用户密钥长度异常：${raw.length}`);
-        const userKey: SymmetricKey = { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
+    const cached = await this.unlockCache?.load(account.serverUrl, account.email).catch(() => null);
+    const kdf = cached?.kdf ?? await this.kdfOf({
+      serverUrl: account.serverUrl, email: account.email, masterPassword,
+    });
 
-        this.masterKey = masterKey;
-        this.session.beginUnlock();
-        this.session.completeUnlock(userKey);
-        console.warn('[解锁] 本地解锁成功 —— 关键路径上没有走网络');
+    const bare = this.makeHttp(account.serverUrl);
+    const masterKey = await deriveMasterKey(masterPassword, account.email, kdf);
+    const hash = await hashMasterPassword(masterKey, masterPassword);
 
-        // 先把密文缓存解出来填上（纯本地），再去补登录和同步
-        this.session.setSyncing(true);
-        try {
-          await this.doSyncFromCacheOnly(userKey);
-        } finally {
-          this.session.setSyncing(false);
-        }
-        void this.reloginAndSync(masterPassword, account);
-        return;
-      } catch (e) {
-        console.warn('[解锁] 本地记录对不上，改走网络', e instanceof Error ? e.message : e);
-      }
-    }
-
-    await this.unlockOnline(masterPassword, account);
+    this.session.beginUnlock();
+    // ⚠️ 这里面有 login —— **服务端验证就在那一步**。没有本地捷径，也不该有。
+    await this.finishConnect(bare, {
+      serverUrl: account.serverUrl, email: account.email, masterPassword,
+    }, masterKey, hash, undefined);
   }
 
   /** 走网络那条路：原来那条，一次没变 */
@@ -919,71 +891,7 @@ export class VaultClient {
     await this.finishConnect(bare, params, masterKey, hash, undefined);
   }
 
-  /**
-   * 本地解锁之后再补上网络那一半：登录拿令牌 → 接上传输层 → 同步。
-   *
-   * ⚠️ 用户已经在界面里了，这里**任何失败都不能冒出去** ——
-   * 最坏的结果应当是「列表停在缓存那一版、左下角的圈一直转或者停掉」，
-   * 而不是「保险库突然报错」。
-   */
-  private async reloginAndSync(masterPassword: string, account: AccountInfo): Promise<void> {
-    this.session.setSyncing(true);
-    try {
-      const key = this.masterKey;
-      if (!key) return;
-      const hash = await hashMasterPassword(key, masterPassword);
 
-      /*
-       * ⚠️ **要重试。** 这一步不紧急，但不成功就没有令牌 ——
-       * 而没有令牌时**所有写操作都会失败**，用户看到的是一句
-       * 和网络有关的错，很难联想到「后台那半还没跑完」。
-       *
-       * 实测这条链路单次往返 5~10 秒且会断（`error decoding response body`
-       * 是传输被截断）。一次抖动就永久放弃是不可接受的 ——
-       * 那会把一个可用性问题变成「保存坏了」。
-       *
-       * 退避取 1s/2s/4s：链路本就要几秒一轮，退避太短只是把断掉的
-       * 连接再撞一次。
-       */
-      const delays = [0, 1000, 2000, 4000];
-      let last: unknown = null;
-      for (const [i, wait] of delays.entries()) {
-        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
-        const bare = this.makeHttp(account.serverUrl);
-        try {
-          const { token } = await this.authenticate(bare, {
-            serverUrl: account.serverUrl, email: account.email, masterPassword,
-          }, key, hash, undefined);
-          this.adopt(bare, {
-            serverUrl: account.serverUrl, email: account.email, masterPassword,
-          }, key, token);
-          await this.doSync(this.requireKey());
-          console.warn(`[解锁] 后台补登录 + 同步完成（第 ${i + 1} 次尝试）`);
-          return;
-        } catch (e) {
-          last = e;
-          const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-          console.warn(`[解锁] 后台补登录第 ${i + 1} 次失败 —— ${why}`);
-        }
-      }
-      /*
-       * 全部重试都用完。**这里必须让用户知道**：界面看起来一切正常，
-       * 但保存会失败。只说「停在缓存那一版」是不够的 ——
-       * 那听起来只是「数据旧了点」，而实际是「写不了」。
-       */
-      const why = last instanceof Error ? `${last.name}: ${last.message}` : String(last);
-      console.warn(`[解锁] 后台补登录彻底失败，写操作会失败 —— ${why}`);
-      this.onDisconnected?.();
-    } finally {
-      this.session.setSyncing(false);
-    }
-  }
-
-  /** 只吃密文缓存，不碰网络。本地解锁那条路用它先把界面填上 */
-  private async doSyncFromCacheOnly(key: SymmetricKey): Promise<void> {
-    this.syncEngine ??= this.makeSyncEngine();
-    await this.syncEngine.hydrateFromCache(key);
-  }
   isUnlocked(): boolean { return this.session.isUnlocked(); }
   getHttp(): HttpClient { return this.http; }
 }
