@@ -43,6 +43,15 @@
      *
      * 尺寸从 30 提到 34：行里现在是两行文字（名字 + 摘要），
      * 图标要跟这两行的高度相称。三个类各自就是那个方块，不套外层。
+     *
+     * ⚠️ 尺寸走 `--tile-size` 而不是写死：列表行用 34、详情栏头部用 36、
+     * 将来紧凑密度要更小 —— 这是**同一个方块的不同尺寸**，不是三种方块。
+     *
+     * ⚠️ 这个变量曾经**只写不读**：`ItemIcon.tsx` 一直在设它，而这里写死 34px，
+     * 于是 `size={36}` 是空转的（详情栏的图标并没有变大，而两处注释都在描述
+     * 一个不成立的状态）。改尺寸相关的代码时，两头一起看。
+     *
+     * 圆角跟着尺寸走（34px → 9px，和原来一致）：小尺寸上固定 9px 会圆得过分。
      */
     .tile-img,
     .tile-avatar,
@@ -50,9 +59,9 @@
       display: grid;
       place-items: center;
       flex: none;
-      width: 34px;
-      height: 34px;
-      border-radius: 9px;
+      width: var(--tile-size, 34px);
+      height: var(--tile-size, 34px);
+      border-radius: calc(var(--tile-size, 34px) * 0.265);
       overflow: hidden;
     }
 

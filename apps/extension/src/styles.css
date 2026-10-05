@@ -10,12 +10,21 @@
  * 那种约定守不住：这份已经落后了整整一版（还停在「只有媒体查询版暗色」，
  * 没有显式主题选择、没有玻璃那套），而用户眼里这是同一个产品。
  *
- * 这里只留弹窗**自己的**组件基元 —— 它是个小方块，和桌面端的三栏窗口
- * 共用不上那些布局。
+ * ## ⚠️ `components.css` 也必须引
+ *
+ * 加它之前这里漏了整整一段时间，后果是**弹窗里的条目图标块完全没有样式**：
+ * `IconGlyph` 渲染的是 `.tile-img` / `.tile-avatar` / `.tile-glyph`，
+ * 而这三个类住在 `components.css` 里 —— 类名在 DOM 上、规则却不在产物里，
+ * 于是没有 34px 尺寸、没有圆角、没有彩色底。产物里查得到：
+ * `grep tile-avatar dist/popup.css` → 0。
+ *
+ * ⚠️ 引的顺序有意义：共享的在前、本文件自己的 `@layer components` 在后，
+ * 这样弹窗自己的规则在同名冲突时赢。
  *
  * 详见 docs/reference/design-system.md。
  */
 @import '@coffer/ui/theme.css';
+@import '@coffer/ui/components.css';
 
 @layer components {
   .band {
@@ -109,21 +118,17 @@
   }
   .field:disabled { opacity: 0.5; }
 
-  .tile {
-    display: grid;
-    place-items: center;
-    flex: none;
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    background: var(--surface-hover);
-    color: var(--ink-secondary);
-  }
-  .tile[data-type='login'] { background: color-mix(in oklab, var(--accent) 12%, var(--surface-paper)); color: var(--accent); }
-  .tile[data-type='card'] { background: color-mix(in oklab, var(--caution) 15%, var(--surface-paper)); color: var(--caution); }
-  .tile[data-type='identity'] { background: color-mix(in oklab, var(--safe) 13%, var(--surface-paper)); color: var(--safe); }
-  .tile[data-type='secureNote'] { background: color-mix(in oklab, var(--ink-tertiary) 12%, var(--surface-paper)); color: var(--ink-secondary); }
-  .tile[data-type='sshKey'] { background: color-mix(in oklab, var(--risk) 11%, var(--surface-paper)); color: var(--risk); }
+  /*
+   * 这里原本有一份 `.tile` + 五个 `[data-type]` 的拷贝，已删。
+   *
+   * 它是**上一代**的定义（30px / 圆角 8px），被 `components.css` 里那套
+   * `.tile-img` / `.tile-avatar` / `.tile-glyph`（34px / 圆角 9px）取代了 ——
+   * `grep className="tile"` 全仓库零命中。
+   *
+   * 删掉不只是清垃圾：留着它的话，上面 `components.css` 一引进来就会**同时
+   * 存在两个 `.tile` 定义**，同优先级下谁生效取决于导入顺序 ——
+   * 而那种东西读代码看不出来，只会变成「弹窗里图标比桌面端小一圈」。
+   */
 }
 
 /* ── 动效 ─────────────────────────────────────────────── */

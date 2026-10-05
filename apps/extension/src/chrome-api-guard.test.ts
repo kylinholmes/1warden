@@ -100,15 +100,84 @@ function rawNamespaceUses(file: string, source: string): string[] {
   return found;
 }
 
-/** 被测源码 —— 排除测试自己（它正文里有反例）和 shim */
+/**
+ * 取一个文件里所有 `import ... from 'x'` 的模块说明符。
+ *
+ * 还是用 AST 而不是正则：正则会把注释里举例的 import 也算进来。
+ */
+function moduleSpecifiers(source: string): string[] {
+  const sf = ts.createSourceFile('x.ts', source, ts.ScriptTarget.Latest, true);
+  const out: string[] = [];
+  const visit = (node: ts.Node): void => {
+    if (ts.isImportDeclaration(node) && ts.isStringLiteral(node.moduleSpecifier)) {
+      out.push(node.moduleSpecifier.text);
+    }
+    ts.forEachChild(node, visit);
+  };
+  visit(sf);
+  return out;
+}
+
+/** 把 `./a/b` 这种相对说明符解析成 SOURCES 里的键 */
+function resolveSpecifier(fromPath: string, spec: string): string | null {
+  if (!spec.startsWith('.')) return null;   // @coffer/* 之类的包依赖，不是本目录源码
+  const base = fromPath.slice(0, fromPath.lastIndexOf('/'));
+  const parts: string[] = [];
+  for (const seg of `${base}/${spec}`.split('/')) {
+    if (seg === '.' || seg === '') continue;
+    if (seg === '..') parts.pop();
+    else parts.push(seg);
+  }
+  const joined = `./${parts.join('/')}`;
+  for (const cand of [`${joined}.ts`, `${joined}.tsx`, `${joined}/index.ts`, `${joined}/index.tsx`]) {
+    if (cand in RESOLVABLE) return cand;
+  }
+  return null;
+}
+
+/** 从某个入口出发，能到达的全部本目录模块（含自身） */
+function reachableFrom(entry: string): Set<string> {
+  const seen = new Set<string>([entry]);
+  const queue = [entry];
+  while (queue.length > 0) {
+    const cur = queue.pop()!;
+    const source = SOURCES[cur];
+    if (source === undefined) continue;
+    for (const spec of moduleSpecifiers(source)) {
+      const next = resolveSpecifier(cur, spec);
+      if (next !== null && !seen.has(next)) {
+        seen.add(next);
+        queue.push(next);
+      }
+    }
+  }
+  return seen;
+}
+
+/**
+ * 被测源码。
+ *
+ * 排除三类：
+ * - 测试自己（正文里有**故意写错**的反例，会被自己的检查抓到）
+ * - `node_modules`（vitest 会把缓存写进 `src/node_modules/.vite`，
+ *   哪天缓存里出现 `.ts` 就会变成一个查不出原因的红）
+ *
+ * ⚠️ **不**排除 `ext-api.ts` —— 它要被扫描（shim 的定义处），
+ * 也要能被解析（别的文件 import 它）。豁免它的是 `.ts` 值位置那条检查里的
+ * `ALLOWED`，不是这里。
+ */
 function scannedSources(): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [path, source] of Object.entries(SOURCES)) {
-    if (ALLOWED.has(path) || /\.test\.tsx?$/.test(path)) continue;
+    if (path.includes('node_modules')) continue;
+    if (/\.test\.tsx?$/.test(path)) continue;
     out[path] = source;
   }
   return out;
 }
+
+/** 可被 import 解析到的模块 —— 和被测源码同一份视图 */
+const RESOLVABLE = scannedSources();
 
 describe('扩展只通过 ext 访问浏览器 API', () => {
   it('没有任何文件在值位置直接用 chrome / browser', () => {
@@ -150,5 +219,51 @@ describe('扩展只通过 ext 访问浏览器 API', () => {
     expect(hits).toHaveLength(2);
     expect(hits[0]).toContain('chrome.runtime.sendMessage');
     expect(hits[1]).toContain('browser.storage.local.get');
+  });
+});
+
+/**
+ * MAIN world 的脚本跑在**页面的** global 上，那里 `globalThis.chrome` 是网页版的
+ * `chrome` 对象（有 `loadTimes` 之类，**没有任何扩展 API**），`globalThis.browser`
+ * 在 Chrome 上则根本不存在。
+ *
+ * 所以 `ext-api.ts` 的 shim 在 MAIN world 里是个**陷阱**：它不报错，只是悄悄
+ * 返回一个错的对象，然后在某个更远的地方炸掉。
+ *
+ * ⚠️ 而上面那条「值位置不许出现裸 chrome」的检查**抓不到这个** ——
+ * `import { ext } from './ext-api'` 是「合法」的写法。这条不变量此前只写在
+ * `webauthn-wire.ts` 的注释里（「只能依赖标准 Web API」），靠人记得。
+ *
+ * MAIN world 的入口在 `vite.content.config.ts` 里指定（`COFFER_ENTRY=webauthn`
+ * → `src/webauthn-inject.ts` → `webauthn.js`）。
+ */
+const MAIN_WORLD_ENTRY = './webauthn-inject.ts';
+
+describe('MAIN world 的脚本不依赖扩展 API', () => {
+  it('webauthn-inject 的整个依赖图里没有 ext-api', () => {
+    const reachable = [...reachableFrom(MAIN_WORLD_ENTRY)];
+    expect(
+      reachable.filter((p) => p === './ext-api.ts'),
+      'MAIN world 拿不到扩展 API —— shim 在那里会返回页面的 chrome 对象。' +
+        `改为通过 window.postMessage 桥回 content script。依赖图：\n${reachable.join('\n')}`,
+    ).toEqual([]);
+  });
+
+  /** 依赖图要是没走通，上面那条会因为「什么都没连到」而永远通过 */
+  it('依赖图确实走通了（不是个孤点）', () => {
+    const reachable = reachableFrom(MAIN_WORLD_ENTRY);
+    expect(reachable.size).toBeGreaterThan(1);
+    expect([...reachable]).toContain('./webauthn-wire.ts');
+  });
+
+  /** 解析器本身也要能被信任 */
+  it('相对说明符解析正确（含 ../ 和子目录）', () => {
+    expect(resolveSpecifier('./webauthn-inject.ts', './webauthn-wire')).toBe('./webauthn-wire.ts');
+    expect(resolveSpecifier('./popup/Popup.tsx', '../ext-api')).toBe('./ext-api.ts');
+    expect(resolveSpecifier('./popup/Popup.tsx', './main')).toBe('./popup/main.tsx');
+    // 包依赖不是本目录源码，不该解析
+    expect(resolveSpecifier('./a.ts', '@coffer/vault')).toBeNull();
+    // 指向不存在的文件时返回 null，而不是编一个路径出来
+    expect(resolveSpecifier('./popup/Popup.tsx', './does-not-exist')).toBeNull();
   });
 });

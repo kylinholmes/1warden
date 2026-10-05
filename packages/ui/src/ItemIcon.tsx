@@ -76,19 +76,24 @@ export function IconGlyph({ domain, text, hue, type, store, size }: {
     return () => { alive = false; };
   }, [store, domain]);
 
-  if (url !== null) {
-    // alt 留空：紧接着就是条目的名字，读屏软件念两遍同一个东西反而更糟
-    return <img src={url} alt="" className="tile-img" draggable={false} />;
-  }
-
   /*
    * 尺寸走 CSS 变量而不是内联 width/height —— 三个类各自就是那个方块，
    * 内联尺寸会和它们的规则打架（谁赢取决于顺序，而那不是能靠读代码看出来的）。
+   *
+   * ⚠️ **下面三个分支都要带上它。** 早先 `<img>` 那一支漏了，后果不是「图标
+   * 小一点」而是：`size={36}` 时先按 36px 渲染（还没有 favicon，走徽标那支），
+   * favicon 一到位就跳回 34px —— 一次看得见的闪动，而且只在图标**存在**的
+   * 站点上出现，所以很容易被当成错觉。
    */
   const style = {
     '--h': String(hue),
     ...(size === undefined ? {} : { '--tile-size': `${size}px` }),
   } as React.CSSProperties;
+
+  if (url !== null) {
+    // alt 留空：紧接着就是条目的名字，读屏软件念两遍同一个东西反而更糟
+    return <img src={url} alt="" className="tile-img" style={style} draggable={false} />;
+  }
 
   // 没有站点的条目（卡片、笔记、身份、SSH 密钥）保留类型形状 ——
   // 「ZA 信用卡」和「我的邮箱」都变成两个汉字的话，就看不出哪个是卡了
