@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ext } from '../ext-api';
 import {
-  IDENTITY_LABEL, IconGlyph, IconAlert, IconArrowLeft, IconStar, Section, SecretField,
+  IDENTITY_LABEL, ItemIcon, IconAlert, IconArrowLeft, IconStar, Section, SecretField,
 } from '@coffer/ui';
 import { IconStore } from '@coffer/vault';
 import type { ItemSummary } from './Popup';
@@ -125,8 +125,9 @@ export function ItemDetail({ item, icons, busy, onBack, onFill }: {
 
       <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
         <div className="flex items-center gap-3">
-          <IconGlyph
-            domain={item.iconDomain}
+          {/* ⚠️ 走 `ItemIcon` —— 和列表行、和桌面端同一条路径 */}
+          <ItemIcon
+            iconDomain={item.iconDomain}
             text={item.avatarText}
             hue={item.avatarHue}
             type={item.type}

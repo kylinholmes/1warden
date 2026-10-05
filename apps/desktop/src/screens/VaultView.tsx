@@ -18,7 +18,7 @@ import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  IDENTITY_LABEL, ItemRow, NavDrawer, NavTrigger, SecretField, Section,
+  IDENTITY_LABEL, ItemRow, NavDrawer, NavTrigger, SecretField, Section, iconPropsOf,
   TYPE_LABEL, TypeIcon, countByType,
   scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
@@ -310,7 +310,7 @@ export function VaultView({ client, onLock }: Props) {
               {filtered.map((item) => (
                 <li key={item.id}>
                   <ItemRow
-                    icon={<ItemIcon item={item} store={icons} />}
+                    icon={<ItemIcon {...iconPropsOf(item)} store={icons} />}
                     name={item.name}
                     nameFailed={item.nameFailed}
                     summary={summaryOf(item)}
@@ -909,7 +909,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
           在详情栏里却是一把钥匙 —— 明明是同一条。
         */}
         <span className="mt-0.5">
-          <ItemIcon item={item} store={icons} size={36} />
+          <ItemIcon {...iconPropsOf(item)} store={icons} size={36} />
         </span>
         <div className="min-w-0 flex-1">
           <h2 className={`truncate text-xl font-semibold tracking-[-0.015em] ${

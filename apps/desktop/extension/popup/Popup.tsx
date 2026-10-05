@@ -3,9 +3,9 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { IconStore, detectImportFormat, type ImportFormatId } from '@coffer/vault';
 
 import {
-  IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems,
+  IconAlert, IconClose, IconDice, IconGlobe, IconItems,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconStar,
-  ItemRow, NavDrawer, NavRow, NavTrigger, Section,
+  ItemIcon, ItemRow, NavDrawer, NavRow, NavTrigger, Section,
   ConnectScreen, GeneratorBody, ImportView, SecurityReportView,
   apiMessageOf, countByType,
   host, iconStoreFor, rememberAccount, useAccounts,
@@ -782,8 +782,9 @@ function ListSection({ label, items, icons, onOpen }: {
         <ItemRow
           key={it.id}
           icon={
-            <IconGlyph
-              domain={it.iconDomain}
+            /* ⚠️ 走 `ItemIcon`，不直接调 `IconGlyph` —— 和桌面端同一条路径 */
+            <ItemIcon
+              iconDomain={it.iconDomain}
               text={it.avatarText}
               hue={it.avatarHue}
               type={it.type}

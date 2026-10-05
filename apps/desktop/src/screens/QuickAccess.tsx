@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import type { QuickItem } from '../quick-bridge';
 import { IconLock, IconSearch } from '@coffer/ui';
 
-import { IconGlyph } from '@coffer/ui';
+import { ItemIcon } from '@coffer/ui';
 import type { IconStore } from '@coffer/vault';
 
 /**
@@ -121,8 +121,9 @@ export function QuickAccess({ items, icons, locked, busy, notice, onQueryChange,
                   i === index ? 'bg-[var(--surface-selected)]' : ''
                 }`}
               >
-                <IconGlyph
-                  domain={it.iconDomain}
+                {/* ⚠️ 走 `ItemIcon` —— 和主列表、和弹窗同一条路径 */}
+                <ItemIcon
+                  iconDomain={it.iconDomain}
                   text={it.avatarText}
                   hue={it.avatarHue}
                   type={it.type}

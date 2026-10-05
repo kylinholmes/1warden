@@ -34,18 +34,52 @@ import { avatarOf, iconDomainOf, type VaultItem } from '@coffer/vault';
 import type { IconStore } from '@coffer/vault';
 import { TypeIcon } from './icons';
 
-export function ItemIcon({ item, store, size }: {
-  item: VaultItem; store: IconStore | null;
+/**
+ * 图标要的四样东西。
+ *
+ * ⚠️ **这里收的是显示所需的字段，不是整个 `VaultItem`。**
+ *
+ * 以前它收 `VaultItem`，于是在视图里现算 `avatarOf` / `iconDomainOf` ——
+ * 而扩展端**拿不到 `VaultItem`**（弹窗只收摘要，spec 不变量 S1），
+ * 只能自己拿摘要里那三个字段**直接调 `IconGlyph`**，绕过这个组件。
+ *
+ * 同一件事两条路径：`ItemIcon` 将来改点什么（加个兜底、改尺寸规则、
+ * 处理 store 未命中），弹窗那条不会跟着动，而界面上看不出来 ——
+ * 这正是这个仓库里反复出现的那一族，只是换了个地方长。
+ *
+ * 改成收字段之后，两端都走这一个组件：桌面端用下面的 `iconPropsOf`
+ * 从完整条目算，扩展端用后台随摘要送过来的那几个字段。
+ */
+export interface IconProps {
+  iconDomain: string | null;
+  text: string;
+  hue: number;
+  type: string;
+}
+
+/**
+ * 从完整条目算出图标要的字段 —— **桌面端专用**。
+ *
+ * 扩展端在后台算好同样的值随摘要过来，所以那边不调这个函数。
+ * 两边的算法必须是同一套：`avatarOf` / `iconDomainOf` 都在
+ * `@coffer/vault` 里，一处定义。
+ */
+export function iconPropsOf(item: VaultItem): IconProps {
+  const avatar = avatarOf(item);
+  return { iconDomain: iconDomainOf(item), text: avatar.text, hue: avatar.hue, type: item.type };
+}
+
+export function ItemIcon({ iconDomain, text, hue, type, store, size }: IconProps & {
+  store: IconStore | null;
   /** 块边长。默认 34px（列表行）—— 详情栏头部用 36 */
   size?: number;
 }) {
-  const avatar = avatarOf(item);
   return (
     <IconGlyph
-      domain={iconDomainOf(item)}
-      text={avatar.text}
-      hue={avatar.hue}
-      type={item.type}
+      domain={iconDomain}
+      text={text}
+      hue={hue}
+      type={type}
       store={store}
       {...(size === undefined ? {} : { size })}
     />
