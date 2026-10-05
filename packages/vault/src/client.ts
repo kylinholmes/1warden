@@ -18,7 +18,7 @@ import {
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
 import { VaultSession, restoreSession } from './session';
-import { SyncEngine, type SyncCache } from './sync-engine';
+import { SyncEngine, type SyncCache, type UnlockCache } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
 import { unwrapAttachmentKey, decryptAttachmentContent } from './attachments';
 import { encryptBytes } from '@coffer/crypto';
@@ -83,6 +83,7 @@ export class VaultClient {
   /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
   private readonly fetchImpl: typeof fetch;
   private readonly syncCache: SyncCache | undefined;
+  private readonly unlockCache: UnlockCache | undefined;
   private readonly onPhase: ((label: string, ms: number) => void) | undefined;
   /** 连接起点。只给 `mark` 用 —— 诊断用，不参与任何逻辑 */
   private connectT0 = 0;
@@ -122,6 +123,8 @@ export class VaultClient {
      * ⚠️ 存的是密文不是明文，见 `SyncCache` 的说明（那条关系到 spec S1）。
      */
     syncCache?: SyncCache;
+    /** 离线解锁用。不给就是每次都走网络（慢，但功能不变） */
+    unlockCache?: UnlockCache;
     /** 同步开始/结束。与 `onStatus` 分开 —— 见 `VaultSession.syncing` */
     onSync?: (syncing: boolean) => void;
     /** 连接各阶段的耗时。只用于诊断「登录慢」这类问题，不参与任何逻辑 */
@@ -129,6 +132,7 @@ export class VaultClient {
   }) {
     this.fetchImpl = opts.fetchImpl;
     this.syncCache = opts.syncCache;
+    this.unlockCache = opts.unlockCache;
     this.onPhase = opts.onPhase;
     this.deviceStore = opts.deviceStore ?? localStorageDeviceStore;
     this.device = {
@@ -218,11 +222,17 @@ export class VaultClient {
     await this.finishConnect(bare, params, this.masterKey, hash, { token: code, provider, remember });
   }
 
-  private async finishConnect(
+  /**
+   * 登录，并把用户密钥解出来。**不碰会话状态** —— 什么时候翻到已解锁由调用方决定。
+   *
+   * 拆出来是因为现在有两条路都走到这里：正常登录，以及**本地解锁之后的补登录**
+   * （那条路已经解锁过了，再翻一次状态会抛「只能在 unlocking 状态调用」）。
+   */
+  private async authenticate(
     bare: HttpClient, params: ConnectParams, masterKey: Uint8Array,
     masterPasswordHash: string,
     twoFactor: { token: string; provider: number; remember: boolean } | undefined,
-  ): Promise<void> {
+  ): Promise<{ token: TokenResponse; userKey: SymmetricKey }> {
     const token = await loginWithPassword(bare, {
       email: params.email,
       masterPasswordHash,
@@ -234,29 +244,35 @@ export class VaultClient {
       throw new Error('服务器没有返回用户密钥（Key 字段缺失）—— 该账户可能没有完成密钥设置');
     }
 
-    const stretched = await stretchMasterKey(masterKey);
-    this.mark('登录往返 + 解出用户密钥');
     // ⚠️ 用户密钥是**原始 64 字节**，必须用 decryptBytes；
     // decryptString 会尝试 UTF-8 解码而失败
+    const stretched = await stretchMasterKey(masterKey);
     const raw = await decryptBytes(token.key, stretched);
     if (raw.length !== 64) throw new Error(`用户密钥长度异常：${raw.length}（应为 64）`);
-    const userKey: SymmetricKey = { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
+    return { token, userKey: { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) } };
+  }
 
+  /** 把令牌接到客户端上，并把账户写进会话。登录与补登录共用 */
+  private adopt(bare: HttpClient, params: ConnectParams, masterKey: Uint8Array, token: TokenResponse): void {
     this.masterKey = masterKey;
     this.token = token;
     this.http = this.makeHttp(params.serverUrl, this.authHeaders());
-
-    // 从 JWT 的 sub 取用户 uuid —— 写入条目时 encryptedFor 需要它，
-    // 而 api 层会自己填，我们只需要传给 createCipher
-    const userId = jwtSub(token.accessToken);
-
-    const account: AccountInfo = {
+    this.session.setAccount({
       serverUrl: params.serverUrl,
       email: params.email,
-      userId,
+      userId: jwtSub(token.accessToken),
       kdf: { kdf: 0, iterations: 0 } as KdfConfig,
-    };
-    this.session.setAccount(account);
+    });
+  }
+
+  private async finishConnect(
+    bare: HttpClient, params: ConnectParams, masterKey: Uint8Array,
+    masterPasswordHash: string,
+    twoFactor: { token: string; provider: number; remember: boolean } | undefined,
+  ): Promise<void> {
+    const { token, userKey } = await this.authenticate(bare, params, masterKey, masterPasswordHash, twoFactor);
+    this.mark('登录往返 + 解出用户密钥');
+    this.adopt(bare, params, masterKey, token);
     this.session.beginUnlock();
 
     /*
@@ -267,38 +283,68 @@ export class VaultClient {
      * 让用户看空的，而是：
      *
      *   ① 解锁 → 界面立刻可用，并显示「正在同步」
-     *   ② 有本地缓存的话，**毫秒级**把上次的数据解出来填上（下面 hydrateThenSync）
+     *   ② 有本地缓存的话，**毫秒级**把上次的数据解出来填上
      *   ③ 再去服务端拉最新的，拉到了替换
      *
      * 慢的那一段是网络（`/api/sync` 一次返回整个库的密文），不是解密。
-     * 所以②通常就足以让用户感觉「秒开」，而③在后台跑完时列表悄悄更新。
      */
     this.session.completeUnlock(userKey);
-    /*
-     * ⚠️ `await` 而不是 `void` —— **`connect()` 的契约不变**：
-     * 它 resolve 的时候数据已经就位。
-     *
-     * 界面之所以能提前切过去，是因为**会话状态**先变了
-     * （`completeUnlock` 在上面），而不是因为这里提前返回。
-     *
-     * 早先试过 `void`（提前返回），代价立刻显出来：扩展的自动填充在
-     * `connect()` 之后马上读会话，那时数据还在路上 —— 表现是「解锁后
-     * 头几秒匹配不到任何条目」，而且是随机的（取决于网速）。
-     *
-     * `hydrateThenSync` 内部吞掉同步失败，所以这里不会因为网络问题
-     * 把一个已经可用的客户端判成登录失败。
-     */
+
+    // 存下「下次不用问服务端也能解锁」所需要的东西 —— 见 UnlockCache
+    await this.saveUnlockCache(params, masterKey, token);
+
     this.mark('开始同步');
     await this.hydrateThenSync(userKey);
     this.mark('同步完成');
   }
 
   /**
-   * 后台同步：先吃缓存，再问服务端。**不阻塞 `connect()` 的返回。**
+   * 存下离线解锁要用的两样东西：**KDF 参数**和**被加密的用户密钥**。
+   *
+   * ⚠️ 存的是 `token.key`（**密文**），不是解出来的用户密钥。
+   * 它由主密码派生出的密钥保护 —— 和服务端存的那一份是同一级别的保护，
+   * 所以本地多一份副本不增加任何暴露。
+   *
+   * ⚠️ 绝不要把**解出来的**用户密钥写进来。那才是 S1 要拦的东西，
+   * 而它看起来只是「省一次解密」。
+   */
+  private async saveUnlockCache(
+    params: ConnectParams, masterKey: Uint8Array, token: TokenResponse,
+  ): Promise<void> {
+    if (!this.unlockCache || !token.key) return;
+    try {
+      /*
+       * ⚠️ 存**派生参数**而不是主密钥。
+       *
+       * 这里要的是「下次解锁时不用再发 prelogin」——`kdf` 就是那个参数。
+       * 存主密钥能省掉 KDF 那一秒，但那是**明文密钥落盘**，直接踩 S1。
+       * 一秒 CPU 换一条不变量的完整，这个买卖没有犹豫的余地。
+       */
+      await this.unlockCache.save({
+        serverUrl: params.serverUrl,
+        email: params.email,
+        kdf: await this.kdfOf(params),
+        wrappedUserKey: token.key,
+      });
+    } catch (e) {
+      console.warn('[解锁缓存] 写入失败', e);
+    }
+  }
+
+  /** 问服务端这个账户的 KDF 参数。存缓存时用一次，代价可接受 */
+  private async kdfOf(params: ConnectParams): Promise<KdfConfig> {
+    const pl = await prelogin(this.makeHttp(params.serverUrl), params.email);
+    return pl.kdf === KDF_TYPE_ARGON2ID
+      ? { kdf: KDF_TYPE_ARGON2ID, iterations: pl.iterations, memory: pl.memory ?? 64, parallelism: pl.parallelism ?? 4 }
+      : { kdf: KDF_TYPE_PBKDF2, iterations: pl.iterations };
+  }
+
+  /**
+   * 后台同步：先吃缓存，再问服务端。**不阻塞调用方。**
    *
    * ⚠️ 这里吞掉异常是**故意**的：调用方已经拿到一个可用的、已解锁的客户端了，
-   * 同步失败不该把它变成失败 —— 表现应当是「列表还停在缓存那一版」，
-   * 而不是「登录失败」。错误由 `onError` 上报。
+   * 同步失败不该把它变成失败 —— 表现应当是「列表还停在缓存那一版」。
+   * 错误由日志上报。
    */
   private async hydrateThenSync(key: SymmetricKey): Promise<void> {
     this.session.setSyncing(true);
@@ -511,8 +557,9 @@ export class VaultClient {
     await this.doSync(key);
   }
 
-  private async doSync(unlockedKey: SymmetricKey): Promise<void> {
-    this.syncEngine ??= new SyncEngine({
+  /** 建同步引擎。`doSync` 与本地解锁那条路共用 —— 两处各建一份必然长歪 */
+  private makeSyncEngine(): SyncEngine {
+    const engine = new SyncEngine({
       session: this.session,
       deps: {
         getRevisionDate: () => getRevisionDateVia(this.http),
@@ -522,10 +569,14 @@ export class VaultClient {
       },
       onError: (e) => console.warn('[sync] 一条记录解密失败，已跳过', e),
     });
-    this.syncEngine.setCache(this.syncCache);
+    engine.setCache(this.syncCache);
+    return engine;
+  }
+
+  private async doSync(unlockedKey: SymmetricKey): Promise<void> {
+    this.syncEngine ??= this.makeSyncEngine();
     // 同步会把解密结果直接写进会话。`unlocking` 态也允许写入 ——
-    // 首次解锁正是「先同步、后 completeUnlock」，数据必须在解锁完成前就位，
-    // 否则解锁的那一瞬间会先渲染出一个空保险库。
+    // 首次解锁正是「先同步、后 completeUnlock」，数据必须在解锁完成前就位。
     await this.syncEngine.sync({ unlockedKey, force: true });
   }
 
@@ -780,10 +831,72 @@ export class VaultClient {
   }
 
   /** 手动锁定后重新解锁，不需要重新走完整登录 */
+  /**
+   * 解锁。
+   *
+   * ## 两条路，先试**本地的**那条
+   *
+   * 拿到用户密钥要走两次网络往返（prelogin 取 KDF 参数、login 取被加密的
+   * 用户密钥）。实测用户的链路 7~70 秒一轮 —— 而这两次往返的结果
+   * **几乎不变**，所以它们被缓存在本地（见 `UnlockCache`）。
+   *
+   *     输入主密码 → 用缓存的 KDF 参数派生（约 1.2s，纯 CPU）
+   *               → 本地解出缓存的用户密钥 → 解锁 → 从密文缓存出数据
+   *               → 后台补登录 + 同步
+   *
+   * 关键路径上**一次网络都不走**。这也顺带解决了一个体验问题：
+   * 密码错了在本地就解得失败，不用等一轮网络才知道。
+   *
+   * ## 落回网络那条路的两种情况
+   *
+   * · 没有缓存（第一次在这台机器上解锁）
+   * · 缓存的用户密钥解不开 —— 密码错了，**或者用户改过主密码**
+   *   （服务端会重新包装用户密钥，本地那份就过期了）
+   *
+   * 第二种情况不该给出「密码错误」这种确定性的说法：两种原因在本地
+   * 区分不了，所以说「本地记录对不上」，然后走网络去问个准的。
+   */
   async unlock(masterPassword: string): Promise<void> {
     const account = this.session.account;
     if (!account) throw new Error('没有已保存的账户');
+
+    const entry = await this.unlockCache?.load(account.serverUrl, account.email).catch(() => null);
+    if (entry) {
+      try {
+        const masterKey = await deriveMasterKey(masterPassword, account.email, entry.kdf);
+        const stretched = await stretchMasterKey(masterKey);
+        const raw = await decryptBytes(entry.wrappedUserKey, stretched);
+        if (raw.length !== 64) throw new Error(`用户密钥长度异常：${raw.length}`);
+        const userKey: SymmetricKey = { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
+
+        this.masterKey = masterKey;
+        this.session.beginUnlock();
+        this.session.completeUnlock(userKey);
+        console.warn('[解锁] 本地解锁成功 —— 关键路径上没有走网络');
+
+        // 先把密文缓存解出来填上（纯本地），再去补登录和同步
+        this.session.setSyncing(true);
+        try {
+          await this.doSyncFromCacheOnly(userKey);
+        } finally {
+          this.session.setSyncing(false);
+        }
+        void this.reloginAndSync(masterPassword, account);
+        return;
+      } catch (e) {
+        console.warn('[解锁] 本地记录对不上，改走网络', e instanceof Error ? e.message : e);
+      }
+    }
+
+    await this.unlockOnline(masterPassword, account);
+  }
+
+  /** 走网络那条路：原来那条，一次没变 */
+  private async unlockOnline(masterPassword: string, account: AccountInfo): Promise<void> {
     const bare = this.makeHttp(account.serverUrl);
+    const params: ConnectParams = {
+      serverUrl: account.serverUrl, email: account.email, masterPassword,
+    };
     const pl = await prelogin(bare, account.email);
     const kdf: KdfConfig = pl.kdf === KDF_TYPE_ARGON2ID
       ? { kdf: KDF_TYPE_ARGON2ID, iterations: pl.iterations, memory: pl.memory ?? 64, parallelism: pl.parallelism ?? 4 }
@@ -793,11 +906,44 @@ export class VaultClient {
     const hash = await hashMasterPassword(masterKey, masterPassword);
 
     this.session.beginUnlock();
-    await this.finishConnect(bare, {
-      serverUrl: account.serverUrl, email: account.email, masterPassword,
-    }, masterKey, hash, undefined);
+    await this.finishConnect(bare, params, masterKey, hash, undefined);
   }
 
+  /**
+   * 本地解锁之后再补上网络那一半：登录拿令牌 → 接上传输层 → 同步。
+   *
+   * ⚠️ 用户已经在界面里了，这里**任何失败都不能冒出去** ——
+   * 最坏的结果应当是「列表停在缓存那一版、左下角的圈一直转或者停掉」，
+   * 而不是「保险库突然报错」。
+   */
+  private async reloginAndSync(masterPassword: string, account: AccountInfo): Promise<void> {
+    const bare = this.makeHttp(account.serverUrl);
+    this.session.setSyncing(true);
+    try {
+      const key = this.masterKey;
+      if (!key) return;
+      const hash = await hashMasterPassword(key, masterPassword);
+      const { token } = await this.authenticate(bare, {
+        serverUrl: account.serverUrl, email: account.email, masterPassword,
+      }, key, hash, undefined);
+      this.adopt(bare, {
+        serverUrl: account.serverUrl, email: account.email, masterPassword,
+      }, key, token);
+      await this.doSync(this.requireKey());
+      console.warn('[解锁] 后台补登录 + 同步完成');
+    } catch (e) {
+      const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      console.warn(`[解锁] 后台补登录失败，界面停在缓存那一版 —— ${why}`);
+    } finally {
+      this.session.setSyncing(false);
+    }
+  }
+
+  /** 只吃密文缓存，不碰网络。本地解锁那条路用它先把界面填上 */
+  private async doSyncFromCacheOnly(key: SymmetricKey): Promise<void> {
+    this.syncEngine ??= this.makeSyncEngine();
+    await this.syncEngine.hydrateFromCache(key);
+  }
   isUnlocked(): boolean { return this.session.isUnlocked(); }
   getHttp(): HttpClient { return this.http; }
 }

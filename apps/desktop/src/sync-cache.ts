@@ -22,7 +22,7 @@
  * 而超限时 `setItem` 会抛 —— 捕获之后**降级成不缓存**（慢，但正确）。
  * 换文件存储要加一个 Rust 命令，为这点数据不值当。
  */
-import type { SyncCache } from '@coffer/vault';
+import type { SyncCache, UnlockCache, UnlockCacheEntry } from '@coffer/vault';
 import type { AccountInfo } from '@coffer/vault';
 import type { SyncResult } from '@coffer/api';
 
@@ -64,3 +64,49 @@ export const syncCache: SyncCache = (() => {
     },
   };
 })();
+
+/**
+ * 离线解锁要用的两样东西：**KDF 参数**和**被加密的用户密钥**。
+ *
+ * ## 为什么这不是「把密钥落盘」
+ *
+ * `wrappedUserKey` 是服务端返回的 `token.key` —— **密文**，由主密码派生出的
+ * 密钥保护。服务端本来就存着同一份，所以本地多一份副本**不增加任何暴露**：
+ * 拿到它而没有主密码，等于拿到一串随机字节。
+ *
+ * ⚠️ **绝不要把解出来的用户密钥写进来。** 那才是 S1 要拦的东西，
+ * 而它看起来只是「省一次解密、省一秒 KDF」。一秒换一条不变量的完整，
+ * 没有犹豫的余地。
+ *
+ * ## 为什么值得存
+ *
+ * 拿到用户密钥本来要走两次网络往返（prelogin 拿 KDF 参数、login 拿密文密钥），
+ * 而这两次的结果几乎不变。实测用户的链路单次往返 4.9~9.6 秒、
+ * 整体 7~70 秒 —— 所以这不是优化，是可用性。
+ */
+export const unlockCache: UnlockCache = {
+  async load(serverUrl, email) {
+    const key = `coffer.unlock.${serverUrl}|${email}`;
+    try {
+      const raw = localStorage.getItem(key);
+      if (raw === null) {
+        console.warn('[解锁缓存] 未命中，这次要走网络');
+        return null;
+      }
+      console.warn('[解锁缓存] 命中');
+      return JSON.parse(raw) as UnlockCacheEntry;
+    } catch (e) {
+      console.warn('[解锁缓存] 读取失败', e);
+      return null;
+    }
+  },
+  async save(entry) {
+    const key = `coffer.unlock.${entry.serverUrl}|${entry.email}`;
+    try {
+      localStorage.setItem(key, JSON.stringify(entry));
+      console.warn('[解锁缓存] 已写入');
+    } catch (e) {
+      console.warn('[解锁缓存] 写入失败', e);
+    }
+  },
+};

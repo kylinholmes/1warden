@@ -1,6 +1,6 @@
 import { partitionCiphers } from '@coffer/api';
 import type { CipherDto, FolderDto, SyncResult as ApiSyncResult } from '@coffer/api';
-import type { SymmetricKey } from '@coffer/crypto';
+import type { SymmetricKey, KdfConfig } from '@coffer/crypto';
 import { decryptCipher, decryptFolder } from './decrypt';
 import type { VaultSession, AccountInfo } from './session';
 import type { VaultItem, VaultFolder } from './model';
@@ -24,6 +24,27 @@ import type { VaultItem, VaultFolder } from './model';
  * 所以缓存**密文**就够快了 —— 解锁后立刻拿本地密文解出界面，
  * 再去后台问服务端有没有变。绕开了 S1，也拿到了速度。
  */
+/**
+ * 离线解锁要用的两样东西：**KDF 参数**和**被加密的用户密钥**。
+ *
+ * ⚠️ 两个字段都是「不存也能用，只是每次解锁都要多两次网络往返」。
+ * 而实测用户的链路是 7~70 秒一轮 —— 所以这个缓存不是优化，是可用性。
+ *
+ * ⚠️ `wrappedUserKey` 是 `token.key`，**密文**。由主密码派生的密钥保护，
+ * 和服务端存的那一份同级。绝不要在这里存解出来的用户密钥。
+ */
+export interface UnlockCacheEntry {
+  serverUrl: string;
+  email: string;
+  kdf: KdfConfig;
+  wrappedUserKey: string;
+}
+
+export interface UnlockCache {
+  load(serverUrl: string, email: string): Promise<UnlockCacheEntry | null>;
+  save(entry: UnlockCacheEntry): Promise<void>;
+}
+
 export interface SyncCache {
   /*
    * ⚠️ 账户是**参数**，不是构造时捕获的。
@@ -93,6 +114,25 @@ export class SyncEngine {
   sync(opts: { unlockedKey: SymmetricKey; force?: boolean }): Promise<SyncOutcome> {
     this.inFlight ??= this.run(opts).finally(() => { this.inFlight = null; });
     return this.inFlight;
+  }
+
+  /**
+   * **只**吃本地密文缓存，不碰网络。
+   *
+   * 本地解锁那条路用它：用户密钥已经在手上了，而用户名下那份密文缓存
+   * 也是本地的 —— 于是「打开就看到内容」完全不需要网络。
+   *
+   * 拿不到缓存时**什么都不做**（列表先空着），后面的网络同步会填上。
+   */
+  async hydrateFromCache(key: SymmetricKey): Promise<void> {
+    const account = this.session.account;
+    if (!this.deps.cache || !account) return;
+    try {
+      const cached = await this.deps.cache.load(account);
+      if (cached) await this.apply(cached, key);
+    } catch (e) {
+      this.onError?.(e);
+    }
   }
 
   /**
