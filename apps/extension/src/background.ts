@@ -21,7 +21,7 @@
 import { ext } from './ext-api';
 import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
-  summaryOf, iconDomainOf, avatarOf, searchItems,
+  summaryOf, iconDomainOf, avatarOf, searchItems, buildReport,
   type AccountInfo, type FieldDescriptor, type VaultItem,
   type CaptureDecision,
   totpCode,
@@ -219,6 +219,7 @@ type Request =
   | { type: 'coffer:matches'; url: string }
   | { type: 'coffer:search'; query: string }
   | { type: 'coffer:folders' }
+  | { type: 'coffer:security' }
   | { type: 'coffer:fill'; itemId: string; tabId: number }
   | { type: 'coffer:generate'; length?: number; digits?: boolean; symbols?: boolean }
   | { type: 'coffer:pending'; tabId?: number }
@@ -454,6 +455,41 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
           id: f.id,
           name: f.nameFailed ? '无法解密' : f.name,
         })),
+      };
+    }
+
+    /**
+     * 安全报告 —— 和桌面端**同一份逻辑**（`@coffer/vault` 的 `buildReport`）。
+     *
+     * ⚠️ **`unsecured` 必须降级成摘要再回**。报告的其它部分只有 `itemId`
+     * （没有条目本体），只有它是 `VaultItem[]`（完整条目、带明文密码）——
+     * 直接送回弹窗就破了「弹窗只拿摘要」那条边界，而那条边界正是
+     * `coffer:matches` 刻意把匹配放在后台的原因。
+     *
+     * `breached`（HIBP 查询）**不在这里触发** —— 它是网络请求、需要用户
+     * 明确开启，而且是这个应用唯一会联系第三方的功能。默认空。
+     */
+    case 'coffer:security': {
+      const session = await sessions.load();
+      if (!session) return { unlocked: false, report: null };
+      const r = buildReport(session.items, Date.now());
+      return {
+        unlocked: true,
+        report: {
+          total: r.total,
+          score: r.score,
+          grade: r.grade,
+          // 绝大多数发现本来就只有 `itemId`（没有条目本体）—— 原样回
+          reused: r.reused,
+          weak: r.weak,
+          expiring: r.expiring,
+          // ⚠️ 只有 `unsecured` 是 `VaultItem[]`（完整条目、带明文密码）。
+          // 它是这里**唯一**需要降级成摘要的东西 —— 直接回就破了
+          // 「弹窗拿不到完整条目」那条边界。
+          unsecured: r.unsecured.map((i) => ({
+            id: i.id, name: i.nameFailed ? '无法解密' : i.name,
+          })),
+        },
       };
     }
 
