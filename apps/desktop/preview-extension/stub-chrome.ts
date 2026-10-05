@@ -119,8 +119,10 @@ const MATCH_IDS = new Set(['1', '2']);
 
 export function stubChrome(): void {
   // `state=locked` 未登录 → 显示连接表单；`state=connect` 是它的别名，
-  // 名字更直白（那个状态在弹窗里就是「还没有账户」）
-  const unlocked = which !== 'locked' && which !== 'connect';
+  // 名字更直白（那个状态在弹窗里就是「还没有账户」）。
+  // `state=2fa` 同样停在未登录 —— 它是连接表单的**下一步**，
+  // 而这一步以前根本没有预览（见本文件顶部「仪器骗人」那段）。
+  const unlocked = which !== 'locked' && which !== 'connect' && which !== '2fa';
 
   const reply = (msg: Record<string, unknown>): unknown => {
     switch (msg.type) {
@@ -153,6 +155,20 @@ export function stubChrome(): void {
        * 看起来和「产品就是这样」一模一样。这个文件顶上写着「仪器骗人比没有
        * 仪器更糟」，而刚刚正是这么骗了一次：类型加了两栏，桩没跟上。
        */
+      /*
+       * 解锁。
+       *
+       * ⚠️ `?state=2fa` 时回的是**两步验证挑战**，而不是错误 ——
+       * 这一屏在扩展端曾经完全不存在（`twoFactor` 在 `extension/` 里
+       * 出现 0 次，开了两步验证的服务器根本登不进来）。
+       * 桩跟着真实后台的形状回，这条预览才有意义。
+       */
+      case 'coffer:connect':
+        return which === '2fa'
+          ? { ok: false, twoFactor: { providers: [0, 1] } }
+          : { ok: true, itemCount: ITEMS.length };
+      case 'coffer:connect-2fa':
+        return { ok: true, itemCount: ITEMS.length };
       case 'coffer:security': {
         const report: ReportBrief = {
           total: ITEMS.length, score: 72, grade: 'fair',

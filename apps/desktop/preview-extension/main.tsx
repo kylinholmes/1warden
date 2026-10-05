@@ -74,6 +74,32 @@ if (new URLSearchParams(location.search).get('state') === 'card') {
     .find((b) => b.textContent?.includes('招商银行 Visa'))?.click(), 500);
 }
 
+/*
+ * `?state=2fa`：填三个输入框并提交，好截图核对**两步验证**那一屏。
+ *
+ * ⚠️ 必须走**原型上的原生 setter**，不能直接赋 `el.value`。
+ * React 的受控输入比对的是自己内部记的值：直接赋值它看不出变化、
+ * 不重渲染，于是提交上去的仍然是空字符串 —— 表单会卡在 `required` 上，
+ * 而**看起来就像是这一屏坏了**。
+ *
+ * 这一段缺席，正是这一屏一直没被肉眼核对过的原因（见 restructure-plan）。
+ */
+if (new URLSearchParams(location.search).get('state') === '2fa') {
+  setTimeout(() => {
+    const form = document.querySelector('form');
+    const inputs = form?.querySelectorAll('input');
+    if (!form || !inputs || inputs.length < 3) return;
+    const setValue = (el: HTMLInputElement, v: string) => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set?.call(el, v);
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    };
+    setValue(inputs[0] as HTMLInputElement, 'https://vault.example.com');
+    setValue(inputs[1] as HTMLInputElement, 'me@example.com');
+    setValue(inputs[2] as HTMLInputElement, 'correct horse battery staple');
+    form.requestSubmit();
+  }, 400);
+}
+
 /* \`?state=import\`：点开导入那一项，核对界面 */
 if (new URLSearchParams(location.search).get('state') === 'import') {
   setTimeout(() => [...document.querySelectorAll('button')]
