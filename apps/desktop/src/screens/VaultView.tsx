@@ -808,7 +808,7 @@ function NavItem(props: {
           <span className="nav-count shrink-0 text-2xs tabular-nums text-[var(--ink-secondary)]">{props.count}</span>
         )}
       </button>
-      {/* 文件夹项的重命名/删除菜单 —— 折叠态（56px）放不下，跟着一起藏 */}
+      {/* 文件夹项的重命名/删除菜单 —— 折叠态放不下，跟着一起藏 */}
       {props.children && <div className="nav-extra">{props.children}</div>}
     </li>
   );

@@ -11,6 +11,7 @@
  *   · `./CopyButton`    复制按钮（界面与反馈）
  *   · `./SecretField`   可复制/可揭示的字段 + 详情分组 `Section`
  *   · `./platform`      编译期平台常量（`__PLATFORM__`，见那个文件顶部）
+ *   · `./NavRail`       导航栏（折叠 80 / 展开 214，两端共用）
  *
  * 每一样都是**先发现了两份拷贝**才搬过来的：令牌那份扩展端已经落后一版，
  * 图标那份扩展端自己写着「和桌面端是同一套画法」—— 同一套画法写两遍，
@@ -21,7 +22,7 @@
  * 单测全都不会报，只有肉眼看得见。有守卫测试盯着这件事
  * （`apps/extension/src/shared-css-wiring.test.ts`）。
  *
- * 还没有搬过来的：**详情块的外壳**（`ItemDetail`）和侧栏。
+ * 还没有搬过来的：**详情块的外壳**（`ItemDetail`）。
  *
  * 详情块的**零件已经有了**（`SecretField` / `Section` / `CopyButton`），
  * 剩下的外壳拖着 `VaultClient`（附件下载）、Tauri 对话框、原生自动输入
@@ -35,3 +36,4 @@ export * from './CopyButton';
 export * from './SecretField';
 export * from './destinations';
 export * from './platform';
+export * from './NavRail';

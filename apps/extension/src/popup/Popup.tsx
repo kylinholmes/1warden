@@ -4,11 +4,14 @@ import { generatePassword, passwordStrength } from '@coffer/crypto';
 import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
-  CopyButton, IconAlert, IconClose, IconGlobe, IconGlyph, IconKey, IconLock,
-  IconKeyboard, IconSearch, IconSpinner, IconStar, ItemRow, countByType,
-  scheduleClipboardClear, typeDestinations,
+  CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
+  IconKeyboard, IconLock, IconSearch, IconSpinner, IconStar, ItemRow, NavRail, NavRow,
+  countByType, scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
-import { Rail, type Destination } from './Rail';
+
+/** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
+type Destination = 'all' | 'favorites' | 'generator' | `type:${string}`;
+
 import { ItemDetail } from './ItemDetail';
 
 /**
@@ -255,19 +258,55 @@ export function Popup() {
       所以「弹窗撑不开」它看不见 —— 那是那个仪器的一个盲区。）
     */
     <div className="screen-in vault-shell h-[560px] w-[440px]">
-      <Rail
-        types={railTypes}
-        current={dest}
-        onSelect={(d) => { setDest(d); setOpenId(null); }}
+      {/*
+        ⚠️ 这个导航栏**和桌面端是同一个组件**（`@coffer/ui` 的 `NavRail`）——
+        折叠 80 / 展开 214 是同一份条目的两种排布，不是两套实现。
+        内容由这里给：桌面端多出文件夹、安全报告、导入，弹窗没有那些能力。
+      */}
+      <NavRail
+        label="保险库导航"
         expanded={railExpanded}
         onToggleExpanded={() => setRailExpanded((v) => !v)}
-        onLock={() => {
-          void (async () => {
-            await send({ type: 'coffer:lock' });
-            setOpenId(null);
-            await refresh();
-          })();
-        }}
+        current={dest}
+        onSelect={(k) => { setDest(k as Destination); setOpenId(null); }}
+        brand={
+          <>
+            <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
+              <IconLock size={13} />
+            </span>
+            {railExpanded && (
+              <span className="min-w-0 truncate text-lg font-semibold tracking-[-0.01em]">Coffer</span>
+            )}
+          </>
+        }
+        groups={[
+          {
+            key: 'main',
+            entries: [
+              { key: 'all', label: '全部', icon: <IconItems size={20} /> },
+              { key: 'favorites', label: '收藏', icon: <IconStar size={20} /> },
+            ],
+          },
+          { key: 'types', title: '类别', entries: railTypes },
+          {
+            key: 'tools',
+            entries: [{ key: 'generator', label: '生成', icon: <IconDice size={20} /> }],
+          },
+        ]}
+        footer={
+          <NavRow
+            entry={{ key: '__lock', label: '锁定', icon: <IconLock size={20} /> }}
+            active={false}
+            expanded={railExpanded}
+            onClick={() => {
+              void (async () => {
+                await send({ type: 'coffer:lock' });
+                setOpenId(null);
+                await refresh();
+              })();
+            }}
+          />
+        }
       />
 
       <div className="vault-content" data-detail={openItem !== null}>

@@ -162,6 +162,12 @@
      * 因为宽屏下它是一栏、该显示占位。但窄屏下它绝对定位盖住列表 ——
      * 不清掉的话，用户打开弹窗看到的是一句「请选一条」，而列表不见了。
      */
+    /*
+     * 折叠态藏掉行尾的附加内容（文件夹的「更多」按钮）——
+     * 它浮在行尾，80px 里会盖住图标。
+     */
+    .vault-rail[data-expanded='false'] .nav-extra { display: none; }
+
     .vault-content[data-detail='false'] .vault-detail {
       display: none;
     }
