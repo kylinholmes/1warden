@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { QuickItem } from '../quick-bridge';
-import { IconLock, IconSearch, TypeIcon } from '../components/icons';
+import { IconLock, IconSearch } from '../components/icons';
+import { IconGlyph } from '../components/ItemIcon';
+import type { IconStore } from '@coffer/vault';
 
 /**
  * 快速面板的界面 —— **纯展示**，不碰任何数据源。
@@ -19,8 +21,10 @@ import { IconLock, IconSearch, TypeIcon } from '../components/icons';
  * 而不是主窗口那种三栏结构。窗口边缘那一圈圆角由外壳给（透明窗口），
  * 这里只负责内部。
  */
-export function QuickAccess({ items, locked, busy, notice, onQueryChange, onPick, onClose }: {
+export function QuickAccess({ items, icons, locked, busy, notice, onQueryChange, onPick, onClose }: {
   items: readonly QuickItem[];
+  /** 站点图标的缓存。主窗口过桥传来服务端地址后建的；没有就只显示彩色徽标 */
+  icons: IconStore | null;
   locked: boolean;
   busy: boolean;
   notice: string | null;
@@ -116,14 +120,19 @@ export function QuickAccess({ items, locked, busy, notice, onQueryChange, onPick
                   i === index ? 'bg-[var(--surface-selected)]' : ''
                 }`}
               >
-                <span className="tile" data-type="login">
-                  <TypeIcon type="login" />
-                </span>
+                <IconGlyph
+                  domain={it.iconDomain}
+                  text={it.avatarText}
+                  hue={it.avatarHue}
+                  type={it.type}
+                  store={icons}
+                />
                 <span className="min-w-0 flex-1">
                   <span className="block truncate text-[var(--text-md)] leading-snug">{it.name}</span>
-                  {it.username && (
+                  {/* 摘要规则与主窗口同一份（`summaryOf`），不在这里再推一遍 */}
+                  {it.summary !== null && (
                     <span className="mt-0.5 block truncate text-[var(--text-xs)] leading-snug text-[var(--ink-tertiary)]">
-                      {it.username}
+                      {it.summary}
                     </span>
                   )}
                 </span>

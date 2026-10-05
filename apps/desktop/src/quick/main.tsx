@@ -9,6 +9,7 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { QuickAccess } from '../screens/QuickAccess';
+import { iconStoreFor } from '../icon-store';
 import { initPlatform } from '../platform';
 import { initTheme } from '../theme';
 import {
@@ -22,6 +23,13 @@ function Quick() {
   const [locked, setLocked] = useState(false);
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
+  /**
+   * 站点图标的缓存。
+   *
+   * `iconStoreFor` 是模块级单例（按服务端地址），所以面板反复显示/隐藏
+   * 不会让缓存失效 —— 图标只抓一次。服务端地址由主窗口随结果带过来。
+   */
+  const [serverUrl, setServerUrl] = useState<string | null>(null);
   /** 只认最新一次查询的结果 —— 用户打字很快，早发的会晚回 */
   const latestSeq = useRef(0);
 
@@ -33,6 +41,7 @@ function Quick() {
       setItems(r.items);
       setLocked(r.locked);
       setBusy(false);
+      setServerUrl(r.serverUrl);
     }).then((un) => unlisteners.push(un));
 
     void onActionResult((r) => {
@@ -67,6 +76,7 @@ function Quick() {
   return (
     <QuickAccess
       items={items}
+      icons={serverUrl === null ? null : iconStoreFor(serverUrl)}
       locked={locked}
       busy={busy}
       notice={notice}

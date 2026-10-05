@@ -7,7 +7,10 @@
  */
 import { useEffect } from 'react';
 import { emitTo, listen } from '@tauri-apps/api/event';
-import { searchItems, totpCode, type VaultClient, type VaultItem } from '@coffer/vault';
+import {
+  searchItems, totpCode, summaryOf, iconDomainOf, avatarOf,
+  type VaultClient, type VaultItem,
+} from '@coffer/vault';
 import { QUICK_WINDOW, type QuickItem, type QuickAction } from './quick-bridge';
 
 /** 面板一次最多列这么多 —— 再多就得靠搜索了，列满反而看不清 */
@@ -39,13 +42,26 @@ async function copyToClipboard(value: string): Promise<void> {
   }, CLEAR_AFTER_MS);
 }
 
+/**
+ * 把条目压成面板要的那几个字段。
+ *
+ * ⚠️ 显示相关的那几个（摘要、徽标）在这里就算好，不留给面板去算。
+ * 面板是**另一个窗口**，拿不到 `VaultItem` —— 让它自己算就等于把
+ * `summaryOf` / `avatarOf` 的规则在两个窗口里各写一遍，而它们迟早不一致。
+ */
 function summarise(i: VaultItem): QuickItem {
+  const avatar = avatarOf(i);
   return {
     id: i.id,
     name: i.nameFailed ? '无法解密' : i.name,
     username: i.login?.username ?? null,
     hasPassword: i.login?.password != null,
     hasTotp: i.login?.totp != null,
+    type: i.type,
+    summary: summaryOf(i),
+    iconDomain: iconDomainOf(i),
+    avatarText: avatar.text,
+    avatarHue: avatar.hue,
   };
 }
 
@@ -66,6 +82,7 @@ export function useQuickBridge(client: VaultClient): void {
         seq: e.payload.seq,
         locked,
         items: items.map(summarise),
+        serverUrl: session.account?.serverUrl ?? null,
       });
     }).then((un) => unlisteners.push(un));
 

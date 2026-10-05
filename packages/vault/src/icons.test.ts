@@ -115,7 +115,8 @@ describe('IconStore', () => {
    */
   it('算不了摘要时也要降级成 null，而不是抛出去', async () => {
     const original = crypto.subtle.digest.bind(crypto.subtle);
-    // @ts-expect-error 故意制造「没有摘要能力」的环境
+    // 赋一个必抛的函数进去 —— 类型上合法（never 可赋给任何返回类型），
+    // 但运行时就是我们想模拟的「算不了摘要」
     crypto.subtle.digest = () => { throw new Error('没有 crypto.subtle'); };
     try {
       const store = new IconStore({
@@ -210,6 +211,8 @@ function fakeBytes(size = 4096): Uint8Array {
 }
 
 async function sha256Hex(bytes: Uint8Array): Promise<string> {
-  const digest = await crypto.subtle.digest('SHA-256', bytes);
+  // `slice()` 拿到的是自己的 ArrayBuffer —— 绕开 Uint8Array<ArrayBufferLike>
+  // 与 BufferSource 之间的类型纠缠（实现那边同理）
+  const digest = await crypto.subtle.digest('SHA-256', bytes.slice().buffer);
   return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
 }

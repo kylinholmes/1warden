@@ -408,12 +408,28 @@ createRoot(document.getElementById('root')!).render(
     ) : which === 'quick' ? (
       <div style={{ width: 620, height: 400 }}>
         <QuickAccess
+          /*
+           * ⚠️ 这些字段要和 `QuickItem` 对齐 —— 而**没有类型检查会提醒你**，
+           * 因为预览源码不在 tsconfig 的 include 里（见那个文件里的说明）。
+           * 色相值是按真实规则（域名做 FNV-1a 取模）算出来的，
+           * 不是随手编的：编的话截图里的配色就不代表真机效果。
+           */
           items={[
-            { id: '1', name: 'GitHub', username: 'me@example.com', hasPassword: true, hasTotp: true },
-            { id: '2', name: '公司 VPN', username: 'zhang', hasPassword: true, hasTotp: false },
-            { id: '3', name: '一个名字特别特别长的服务用来测试截断', username: 'x', hasPassword: true, hasTotp: false },
-            { id: '4', name: '云服务商', username: null, hasPassword: true, hasTotp: false },
+            { id: '1', name: 'GitHub', username: 'me@example.com', hasPassword: true, hasTotp: true,
+              type: 'login', summary: 'me@example.com', iconDomain: 'github.com', avatarText: 'Gi', avatarHue: 41 },
+            { id: '2', name: '公司 VPN', username: 'zhang', hasPassword: true, hasTotp: false,
+              type: 'login', summary: 'zhang', iconDomain: 'vpn.acme-corp.net', avatarText: '公司', avatarHue: 329 },
+            { id: '3', name: '一个名字特别特别长的服务用来测试截断', username: 'x', hasPassword: true, hasTotp: false,
+              type: 'login', summary: 'x', iconDomain: 'a-very-long-hostname-for-truncation.cloudflare.com',
+              avatarText: '一个', avatarHue: 318 },
+            { id: '4', name: '云服务商', username: null, hasPassword: true, hasTotp: false,
+              type: 'login', summary: 'cloud.digitalocean.com', iconDomain: 'cloud.digitalocean.com',
+              avatarText: '云服', avatarHue: 269 },
+            // 没有网址的笔记 —— 走「着色的类型图标」那一层
+            { id: '5', name: '家里 Wi-Fi 密码', username: null, hasPassword: false, hasTotp: false,
+              type: 'secureNote', summary: null, iconDomain: null, avatarText: '家里', avatarHue: 178 },
           ]}
+          icons={null}
           locked={false}
           busy={false}
           notice={null}

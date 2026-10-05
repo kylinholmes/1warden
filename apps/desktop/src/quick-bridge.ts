@@ -26,6 +26,24 @@ export interface QuickItem {
   /** 有没有密码/验证码，只用于决定按钮显不显示 */
   hasPassword: boolean;
   hasTotp: boolean;
+
+  /*
+   * ── 显示用的字段 ──
+   *
+   * 面板是**另一个窗口**，拿不到主窗口的 `VaultItem`，所以这些在主窗口那边
+   * 算好了过桥。不这样做的话，`summaryOf` / `avatarOf` 那套规则要在两个
+   * 窗口里各实现一遍 —— 而它们迟早会不一致。
+   */
+  /** 条目类型，决定没有站点时画哪个类型图标 */
+  type: string;
+  /** 列表第二行（`summaryOf` 的结果）。null = 这行不显示 */
+  summary: string | null;
+  /** 有站点时是那个域名，用来取图标；没有则为 null */
+  iconDomain: string | null;
+  /** 彩色徽标上写什么字（`avatarOf` 的结果） */
+  avatarText: string;
+  /** 徽标色相（`avatarOf` 的结果），0–359 */
+  avatarHue: number;
 }
 
 /** 面板能触发的动作。刻意只有复制 —— 见 QuickAccess 顶部的说明。 */
@@ -36,6 +54,13 @@ export interface QuickResults {
   seq: number;
   locked: boolean;
   items: QuickItem[];
+  /**
+   * 服务端地址 —— 面板要拿它取站点图标。
+   *
+   * 每次结果都带上而不是握手时给一次：面板可能比主窗口先起来，
+   * 「先要一次」那条路会在启动时序上打架。这个值很小，重复带没关系。
+   */
+  serverUrl: string | null;
 }
 
 export const QUICK_WINDOW = 'quick';

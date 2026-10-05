@@ -21,6 +21,12 @@
  *
  * ⚠️ 第 2 层不是「降级」那种将就。本地开发环境的出网是受限的，
  * 大部分 favicon 抓不到，所以第 2 层才是常态 —— 它必须好看。
+ *
+ * ## 两个入口
+ *
+ * `ItemIcon` 收条目、`IconGlyph` 收算好的字段。后者是给**另一个窗口**用的
+ * （快速面板拿不到 `VaultItem`，字段由主窗口算好过桥）——
+ * 两条路共用这一个实现，规则就不会在两个窗口里长歪。
  */
 import { useEffect, useState } from 'react';
 import { avatarOf, iconDomainOf, type VaultItem } from '@coffer/vault';
@@ -28,7 +34,25 @@ import type { IconStore } from '@coffer/vault';
 import { TypeIcon } from './icons';
 
 export function ItemIcon({ item, store }: { item: VaultItem; store: IconStore | null }) {
-  const domain = iconDomainOf(item);
+  const avatar = avatarOf(item);
+  return (
+    <IconGlyph
+      domain={iconDomainOf(item)}
+      text={avatar.text}
+      hue={avatar.hue}
+      type={item.type}
+      store={store}
+    />
+  );
+}
+
+export function IconGlyph({ domain, text, hue, type, store }: {
+  domain: string | null;
+  text: string;
+  hue: number;
+  type: string;
+  store: IconStore | null;
+}) {
   const [url, setUrl] = useState<string | null>(null);
 
   useEffect(() => {
@@ -50,21 +74,17 @@ export function ItemIcon({ item, store }: { item: VaultItem; store: IconStore | 
     return <img src={url} alt="" className="tile-img" draggable={false} />;
   }
 
-  const avatar = avatarOf(item);
+  const style = { '--h': String(hue) } as React.CSSProperties;
 
   // 没有站点的条目（卡片、笔记、身份、SSH 密钥）保留类型形状 ——
   // 「ZA 信用卡」和「我的邮箱」都变成两个汉字的话，就看不出哪个是卡了
   if (domain === null) {
     return (
-      <span className="tile-glyph" style={{ '--h': String(avatar.hue) } as React.CSSProperties}>
-        <TypeIcon type={item.type} size={17} />
+      <span className="tile-glyph" style={style}>
+        <TypeIcon type={type} size={17} />
       </span>
     );
   }
 
-  return (
-    <span className="tile-avatar" style={{ '--h': String(avatar.hue) } as React.CSSProperties}>
-      {avatar.text}
-    </span>
-  );
+  return <span className="tile-avatar" style={style}>{text}</span>;
 }

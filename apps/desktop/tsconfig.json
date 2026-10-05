@@ -1,8 +1,11 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "rootDir": "src",
-    "outDir": "dist",
+    /*
+     * 这里**只做类型检查**，产物由 vite 出（`noEmit: true`）。
+     * 所以 `rootDir` / `outDir` 都去掉了：它们只在 emit 时有意义，
+     * 留着反而会把 `preview/**` 挡在 include 外面（TS6059）。
+     */
     "composite": false,
     "declaration": false,
     "jsx": "react-jsx",
@@ -10,5 +13,12 @@
     "types": ["vite/client"],
     "noEmit": true
   },
-  "include": ["src/**/*.ts", "src/**/*.tsx"]
+  /*
+   * ⚠️ `preview/**` 也在内。
+   *
+   * 它一度不在 —— 于是预览的假数据和真实类型脱节了都没人知道，
+   * 而预览是**用来看的仪器**：仪器骗人比没有仪器更糟。
+   * 它用的是同一套组件，类型本来就该一起管。
+   */
+  "include": ["src/**/*.ts", "src/**/*.tsx", "preview/**/*.ts", "preview/**/*.tsx"]
 }
