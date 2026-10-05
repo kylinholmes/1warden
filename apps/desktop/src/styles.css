@@ -283,20 +283,30 @@ input[type='range'] {
   .app-sidebar { --nav-w: var(--rail-w); }
   .app-shell { container-type: inline-size; container-name: shell; }
 
-  @container shell (max-width: 900px) {
-    /* 覆盖 NavRail 给的变量（它不能写内联 width，否则这条永远不生效） */
-    .app-sidebar { --nav-w: 56px; }
-    .app-sidebar .nav-label,
-    .app-sidebar .nav-count,
-    .app-sidebar .nav-section-title,
-    .app-sidebar .nav-brand-text,
-    .app-sidebar .nav-kbd,
-    .app-sidebar .nav-extra,
-    .app-sidebar [data-nav-new-folder] { display: none; }
-    .app-sidebar .nav-item { justify-content: center; padding-inline: 0; }
-    .app-sidebar .nav-band { justify-content: center; padding-inline: 0; }
-    .app-sidebar .nav-account { justify-content: center; }
-  }
+  /*
+   * ⚠️ 这里原来有一块 `@container shell (max-width: 900px)`，把 `.app-sidebar`
+   * 收成 56px 的图标条、藏掉全部文字。**已删除** —— 它买到的是正好相反的东西。
+   *
+   * `.app-sidebar` 只有**一个**使用者：`VaultView` 传给 `NavDrawer` 的那个
+   * rail。**不存在另一个「常驻侧栏」元素** —— 窄屏滑出来的抽屉和宽屏常驻的
+   * 侧栏是**同一个元素**，`components.css` 按容器宽度给了它两套定位
+   * （`@container shell (min-width: 900px)` 那一档才 `position: static`）。
+   *
+   * 而这两档正好互补：`.app-sidebar` 以**抽屉**形态可见的时候，容器一定
+   * 小于 900px —— 也就是这条规则**一定生效**。于是它的实际效果是：
+   * 抽屉一拉开，就是一个 214px 宽、一个标签都没有的图标条。
+   *
+   * 而且 `--nav-w: 56px` 那条**从来没生效过**：`.vault-rail[data-expanded='true']`
+   * 比 `.app-sidebar` 更具体，宽度一直是 214px 说了算。所以看上去不是
+   * 「收窄了」，是「该收没收，但字全没了」—— 一片空荡荡的宽度。
+   *
+   * 为什么一直没被发现：**要看出来必须把抽屉拉开再截一张图**。
+   * 核「手机视口」那一轮只截了抽屉**关着**的样子（汉堡按钮在、排版对），
+   * 于是这条从旁边溜过去了 —— 记在 docs 三·五。
+   *
+   * 抽屉是**浮层**：宽度是自己的，不跟内容抢地方。所以它没有「收窄」这回事 ——
+   * 要么关着，要么完整展开（带标签），中间那一档没有意义。
+   */
 
   /* ── 表面 ───────────────────────────────────────────── */
 

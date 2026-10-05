@@ -10,6 +10,7 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "preview:build": "vite build -c vite.preview.config.ts",
+    "preview:mobile:build": "COFFER_PREVIEW_PLATFORM=mobile vite build -c vite.preview.config.ts",
     "preview:extension:build": "vite build -c vite.preview-extension.config.ts",
     "build:extension": "vite build -c vite.extension.config.ts && vite build -c vite.content.config.ts && COFFER_ENTRY=webauthn vite build -c vite.content.config.ts",
     "dev:extension": "vite build --watch -c vite.extension.config.ts & vite build --watch -c vite.content.config.ts & COFFER_ENTRY=webauthn vite build --watch -c vite.content.config.ts"

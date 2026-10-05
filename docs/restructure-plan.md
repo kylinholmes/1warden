@@ -491,6 +491,98 @@ PATH="$HOME/.cargo/bin:$PATH" cargo check --target aarch64-apple-ios-sim
 所以移动端的构建脚本里必须带上这个前缀，否则失败的样子还是「找不到 core」，
 而那个样子会让人去查目标装没装 —— 一个已经查过、且结论是「装了」的地方。
 
+## 三·九、移动端：第一次有东西了
+
+在这一轮之前，移动端**一行都没有**：`IS_MOBILE` 在 `platform.ts` 里声明了，
+全仓库出现 0 次；`__PLATFORM__` 有四个构建目标各自 `define`，
+但**没有任何一处真的读它**。
+
+现在：
+
+| | 状态 |
+|---|---|
+| Rust 对着 `aarch64-apple-ios-sim` 编过 | ✅ `cargo check` Finished |
+| `mobile` 构建目标（`bun run build:mobile`） | ✅ 桌面专属代码**不进产物** |
+| 移动端预览（`preview:mobile:build`） | ✅ 可截图 |
+| 模拟器/真机跑起来 | ❌ **还没做**（`tauri ios init` 那一步） |
+
+### 怎么分的家
+
+源码和 HTML **共用一份**。用户的判据是「PC 版窗口调窄，UI 自动跟着变……
+这个逻辑直接用到移动端上」—— 布局层确实不用分家：容器查询在 390px 下
+已经把 rail 收成抽屉了。分家的只有**能力**，由 `__PLATFORM__` 表达。
+
+| | 桌面端 | 移动端 |
+|---|---|---|
+| `__PLATFORM__` | `'desktop'` | `'mobile'` |
+| 入口 | `index.html` + `quick.html` | 只有 `index.html` |
+| 产物 | `dist/` | `dist-mobile/` |
+
+移动端没有 `quick.html`：快速面板是 `alwaysOnTop` / `skipTaskbar` 的常驻小窗，
+移动端没有「另一个窗口」这个形态。
+
+Rust 侧移进桌面端的：`rfd`（系统文件对话框）、`tray-icon` / `image-png`（托盘）；
+`save` / `tray` / 快速面板那三条命令加了 `#[cfg(desktop)]`。
+`autotype` 和 `hotkey` **不用加** —— 它们在文件顶上写了 `#![cfg(...)]`，自己管自己。
+
+### ⚠️ 移动端**现在做不到**的一件事（别让它悄悄消失）
+
+**附件取不回。** `canSaveFiles()` 在移动端返回 false，「取回」按钮不渲染 ——
+`save_file` 那条命令在移动端不存在，而 iOS 的对应物是**分享面板**
+（「存到文件」），不是「另存为」。那是另一套实现，**还没写**。
+
+所以移动端上附件是**看得到、取不回**的。
+
+### ⚠️ 三件事只有「拉开抽屉再截图」才看得见
+
+这一轮改了三处，**每一处都是截图发现的，而且每一处都不是移动端独有的**：
+
+**一、`detectOs` 把每一台 iPhone 都判成了 macOS。** iPhone 的 UA 里含有
+`like Mac OS X`，于是 `--titlebar-h` 拿到 28px —— 那是给三个红绿灯圆点留的。
+改成 `detectOs(ua = navigator.userAgent)`，先认 iOS 再认桌面系统。
+
+**二、抽屉一拉开就是 214px 宽、一个标签都没有的图标条。**
+`styles.css` 里有一块 `@container shell (max-width: 900px)` 在 `.app-sidebar`
+里藏掉所有文字 —— 它以为那是常驻侧栏。但 `.app-sidebar` **只有抽屉一个使用者**，
+而两档正好互补，所以这条规则**在抽屉打开时一定生效**。
+（顺带：那个 `--nav-w: 56px` 从来没生效过，`.vault-rail[data-expanded='true']`
+比它更具体。）
+
+**这一条桌面端窄窗口同样中招**，不是移动端的问题。
+
+**三、预览页没有 viewport meta。** `preview/index.html` 一直没写，
+桌面浏览器上毫无影响 —— 但一开触摸模拟，**布局视口就变成 980px 的默认值**，
+截出来是一张 980px 宽的桌面三栏图，而它会被当成「390px 下的手机界面」看。
+
+### 这一轮的教训：**仪器本身也会骗人**
+
+第三条尤其值得记：它不报错、不空白，给的是一张**看起来很正常的图**，
+只是那张图不是你以为的那个东西。所以「手机视口」这件事得拆成两半：
+
+| | 回答什么 |
+|---|---|
+| `390×844` | 排版在窄屏下成不成立 |
+| `COFFER_SHOT_TOUCH=1` | 这套交互在**没有 hover 的手指下**成不成立 |
+
+之前那次验收只做了前者（`mobile: false`）。现在 `ui-shot.ts` 两样都有，
+还多了 `COFFER_SHOT_TAP=<选择器>` —— 用**触摸**点一下再拍。
+（用 `element.click()` 是不行的：它走鼠标那条路，会把 `:hover` 也置上，
+等于把要验的前提自己抹掉。）
+
+顺带核过：抽屉在触摸下**能打开**（靠 sticky hover），所以「没有 hover
+就够不着导航」那个担心不成立 —— 那个 bug 在扩展弹窗上已经犯过一次。
+
+### 加了两条守卫
+
+- `src/safe-area.test.ts` —— `env(safe-area-inset-*)` 和 `viewport-fit=cover`
+  必须**成对**出现。少一个不报错：`env()` 一律返回 0，
+  于是「让出了安全区」和「根本没让」在代码上长得一模一样
+- `src/drawer-css.test.ts` —— 没有任何规则可以在 `.app-sidebar` 里藏文字
+
+⚠️ 两条的第一版**都是空转的**，都是「故意改坏再看它红不红」发现的：
+safe-area 那条匹配到了 HTML 里的**文档注释**（注释里就写着 `viewport-fit=cover`），
+drawer 那条现在自带一条「判据能认出那段被删掉的规则吗」的自检。
+
 ## 四、验收
 
 用户给的判据：

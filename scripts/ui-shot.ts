@@ -173,8 +173,22 @@ try {
     await send('Runtime.enable');
     await send('Log.enable');
   }
+  /*
+   * ⚠️ 手机视口 ≠ 手机。
+   *
+   * `COFFER_SHOT_TOUCH=1` 之前，「手机尺寸」那一轮跑的是
+   * `mobile: false` + 没有触摸模拟 —— 那是**一个窄的桌面窗口**：
+   * 有鼠标、有 hover、有精确指针。手机上这三样都没有，
+   * 而「导航抽屉靠 `:hover` 打开」这种设计恰恰只有在没有 hover 时才露馅。
+   *
+   * 所以尺寸和触摸能力是**两件事**，得分开说：`390×844` 只回答了
+   * 「排版在窄屏下成不成立」，`touch` 才回答「这套交互在手指下成不成立」。
+   * 上面 docs 里那次验收只做了前者 —— 记在那里了。
+   */
+  const touch = process.env.COFFER_SHOT_TOUCH === '1';
+  await send('Emulation.setTouchEmulationEnabled', { enabled: touch, maxTouchPoints: 5 });
   await send('Emulation.setDeviceMetricsOverride', {
-    width, height, deviceScaleFactor: 2, mobile: false,
+    width, height, deviceScaleFactor: 2, mobile: touch,
   });
 
   /*
@@ -202,6 +216,48 @@ try {
    */
   const delay = Number(process.env.COFFER_SHOT_DELAY ?? 1200);
   await new Promise((r) => setTimeout(r, delay));
+
+  /*
+   * 点一下再拍。
+   *
+   * `COFFER_SHOT_TAP=<选择器>` —— 用**触摸**点这个元素的中心，等一小会儿
+   * 让动效走完，然后截图。
+   *
+   * ⚠️ 为什么是触摸而不是 `element.click()`：`click()` 走的是**鼠标**那条路，
+   * 会老老实实地把 `:hover` 也置上。而移动端真正的问题是
+   * 「**没有 hover 的时候这个交互还成不成立**」—— 用 `click()` 去验，
+   * 等于把要验的那个前提自己抹掉了。
+   *
+   * `Input.dispatchTouchEvent` 走的是和手指同一条输入路径，
+   * 所以「靠 `:hover` 打开的浮层在触摸下会怎样」这一条才有意义。
+   */
+  const tapSelector = process.env.COFFER_SHOT_TAP;
+  if (tapSelector) {
+    const point = await send<{ result?: { value?: { x: number; y: number } | null } }>(
+      'Runtime.evaluate',
+      {
+        expression: `(() => {
+          const el = document.querySelector(${JSON.stringify(tapSelector)});
+          if (el === null) return null;
+          const r = el.getBoundingClientRect();
+          return { x: r.left + r.width / 2, y: r.top + r.height / 2 };
+        })()`,
+        returnByValue: true,
+      },
+    );
+    const p = point.result?.value;
+    if (!p) {
+      // 找不到就**大声**说 —— 静默跳过的话，截出来的是一张「没点过」的图，
+      // 而它看起来和「点了没反应」一模一样。
+      throw new Error(`COFFER_SHOT_TAP：找不到 ${tapSelector}`);
+    }
+    await send('Input.dispatchTouchEvent', {
+      type: 'touchStart', touchPoints: [{ x: p.x, y: p.y }],
+    });
+    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    // 等动效走完（--dur-base 是 200 上下，给足余量）
+    await new Promise((r) => setTimeout(r, Number(process.env.COFFER_SHOT_TAP_DELAY ?? 700)));
+  }
 
   const shot = await send<{ data: string }>('Page.captureScreenshot', {
     format: 'png',

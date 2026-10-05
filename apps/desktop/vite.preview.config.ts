@@ -14,19 +14,32 @@ import tailwindcss from '@tailwindcss/vite';
  * 界面就只能靠「读代码想象」，而排版问题恰恰是读代码看不出来的
  * （本项目已经因为一个 Tailwind 命名空间冲突，把整个表单压成 12 像素宽）。
  */
+/*
+ * 这个预览是给**哪个平台**渲染的。
+ *
+ * ⚠️ 不是可有可无的开关：`__PLATFORM__` 是**编译期**常量，所以
+ * 「移动端少一段 UI」这件事**只有换一个值重新构建才看得见**。
+ * 用桌面端的预览在窄窗口下截图，看到的是桌面端在窄窗口下的样子 ——
+ * 那不是移动端（顶栏让位、自动输入那一块、附件取回按钮都不一样）。
+ *
+ * 默认 desktop，保持既有的 `preview:build` / 文档里的命令不变。
+ */
+const PLATFORM = process.env['COFFER_PREVIEW_PLATFORM'] ?? 'desktop';
+
 export default defineConfig({
   /*
    * 编译期平台常量 —— 共享组件靠它区分「这个构建是给谁的」。
    * 打包时被替换成字面量，另一端的分支直接不进产物。
    * 详见 packages/ui/src/platform.ts。
    */
-  define: { __PLATFORM__: JSON.stringify('desktop') },
+  define: { __PLATFORM__: JSON.stringify(PLATFORM) },
   root: resolve(__dirname, 'preview'),
   publicDir: false,
   plugins: [react(), tailwindcss()],
   resolve: { alias: { '@coffer/vault': resolve(__dirname, '../../packages/vault/src/index.ts') } },
   build: {
-    outDir: resolve(__dirname, 'dist-preview'),
+    // 桌面端仍然是 `dist-preview`（文档和已有的截图命令都指着它）
+    outDir: resolve(__dirname, PLATFORM === 'desktop' ? 'dist-preview' : `dist-preview-${PLATFORM}`),
     emptyOutDir: true,
     target: 'chrome116',
   },
