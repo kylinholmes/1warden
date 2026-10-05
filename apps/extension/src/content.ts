@@ -10,6 +10,7 @@
  *
  * 这样即使页面本身有 XSS、或者有别的扩展想读我们的内存，也拿不到明文。
  */
+import { ext } from './ext-api';
 import { isLikelyLoginForm, type FieldDescriptor } from '@coffer/vault';
 
 /** 与 background / popup 约定的消息形状 */
@@ -91,7 +92,7 @@ function report(): void {
     isLoginForm: isLikelyLoginForm(fields),
   };
   // background 可能还没醒 —— sendMessage 会把它唤醒
-  chrome.runtime.sendMessage(msg).catch(() => { /* 没有接收方是正常情况 */ });
+  ext.runtime.sendMessage(msg).catch(() => { /* 没有接收方是正常情况 */ });
 }
 
 /** 页面可能是 SPA，路由变化后表单会换掉 */
@@ -130,7 +131,7 @@ function onFormSubmit(event: Event): void {
   if (!form.querySelector('input[type="password"]')) return;
 
   console.debug('[coffer] 检测到登录表单提交');
-  chrome.runtime.sendMessage({ type: 'coffer:submitted', url: location.href })
+  ext.runtime.sendMessage({ type: 'coffer:submitted', url: location.href })
     .catch(() => { /* 没有接收方是正常情况 */ });
 }
 
@@ -145,7 +146,7 @@ document.addEventListener('keydown', (e) => {
   const el = e.target;
   if (!(el instanceof HTMLInputElement)) return;
   if (el.type !== 'password' && el.form?.querySelector('input[type="password"]') === null) return;
-  chrome.runtime.sendMessage({ type: 'coffer:submitted', url: location.href }).catch(() => {});
+  ext.runtime.sendMessage({ type: 'coffer:submitted', url: location.href }).catch(() => {});
 }, true);
 
 // ── 注册顺序很重要 ──
@@ -163,7 +164,7 @@ document.addEventListener('keydown', (e) => {
  * popup 点击填充时，background 需要知道「现在这份字段列表」——
  * 页面可能已经变了。这里按需重新读一遍再回。
  */
-chrome.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
+ext.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
   if ((msg as { type?: string })?.type !== 'coffer:read-fields') return undefined;
   const fields = readFields();
   respond({ fields, isLoginForm: isLikelyLoginForm(fields) });
@@ -248,7 +249,7 @@ window.addEventListener('message', (event: MessageEvent) => {
    * 这条消息的载荷是页面说了算的 —— 它也可能是**别的 frame** 发过来的。
    * 但无论来自谁，能到达的都是 window 自己，所以回给 window 是对的。
    */
-  const work: Promise<Record<string, unknown>> = chrome.runtime
+  const work: Promise<Record<string, unknown>> = ext.runtime
     .sendMessage({ type: 'coffer:webauthn', payload: data })
     .then((reply: unknown) => (reply ?? { ok: false, error: '扩展没有返回结果' }) as Record<string, unknown>)
     .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : '扩展没有响应' }));

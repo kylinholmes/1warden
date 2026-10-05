@@ -19,6 +19,7 @@
  * （没有主密码解不开）。两者放不同的区，正是因为它们的**敏感度不同**，
  * 而不是随手挑的。
  */
+import { ext } from './ext-api';
 import type { SyncCache } from '@coffer/vault';
 import type { AccountInfo } from '@coffer/vault';
 import type { SyncResult } from '@coffer/api';
@@ -35,7 +36,7 @@ export const extensionSyncCache: SyncCache = {
   async load(account) {
     const key = keyFor(account);
     try {
-      const got = await chrome.storage.local.get(key);
+      const got = await ext.storage.local.get(key);
       const raw = got[key];
       return typeof raw === 'string' ? (JSON.parse(raw) as SyncResult) : null;
     } catch {
@@ -46,7 +47,7 @@ export const extensionSyncCache: SyncCache = {
   },
   async save(account, payload) {
     try {
-      await chrome.storage.local.set({ [keyFor(account)]: JSON.stringify(payload) });
+      await ext.storage.local.set({ [keyFor(account)]: JSON.stringify(payload) });
     } catch {
       // 多半是超配额（10MB 量级）。不缓存是**可用**的，只是慢 —— 不能抛，
       // 抛了会让一次成功的同步看起来失败

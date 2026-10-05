@@ -1,3 +1,5 @@
+import { ext } from './ext-api';
+
 /**
  * 离屏文档 —— 只干一件事：在 N 秒后清空剪贴板。
  *
@@ -54,7 +56,7 @@ async function clearIfUnchanged(): Promise<void> {
   } catch { /* 读不了就不动它 */ }
 }
 
-chrome.runtime.onMessage.addListener((msg: unknown) => {
+ext.runtime.onMessage.addListener((msg: unknown) => {
   const m = msg as { type?: string; value?: string };
   if (m?.type !== 'coffer-internal:schedule-clear' || typeof m.value !== 'string') {
     return undefined;
