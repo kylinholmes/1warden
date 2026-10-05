@@ -85,6 +85,7 @@ export class VaultClient {
   private readonly syncCache: SyncCache | undefined;
   private readonly unlockCache: UnlockCache | undefined;
   private readonly onPhase: ((label: string, ms: number) => void) | undefined;
+  private readonly onDisconnected: (() => void) | undefined;
   /** 连接起点。只给 `mark` 用 —— 诊断用，不参与任何逻辑 */
   private connectT0 = 0;
 
@@ -129,11 +130,20 @@ export class VaultClient {
     onSync?: (syncing: boolean) => void;
     /** 连接各阶段的耗时。只用于诊断「登录慢」这类问题，不参与任何逻辑 */
     onPhase?: (label: string, ms: number) => void;
+    /**
+     * 离线解锁之后，后台补登录**彻底失败**了。
+     *
+     * 界面此时是「已经解锁、数据是缓存那一版」，看起来完全正常 ——
+     * 但客户端手上没有令牌，**所有写操作都会失败**。
+     * 调用方该据此提示用户「当前离线」。
+     */
+    onDisconnected?: () => void;
   }) {
     this.fetchImpl = opts.fetchImpl;
     this.syncCache = opts.syncCache;
     this.unlockCache = opts.unlockCache;
     this.onPhase = opts.onPhase;
+    this.onDisconnected = opts.onDisconnected;
     this.deviceStore = opts.deviceStore ?? localStorageDeviceStore;
     this.device = {
       // 用桌面端的值而不是 CLI —— 服务端日志里能看出这是我们的应用
@@ -917,23 +927,53 @@ export class VaultClient {
    * 而不是「保险库突然报错」。
    */
   private async reloginAndSync(masterPassword: string, account: AccountInfo): Promise<void> {
-    const bare = this.makeHttp(account.serverUrl);
     this.session.setSyncing(true);
     try {
       const key = this.masterKey;
       if (!key) return;
       const hash = await hashMasterPassword(key, masterPassword);
-      const { token } = await this.authenticate(bare, {
-        serverUrl: account.serverUrl, email: account.email, masterPassword,
-      }, key, hash, undefined);
-      this.adopt(bare, {
-        serverUrl: account.serverUrl, email: account.email, masterPassword,
-      }, key, token);
-      await this.doSync(this.requireKey());
-      console.warn('[解锁] 后台补登录 + 同步完成');
-    } catch (e) {
-      const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
-      console.warn(`[解锁] 后台补登录失败，界面停在缓存那一版 —— ${why}`);
+
+      /*
+       * ⚠️ **要重试。** 这一步不紧急，但不成功就没有令牌 ——
+       * 而没有令牌时**所有写操作都会失败**，用户看到的是一句
+       * 和网络有关的错，很难联想到「后台那半还没跑完」。
+       *
+       * 实测这条链路单次往返 5~10 秒且会断（`error decoding response body`
+       * 是传输被截断）。一次抖动就永久放弃是不可接受的 ——
+       * 那会把一个可用性问题变成「保存坏了」。
+       *
+       * 退避取 1s/2s/4s：链路本就要几秒一轮，退避太短只是把断掉的
+       * 连接再撞一次。
+       */
+      const delays = [0, 1000, 2000, 4000];
+      let last: unknown = null;
+      for (const [i, wait] of delays.entries()) {
+        if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+        const bare = this.makeHttp(account.serverUrl);
+        try {
+          const { token } = await this.authenticate(bare, {
+            serverUrl: account.serverUrl, email: account.email, masterPassword,
+          }, key, hash, undefined);
+          this.adopt(bare, {
+            serverUrl: account.serverUrl, email: account.email, masterPassword,
+          }, key, token);
+          await this.doSync(this.requireKey());
+          console.warn(`[解锁] 后台补登录 + 同步完成（第 ${i + 1} 次尝试）`);
+          return;
+        } catch (e) {
+          last = e;
+          const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+          console.warn(`[解锁] 后台补登录第 ${i + 1} 次失败 —— ${why}`);
+        }
+      }
+      /*
+       * 全部重试都用完。**这里必须让用户知道**：界面看起来一切正常，
+       * 但保存会失败。只说「停在缓存那一版」是不够的 ——
+       * 那听起来只是「数据旧了点」，而实际是「写不了」。
+       */
+      const why = last instanceof Error ? `${last.name}: ${last.message}` : String(last);
+      console.warn(`[解锁] 后台补登录彻底失败，写操作会失败 —— ${why}`);
+      this.onDisconnected?.();
     } finally {
       this.session.setSyncing(false);
     }
