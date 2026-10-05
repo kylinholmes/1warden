@@ -305,7 +305,15 @@ export class VaultClient {
     try {
       await this.doSync(key);
     } catch (e) {
-      console.warn('[sync] 后台同步失败，界面停在已有数据上', e);
+      /*
+       * ⚠️ 把 `e.message` 拼进**字符串**，不要只把 `e` 传进去。
+       *
+       * vite 转发页面 console 时只保留第一个参数的**第一行**，对象会被
+       * 压成栈顶那一帧 —— 于是日志里只有 `requestRaw@…/http.ts:147`，
+       * 而真正的原因（超时？401？证书？）一个字都看不到。
+       */
+      const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
+      console.warn(`[sync] 后台同步失败，界面停在已有数据上 —— ${why}`);
     } finally {
       this.session.setSyncing(false);
     }
