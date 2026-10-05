@@ -263,13 +263,27 @@ export function NavDrawer(
 ) {
   return (
     <div className="nav-drawer">
-      {/* 悬停带。窄，但整条高度都可命中 —— 只做一个按钮的话太难悬准 */}
-      <div className="nav-drawer-trigger" aria-hidden>
-        <IconItems size={16} />
-      </div>
       <div className="nav-drawer-panel">
         <NavRail {...props} expanded />
       </div>
     </div>
+  );
+}
+
+/**
+ * 抽屉的**开关** —— 由调用方放在自己的顶栏里（搜索框前面），不在这里。
+ *
+ * ⚠️ 它一度是绝对定位到**窗口左上角**的，在桌面端正好压住 macOS 的
+ * 红绿灯（那三个点是**系统**画的，在 WebView 之上，抢不过）。而且窗口
+ * 左上角是系统的地盘，不该放应用自己的控件。
+ *
+ * 现在它是普通流内元素，位置交给各端的顶栏决定；悬停的联动靠
+ * `.vault-shell:has(...)`（见 components.css）。
+ */
+export function NavTrigger() {
+  return (
+    <button type="button" className="nav-trigger" aria-label="导航" title="导航">
+      <IconItems size={17} />
+    </button>
   );
 }

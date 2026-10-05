@@ -18,7 +18,7 @@ import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  ItemRow, NavDrawer, SecretField, Section, TYPE_LABEL, TypeIcon, countByType,
+  ItemRow, NavDrawer, NavTrigger, SecretField, Section, TYPE_LABEL, TypeIcon, countByType,
   scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
@@ -231,6 +231,10 @@ export function VaultView({ client, onLock }: Props) {
           <div className="below-titlebar vault-list bg-[var(--surface-content)]">
             {/* 这一条也是标题栏的一部分 —— 整条顶部带子都可以拖窗口 */}
             <div className="band" data-tauri-drag-region="deep">
+              {/* 导航开关 —— 和扩展端同一条位置：顶栏最左、搜索框前面。
+                  曾经绝对定位到窗口左上角，那里是 macOS 红绿灯的地盘（系统画的，
+                  抢不过），而且窗口角落不该放应用控件。 */}
+              <NavTrigger />
               <div className="relative flex min-w-0 flex-1 items-center">
                 <IconSearch size={15} className="pointer-events-none absolute left-1.5 text-[var(--ink-tertiary)]" />
                 <input
@@ -289,9 +293,8 @@ export function VaultView({ client, onLock }: Props) {
                 )}
               </div>
               <button onClick={() => setMode({ kind: 'new' })} title="新建条目  ⌘N" className="btn btn-primary">
-                <IconPlus size={14} />
-                新建
-              </button>
+<IconPlus size={15} />
+</button>
             </div>
 
             {folderError && (

@@ -195,25 +195,35 @@
      * `.nav-drawer` 在 flex 行里宽度为 0（面板是绝对定位的），所以这里
      * `left: 0` 就是**整个外壳**的左上角。
      */
-    .nav-drawer-trigger {
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 44px;
-      height: 56px;
+    /*
+     * 抽屉的开关。**流内元素**，放在各端自己的顶栏里（搜索框前面）。
+     *
+     * ⚠️ 它一度绝对定位到窗口左上角 —— 桌面端那里正好是 macOS 的红绿灯，
+     * 而那是**系统**画的、在 WebView 之上，应用控件抢不过。
+     */
+    .nav-trigger {
       display: grid;
       place-items: center;
+      width: 28px;
+      height: 28px;
+      flex: none;
+      border-radius: var(--radius-sm);
       color: var(--ink-secondary);
-      transition: color var(--dur-fast) var(--ease-enter);
+      transition: background-color var(--dur-fast) var(--ease-enter),
+        color var(--dur-fast) var(--ease-enter);
     }
-    .nav-drawer:hover .nav-drawer-trigger,
-    .nav-drawer:focus-within .nav-drawer-trigger { color: var(--ink-secondary); }
+    .nav-trigger:hover { background: var(--surface-hover); color: var(--ink-primary); }
 
     /*
-     * 面板。默认整体移出左边缘（translateX(-100%)），悬停/聚焦时滑回来。
-     * ⚠️ 它是 `.nav-drawer` 的**子元素** —— 鼠标从带子移到面板上时
-     * `:hover` 仍然成立，面板才不会在手底下闪走。
+     * 悬停联动：鼠标在**开关**上，或者已经移进**面板**里，面板就保持展开。
+     *
+     * ⚠️ 用 `:has()` 而不是让开关和面板做兄弟 —— 开关现在住在顶栏里、
+     * 面板是外壳的直接子元素，两者在 DOM 上离得很远。`:has()` 是唯一
+     * 能把「这两个离得远的东西算作一次悬停」表达出来的东西。
      */
+    .vault-shell:has(.nav-trigger:hover) .nav-drawer-panel,
+    .vault-shell:has(.nav-drawer-panel:hover) .nav-drawer-panel { transform: none; }
+
     .nav-drawer-panel {
       position: absolute;
       inset-block: 0;
@@ -251,7 +261,7 @@
     @container shell (min-width: 900px) {
       .nav-drawer { display: flex; flex: none; }
       /* 触发器藏起来：这一档导航常驻，不需要入口 */
-      .nav-drawer-trigger { display: none; }
+      .nav-trigger { display: none; }
       .nav-drawer-panel {
         position: static;
         transform: none;
