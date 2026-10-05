@@ -7,7 +7,19 @@
   <html lang="zh-CN" spellcheck="false">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      `viewport-fit=cover` 是**移动端安全区的前提**，不是可选项。
+
+      不写它，`env(safe-area-inset-*)` **一律返回 0**（见 src/styles.css 里
+      iOS 那一档）—— 而它不报错、不警告，于是「让出了安全区」和「根本没让」
+      在代码上长得一模一样，只有真机上才看得出。
+
+      写上了则相反：内容铺满整块屏幕（含状态栏那一条），顶部留白改由
+      `--titlebar-h` 从 `env()` 拿。桌面浏览器不理会这个属性，所以同一份
+      index.html 两端共用是安全的 —— 桌面端和移动端是**两个构建、
+      一份 HTML**（见 vite.mobile.config.ts）。
+    -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <title>Coffer</title>
   </head>
   <body>
