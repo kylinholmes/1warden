@@ -25,7 +25,7 @@ import {
   summaryOf, iconDomainOf, avatarOf, searchItems, buildReport, checkBreaches,
   parseImport, detectImportFormat, IMPORT_FORMATS, type ImportFormatId,
   type AccountInfo, type FieldDescriptor, type VaultItem,
-  type CaptureDecision,
+  type CaptureDecision, type TwoFactorChallenge,
   totpCode,
 } from '@coffer/vault';
 import { fromBase64 } from '@coffer/crypto';
@@ -226,6 +226,7 @@ async function getPending(tabId: number): Promise<PendingCapture | null> {
 type Request =
   | { type: 'coffer:status' }
   | { type: 'coffer:connect'; serverUrl: string; email: string; masterPassword: string }
+  | { type: 'coffer:connect-2fa'; code: string; provider: number; remember: boolean }
   | { type: 'coffer:lock' }
   | { type: 'coffer:list' }
   | { type: 'coffer:matches'; url: string }
@@ -244,6 +245,35 @@ type Request =
   | { type: 'coffer:reveal'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: 'coffer:webauthn'; payload: unknown };
+
+/**
+ * 服务器要求两步验证 —— `client.connect` 抛这个，调用方要给用户看输入框，
+ * 然后走 `connectWithTwoFactor`。
+ *
+ * 判据是 `twoFactorRequired` 这个标记，和桌面端 `Connect.tsx` 里那份一致
+ * （`packages/vault/src/client.ts` 打上的）。
+ */
+function isTwoFactor(e: unknown): e is TwoFactorChallenge & { providers: number[]; providersInfo?: unknown } {
+  return typeof e === 'object' && e !== null
+    && (e as { twoFactorRequired?: boolean }).twoFactorRequired === true;
+}
+
+/**
+ * 连接成功之后的收尾。
+ *
+ * 抽出来是因为**两条路都要走一遍**：直接 `connect` 成功，以及
+ * `connect` → 两步验证 → `connectWithTwoFactor` 成功。写两遍的话，
+ * 以后加一步（比如刷新某种缓存）只会加到其中一条上。
+ */
+async function finishConnect(c: VaultClient) {
+  const session = c.getSession();
+  const key = session.getKey();
+  if (!key) throw new Error('解锁后拿不到密钥');
+  await sessions.save(getClient().exportState());
+  // 解锁之后要把角标补上 —— 见 refreshBadges 的说明
+  await refreshBadges();
+  return { ok: true, itemCount: session.items.length };
+}
 
 ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
   const req = msg as { type?: string };
@@ -409,18 +439,46 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       };
     }
 
+    /*
+     * 解锁。
+     *
+     * ⚠️ **服务器要求两步验证时，这里必须把 challenge 回给弹窗，而不是抛错。**
+     *
+     * 抛出去的话消息层会把它当成一般错误，弹窗显示 `apiMessageOf(e)` ——
+     * 而 challenge 没有 `kind`，于是**直接把英文原文显示给用户**，
+     * 而且他永远没有输入验证码的机会。开了两步验证的人因此
+     * **完全登不进扩展**。见 `@coffer/ui` 的 `TwoFactorForm` 顶部。
+     */
     case 'coffer:connect': {
       const c = await unlockedClient();
-      await c.connect({
-        serverUrl: req.serverUrl, email: req.email, masterPassword: req.masterPassword,
-      });
-      const session = c.getSession();
-      const key = session.getKey();
-      if (!key) throw new Error('解锁后拿不到密钥');
-      await sessions.save(getClient().exportState());
-      // 解锁之后要把角标补上 —— 见 refreshBadges 的说明
-      await refreshBadges();
-      return { ok: true, itemCount: session.items.length };
+      try {
+        await c.connect({
+          serverUrl: req.serverUrl, email: req.email, masterPassword: req.masterPassword,
+        });
+      } catch (e) {
+        if (isTwoFactor(e)) {
+          /*
+           * ⚠️ 这一步之后客户端**必须保持存活**，直到 `coffer:connect-2fa`
+           * 回来 —— `connectWithTwoFactor` 用的是 `connect` 存下来的中间状态。
+           *
+           * MV3 的 service worker 空闲约 30 秒会被杀。用户去手机上取验证码
+           * 完全可能超过这个时间，那时中间状态就没了，他只能从头再来一遍。
+           * 这是**降级**（重试一次即可），不是死路 —— 比现在「永远登不进」好得多。
+           */
+          return {
+            ok: false,
+            twoFactor: { providers: e.providers, providersInfo: e.providersInfo },
+          };
+        }
+        throw e;
+      }
+      return await finishConnect(c);
+    }
+
+    case 'coffer:connect-2fa': {
+      const c = await unlockedClient();
+      await c.connectWithTwoFactor(req.code, req.provider, req.remember);
+      return await finishConnect(c);
     }
 
     case 'coffer:lock': {

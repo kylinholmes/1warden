@@ -7,7 +7,7 @@ import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, NavTrigger, Section,
-  SecurityReportView,
+  SecurityReportView, TwoFactorForm,
   STRENGTH_LABELS, apiMessageOf, countByType, crackSentence,
   host, iconStoreFor,
   scheduleClipboardClear, typeDestinations,
@@ -126,6 +126,14 @@ export function Popup() {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
+  /**
+   * 服务器要求两步验证时拿到的挑战。
+   *
+   * 它**不是错误** —— 是解锁流程的下一步（见 `@coffer/ui` 的 `TwoFactorForm`）。
+   * 以前扩展端完全没有这一步，于是开了两步验证的 Vaultwarden 用户
+   * 根本登不进来。
+   */
+  const [challenge, setChallenge] = useState<{ providers: number[] } | null>(null);
 
   /*
    * ── 主列表与搜索
@@ -412,15 +420,43 @@ export function Popup() {
         <div className="vault-list">
         {!status.unlocked ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
-            <ConnectForm busy={busy} onSubmit={async (p) => {
-              setBusy(true); setError(null);
-              try {
-                await send({ type: 'coffer:connect', ...p });
-                await refresh();
-              } catch (e) {
-                setError(apiMessageOf(e));
-              } finally { setBusy(false); }
-            }} />
+            {challenge === null ? (
+              <ConnectForm busy={busy} onSubmit={async (p) => {
+                setBusy(true); setError(null);
+                try {
+                  const r = await send<{ ok: boolean; twoFactor?: { providers: number[] } }>({
+                    type: 'coffer:connect', ...p,
+                  });
+                  /*
+                   * ⚠️ 两步验证**不是错误** —— 是流程的下一步。
+                   * 以前这里没有这个分支，challenge 被当异常抛上来、
+                   * 当成一般错误显示，用户永远没有输入验证码的机会。
+                   */
+                  if (r.twoFactor) { setChallenge(r.twoFactor); return; }
+                  await refresh();
+                } catch (e) {
+                  setError(apiMessageOf(e));
+                } finally { setBusy(false); }
+              }} />
+            ) : (
+              <>
+                <h1 className="mb-4 text-md font-medium text-[var(--ink-secondary)]">需要两步验证</h1>
+                <TwoFactorForm
+                  providers={challenge.providers}
+                  busy={busy}
+                  onSubmit={async ({ code, provider, remember }) => {
+                    setBusy(true); setError(null);
+                    try {
+                      await send({ type: 'coffer:connect-2fa', code, provider, remember });
+                      setChallenge(null);
+                      await refresh();
+                    } catch (e) {
+                      setError(apiMessageOf(e));
+                    } finally { setBusy(false); }
+                  }}
+                />
+              </>
+            )}
           </div>
         ) : (
           <>

@@ -2,7 +2,8 @@ import { useState, useRef, useEffect, type FormEvent } from 'react';
 import type { VaultClient, TwoFactorChallenge } from '@coffer/vault';
 import { probeCertificate, trustCertificate, type CertInfo } from '../trust';
 import {
-  IconAlert, IconArrowLeft, IconChevronDown, IconGlobe, IconLock, IconPlus, IconServer, IconSpinner, apiMessageOf,
+  IconAlert, IconArrowLeft, IconChevronDown, IconGlobe, IconLock, IconPlus, IconServer, IconSpinner,
+  TwoFactorForm, apiMessageOf,
 } from '@coffer/ui';
 
 interface Props {
@@ -17,12 +18,6 @@ function isTwoFactor(e: unknown): e is TwoFactorChallenge & { __twoFactor: true 
 function isCertUntrusted(e: unknown): e is { kind: 'certUntrusted'; fingerprint?: string } {
   return (e as { kind?: string } | null)?.kind === 'certUntrusted';
 }
-
-/** 两步验证方式的名称 —— 数字来自官方枚举 */
-const PROVIDER_NAME: Record<number, string> = {
-  0: '验证器应用', 1: '邮箱', 2: 'Duo', 3: 'YubiKey',
-  5: '记住的设备', 6: '组织 Duo', 7: '安全密钥', 8: '恢复代码',
-};
 
 /**
  * ── 记住的账户
@@ -90,8 +85,8 @@ export function Connect({ client, onConnected }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
-  const [code, setCode] = useState('');
-  const [remember, setRemember] = useState(true);
+  /* 验证码和「记住这台设备」现在由 `TwoFactorForm` 自己管 —— 那两个状态
+     只活在那一屏里，提到这里没有意义，而提到这里正是扩展端漏掉这一步的原因 */
   const [cert, setCert] = useState<CertInfo | null>(null);
 
   /**
@@ -159,12 +154,11 @@ export function Connect({ client, onConnected }: Props) {
     await doConnect();
   }
 
-  async function submitCode(e: FormEvent) {
-    e.preventDefault();
+  async function submitCode(code: string, provider: number, remember: boolean) {
     setBusy(true);
     setError(null);
     try {
-      await client.connectWithTwoFactor(code.trim(), challenge?.providers[0] ?? 0, remember);
+      await client.connectWithTwoFactor(code, provider, remember);
       onConnected();
     } catch (err) {
       setError(apiMessageOf(err));
@@ -238,26 +232,12 @@ export function Connect({ client, onConnected }: Props) {
               onTrust={trustAndRetry}
             />
           ) : challenge ? (
-            <form onSubmit={submitCode} className="space-y-4">
-              <p className="text-sm text-[var(--ink-secondary)]">
-                可用方式：{challenge.providers.map((p) => PROVIDER_NAME[p] ?? `方式 ${p}`).join('、')}
-              </p>
-              <Field label="验证码">
-                <input
-                  type="text" required inputMode="numeric" autoFocus value={code}
-                  onChange={(e) => setCode(e.target.value)}
-                  className="field secret text-center text-xl tracking-[0.3em]"
-                />
-              </Field>
-              <label className="flex items-center gap-2.5 text-sm text-[var(--ink-secondary)]">
-                <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-                记住这台设备
-              </label>
-              <button type="submit" disabled={busy} className="btn btn-primary w-full py-2.5">
-                {busy && <IconSpinner size={15} />}
-                {busy ? '验证中…' : '验证'}
-              </button>
-            </form>
+            /* 和扩展端**同一个组件** —— 那里以前完全没有这一步（见组件顶部） */
+            <TwoFactorForm
+              providers={challenge.providers}
+              busy={busy}
+              onSubmit={({ code, provider, remember }) => { void submitCode(code, provider, remember); }}
+            />
           ) : view === 'pick' ? (
             <AccountPicker
               accounts={accounts}
