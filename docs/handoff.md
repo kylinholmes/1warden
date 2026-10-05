@@ -109,6 +109,30 @@ interface ListSection { label: string | null; items: ItemSummary[] }
 这是这个改动唯一有风险的地方 —— `VaultView` 的详情栏仍需要整条
 `VaultItem`，别把它一起降级了。
 
+**⚠️ 工作树里有一份没提交的草稿**：`packages/ui/src/VaultListColumn.tsx`
+（约 200 行，按上面的接口写完了，`packages/ui/src/index.ts` 加了导出）。
+**但它两端都还没接进去** —— 也就是说它现在**什么都没做**，
+而且没跑过 typecheck。用户叫停时正做到这一步。
+
+接手的处理方式二选一：
+
+- **接着做**：把它接到 `VaultView` 和 `Popup` 上，然后按第七节截图核对两端
+- **丢掉**：`git checkout packages/ui/src/index.ts && rm packages/ui/src/VaultListColumn.tsx`，
+  按上面的接口重写。设计意图在草稿的注释里，丢掉的信息量不大
+
+⚠️ 别把它当成「已经做好的部分」—— 没被任何地方引用的组件，
+在「产物看起来是好的」那一族里算是最容易被误认的一种。
+
+### 已经做完的那半步：CSS 已经合一了（`8d08990`）
+
+`.band` / `.card` / `.btn*` / `.field*` 原来**扩展端手抄了一份**，
+而且抄歪了：`--band-h` 是 54px，扩展端写死 `52px` ——
+弹窗的顶部带子比桌面端矮 2px，两端各自看都正常。
+
+现在这一组在 `packages/ui/src/components.css` 里只有一份，
+`extension/styles.css` 里那块拷贝已删。`field-bare` 也因此在弹窗产物里有了
+（之前没有，而共享列表栏要用它）。
+
 ### ② 移动端**一次都没在设备上跑过**
 
 编得过、构建得出来、能在手机视口下截图核对。但**没启动过**。
