@@ -3,13 +3,16 @@
  *
  * 图标的地址在**服务端**（`/icons/{域名}/icon.png`），而 WebView 的 origin
  * 是 `tauri://localhost`，跨源会被拦掉 —— 所以和其余请求一样走 Rust。
- * 详见 `transport.ts` 顶部。
+ *
+ * ⚠️ 走**宿主**（`host().fetch`）而不是直接 `tauriFetch`：扩展端这一步是
+ * 直接 `fetch`（它有 host permission，不受 CORS 限制），两边只差这一个调用 ——
+ * 而那正是宿主该吸收的东西。见 `@coffer/ui/host`。
  *
  * 这个接口**不需要认证**（实测：不带任何凭据也返回 200），所以这里不挂
  * 任何 token。服务端也因此无法把请求归到某个用户 —— 图标是实例级共享缓存。
  */
 import { IconStore, type IconDiskCache } from '@coffer/vault';
-import { tauriFetch } from './transport';
+import { host } from '@coffer/ui';
 
 /**
  * 按服务端地址缓存一个 store。
@@ -27,7 +30,7 @@ export function iconStoreFor(serverUrl: string): IconStore {
     serverUrl,
     disk: indexedDbIconDisk,
     fetchBytes: async (url) => {
-      const res = await tauriFetch(url, { headers: { Accept: '*/*' } });
+      const res = await host().fetch(url, { headers: { Accept: '*/*' } });
       // 图标取不到不是错误 —— 由 IconStore 回退到彩色徽标
       if (!res.ok) return null;
       return new Uint8Array(await res.arrayBuffer());

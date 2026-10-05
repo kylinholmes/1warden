@@ -7,7 +7,7 @@ import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, Section,
-  countByType, scheduleClipboardClear, typeDestinations,
+  countByType, host, scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
@@ -129,7 +129,7 @@ export function Popup() {
     const url = status?.account?.serverUrl;
     if (!url) return null;
     return iconStoreFor(url, async (u) => {
-      const r = await fetch(u);
+      const r = await host().fetch(u);
       if (!r.ok) return null;
       return new Uint8Array(await r.arrayBuffer());
     });
