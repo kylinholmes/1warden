@@ -231,6 +231,38 @@ input[type='range'] {
  * ────────────────────────────────────────────────────────────────
  */
 @layer components {
+  /*
+   * ── 侧栏折叠 ──
+   *
+   * 窄窗口下侧栏收成一条图标（214 → 56）。这是「三栏 → 折叠 → 竖向」里的
+   * 那个「折叠」，此前完全缺失：侧栏宽度是写死的 `--rail-w`，
+   * 窗口再窄它也占着 214px。
+   *
+   * ⚠️ 用**容器查询**而不是 `@media` —— 和 `.vault-shell` 那套理由一样：
+   * 决定要不要收起来的是**这一栏还剩多少宽度**，不是视口。
+   *
+   * ⚠️ 900px 这条线：rail 214 + 列表 336 + 详情至少 280 ≈ 830，
+   * 再留一点余量。低于它就先牺牲侧栏的文字，而不是让详情没地方放。
+   *
+   * 折叠后**只留图标**，不留 tooltip 之外的信息 —— 计数、备注、快捷键提示
+   * 全藏掉。塞不下的东西半显示比不显示更糟。
+   */
+  .app-sidebar { width: var(--rail-w); }
+
+  @container shell (max-width: 900px) {
+    .app-sidebar { width: 56px; }
+    .app-sidebar .nav-label,
+    .app-sidebar .nav-count,
+    .app-sidebar .nav-section-title,
+    .app-sidebar .nav-brand-text,
+    .app-sidebar .nav-kbd,
+    .app-sidebar .nav-extra,
+    .app-sidebar [data-nav-new-folder] { display: none; }
+    .app-sidebar .nav-item { justify-content: center; padding-inline: 0; }
+    .app-sidebar .nav-band { justify-content: center; padding-inline: 0; }
+    .app-sidebar .nav-account { justify-content: center; }
+  }
+
   /* ── 表面 ───────────────────────────────────────────── */
 
   /* 顶部的带子 —— 三个面板共用同一条水平线 */

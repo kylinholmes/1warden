@@ -550,7 +550,7 @@ function Sidebar(props: {
       材质，右边两块用不透明的表面盖住，只剩这一条把材质透出来。
       见 styles.css 的 --surface-glass —— α 是算出来的，不是调出来的。
     */
-    <nav className="below-titlebar flex w-[var(--rail-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-glass)]">
+    <nav className="app-sidebar below-titlebar flex shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-glass)]">
       {/*
         和列表栏、详情栏共用 `.band` 的高度 —— 三个面板的顶部对齐在同一条线上。
 
@@ -559,11 +559,11 @@ function Sidebar(props: {
         （Tauri 的 drag.js 会认出 button/input/a/label）。
         `pl-[var(--traffic-inset)]` 给系统红绿灯让位（只有 macOS 有）。
       */}
-      <div className="band pl-[var(--traffic-inset)]" data-tauri-drag-region="deep">
+      <div className="band nav-band pl-[var(--traffic-inset)]" data-tauri-drag-region="deep">
         <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
           <IconLock size={13} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-lg font-semibold tracking-[-0.01em]">Coffer</span>
+        <span className="nav-brand-text min-w-0 flex-1 truncate text-lg font-semibold tracking-[-0.01em]">Coffer</span>
         {/* 设置入口在顶栏右端。**不放进底部账户区**：那里是「你是谁 / 离开」，
             设置是「这个应用怎么运作」，和账户不是一类东西 */}
         <button
@@ -620,11 +620,12 @@ function Sidebar(props: {
           能建出第一个文件夹 —— 于是它对用户永远不会出现，整套文件夹功能等于不存在。
         */}
         <div className="mt-4 mb-1 flex items-center justify-between pl-2.5 pr-1">
-          <span className="text-xs font-medium text-[var(--ink-secondary)]">文件夹</span>
+          <span className="nav-section-title text-xs font-medium text-[var(--ink-secondary)]">文件夹</span>
           <button
             onClick={() => { setCreating(true); setMenuFor(null); }}
             title="新建文件夹"
             aria-label="新建文件夹"
+            data-nav-new-folder
             className="rounded-[var(--radius-sm)] p-1 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
           >
             <IconPlus size={13} />
@@ -724,7 +725,7 @@ function Sidebar(props: {
       {props.showTypes && props.typeCounts.length > 0 && (
         <div>
           <div className="mb-1 mt-3 flex items-center px-2">
-            <span className="text-xs font-medium text-[var(--ink-secondary)]">类别</span>
+            <span className="nav-section-title text-xs font-medium text-[var(--ink-secondary)]">类别</span>
           </div>
           <ul className="space-y-0.5">
             {props.typeCounts.map((t) => (
@@ -742,7 +743,7 @@ function Sidebar(props: {
       )}
 
       <div className="border-t border-[var(--border-subtle)] p-2.5">
-        <div className="mb-1 flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5">
+        <div className="nav-account mb-1 flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5">
           <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-2xs font-semibold text-[var(--accent)]">
             {props.account.slice(0, 1).toUpperCase() || '?'}
           </span>
@@ -765,11 +766,11 @@ function Sidebar(props: {
         </div>
         <button
           onClick={props.onLock}
-          className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-sm text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+          className="nav-item flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-sm text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
         >
           <IconLock size={15} />
-          <span className="flex-1">锁定</span>
-          <kbd className="text-2xs text-[var(--ink-secondary)]">⌘L</kbd>
+          <span className="nav-label flex-1">锁定</span>
+          <kbd className="nav-kbd text-2xs text-[var(--ink-secondary)]">⌘L</kbd>
         </button>
       </div>
     </nav>
@@ -792,7 +793,7 @@ function NavItem(props: {
           强调色留给「可以点的动作」，用它给导航项上色会让界面到处是青色 */}
       <button
         onClick={props.onClick}
-        className={`flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 py-[7px] text-left text-sm transition-colors duration-[var(--dur-fast)] ${
+        className={`nav-item flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 py-[7px] text-left text-sm transition-colors duration-[var(--dur-fast)] ${
           props.active
             ? 'bg-[var(--surface-selected)] font-medium text-[var(--ink-primary)]'
             : 'text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]'
@@ -801,13 +802,14 @@ function NavItem(props: {
         <span className={props.active ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}>
           {props.icon}
         </span>
-        <span className="min-w-0 flex-1 truncate">{props.label}</span>
+        <span className="nav-label min-w-0 flex-1 truncate">{props.label}</span>
         {/* 计数是字，不是图形 —— 在玻璃上必须用次级墨（理由见 Sidebar 的注释） */}
         {props.count !== undefined && (
-          <span className="shrink-0 text-2xs tabular-nums text-[var(--ink-secondary)]">{props.count}</span>
+          <span className="nav-count shrink-0 text-2xs tabular-nums text-[var(--ink-secondary)]">{props.count}</span>
         )}
       </button>
-      {props.children}
+      {/* 文件夹项的重命名/删除菜单 —— 折叠态（56px）放不下，跟着一起藏 */}
+      {props.children && <div className="nav-extra">{props.children}</div>}
     </li>
   );
 }

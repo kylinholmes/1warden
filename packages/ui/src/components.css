@@ -117,6 +117,13 @@
       display: flex;
       height: 100%;
       min-height: 0;
+      /*
+       * 导航栏自己的折叠用它 —— 和 `.vault-content` 上那个 `vault` 是
+       * **两个不同的问题**：那个问「列表和详情放不放得下」，这个问
+       * 「侧栏该收起来了吗」。混成一个的话，rail 一展开就会让另一个也误判。
+       */
+      container-type: inline-size;
+      container-name: shell;
     }
 
     /* 列表 + 详情这一块。窄的时候详情绝对定位盖住它，所以这里要 relative */
