@@ -4,7 +4,7 @@ import {
   IDENTITY_LABEL, IconAlert, IconArrowLeft, IconImport, IconPencil, IconStar, ItemIcon, Section, SecretField,
 } from '@coffer/ui';
 import { IconStore, attachmentBytes } from '@coffer/vault';
-import type { ItemSummary } from './Popup';
+import type { ItemSummary } from '@coffer/ui';
 
 /**
  * 第三层：一条记录的详情。
@@ -207,7 +207,16 @@ export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
             size={44}
           />
           <span className="min-w-0 flex-1">
-            <span className="block truncate text-lg font-medium leading-snug">{item.name}</span>
+            {/*
+              ⚠️ 解不开的名字要**说**出来，不能显示成空白 —— 那看起来像这一条
+              本来就是空的。和桌面端 `VaultView` 里同一个做法（斜体 + 三级墨 + 占位词）。
+              摘要把 `name` 和 `nameFailed` 分开之后，每个渲染名字的地方都得自己处理。
+            */}
+            <span className={`block truncate text-lg font-medium leading-snug ${
+              item.nameFailed ? 'italic text-[var(--ink-tertiary)]' : ''
+            }`}>
+              {item.nameFailed ? '无法解密' : item.name}
+            </span>
             {item.summary !== null && (
               <span className="mt-0.5 block truncate text-xs text-[var(--ink-tertiary)]">
                 {item.summary}

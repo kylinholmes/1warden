@@ -26,9 +26,8 @@
 
 const which = new URLSearchParams(location.search).get('state') ?? 'matched';
 
-import { avatarOf, iconDomainOf, searchItems, summaryOf, type VaultItem } from '@coffer/vault';
-import type { ImportPreview, ReportBrief } from '@coffer/ui';
-import type { ItemSummary } from '../extension/popup/Popup';
+import { searchItems, type VaultItem } from '@coffer/vault';
+import { summarise, type ImportPreview, type ReportBrief } from '@coffer/ui';
 
 /**
  * ⚠️ 假数据用**真实的展示函数**算出来，不手写字段。
@@ -93,26 +92,6 @@ const ITEMS: VaultItem[] = [
   loginItem('9', '招商银行 Visa', { type: 'card', rawType: 3, username: 'ZHANG SAN', favorite: true, folderId: 'f2' }),
   loginItem('10', '家里 Wi-Fi 密码', { type: 'secureNote', rawType: 2 }),
 ];
-
-/** 和 `background.ts` 里的 `summarise` 同一套函数 —— 这是它存在的意义 */
-function summarise(item: VaultItem): ItemSummary {
-  const av = avatarOf(item);
-  return {
-    id: item.id,
-    name: item.name,
-    username: item.login?.username ?? null,
-    hasPassword: item.login?.password !== null && item.login?.password !== undefined,
-    hasTotp: item.login?.totp !== null && item.login?.totp !== undefined,
-    uris: (item.login?.uris ?? []).map((u) => u.uri),
-    favorite: item.favorite,
-    folderId: item.folderId,
-    type: item.type,
-    summary: summaryOf(item),
-    iconDomain: iconDomainOf(item),
-    avatarText: av.text,
-    avatarHue: av.hue,
-  };
-}
 
 /** 一条文本 + 一条隐藏 —— 两种情况都要能在预览里看到 */
 const CUSTOM_FIELDS = [

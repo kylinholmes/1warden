@@ -31,7 +31,7 @@ import {
 import { fromBase64 } from '@coffer/crypto';
 import { host } from '@coffer/ui';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
-import { syncCache, kdfCache } from '@coffer/ui';
+import { syncCache, kdfCache, summarise } from '@coffer/ui';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
 import { handleWebauthn, type WebauthnPayload } from './webauthn';
 
@@ -1085,37 +1085,6 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       throw new Error(`未知请求：${unknown.type}`);
     }
   }
-}
-
-/**
- * 列表用的摘要。
- *
- * ⚠️ **不含密码与验证码** —— 明文留在 background，弹窗要填充时再让
- * background 自己去取。少送出去一次就少一分风险，弹窗里也没有任何理由
- * 需要看到它们。
- */
-function summarise(i: VaultItem) {
-  return {
-    id: i.id,
-    name: i.nameFailed ? '无法解密' : i.name,
-    username: i.login?.username ?? null,
-    hasPassword: i.login?.password != null,
-    // 只报「有没有」，不报种子本身
-    hasTotp: i.login?.totp != null,
-    uris: i.login?.uris.map((u) => u.uri) ?? [],
-    favorite: i.favorite,
-    /*
-     * 文件夹 —— 扩展端要和桌面端**对齐**（用户明确要求：这些逻辑两边都要有）。
-     * 只是个 id，不带名字：名字在 `coffer:folders` 那条消息里单独给，
-     * 因为它是**整个库**的一份，跟着每条摘要重复几十遍没道理。
-     */
-    folderId: i.folderId,
-    // 显示用的三个 —— 见 Popup.tsx 里 ItemSummary 的说明
-    type: i.type,
-    summary: summaryOf(i),
-    iconDomain: iconDomainOf(i),
-    ...(() => { const a = avatarOf(i); return { avatarText: a.text, avatarHue: a.hue }; })(),
-  };
 }
 
 /**

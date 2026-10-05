@@ -11,6 +11,9 @@ import {
   host, iconStoreFor, rememberAccount, useAccounts,
   typeDestinations,
   type BreachState, type ImportOutcome, type ImportPreview, type ReportBrief,
+  /* 摘要的类型在共享包里 —— 它原来定义在这个文件里，而 background 和预览桩
+     各抄了一份。见 packages/ui/src/summary.ts */
+  type ItemSummary,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
@@ -47,32 +50,6 @@ import { ItemDetail } from './ItemDetail';
  * 这一行决定「同一条记录看起来是什么样」，两处各写一遍的后果是
  * 同一条在两个地方显示成不同的东西。
  */
-
-/** ⚠️ 导出是为了让 preview 的假数据用**同一个类型** —— 抄一份就会漂 */
-export interface ItemSummary {
-  id: string;
-  name: string;
-  username: string | null;
-  hasPassword: boolean;
-  hasTotp: boolean;
-  uris: string[];
-  favorite: boolean;
-  /** 所属文件夹。和桌面端对齐 —— 那个 `coffer:folders` 给名字，这里只带 id */
-  folderId: string | null;
-
-  /*
-   * ── 显示用的字段 ──
-   *
-   * ⚠️ 和桌面端的快速面板同一个做法：弹窗**拿不到 `VaultItem`**
-   * （它只从 background 收摘要），所以 `summaryOf` / `avatarOf` 那套规则
-   * 在 background 那边算好、随摘要过来。不这样做的话规则要在两处各写一遍。
-   */
-  type: string;
-  summary: string | null;
-  iconDomain: string | null;
-  avatarText: string;
-  avatarHue: number;
-}
 
 interface Status {
   unlocked: boolean;
@@ -842,6 +819,17 @@ function ListSection({ label, items, icons, onOpen }: {
             />
           }
           name={it.name}
+          /*
+           * ⚠️ 这个字段是**必须转发的**：`ItemRow` 靠它把这一行画成斜体 +
+           * 三级墨，并把名字换成「无法解密」。
+           *
+           * 它以前不用传 —— 那时 `summarise` 直接把这五个字**揉进 `name`**。
+           * 摘要有 `nameFailed` 之后，揉进去就不对了（详情、搜索、复制都会
+           * 拿到那五个字），所以改成两个字段分开。分开的代价就是：**每一个
+           * 渲染名字的地方都必须自己转发它，漏一处那一条就显示成空白**。
+           * 桌面端一直传着，弹窗这处当时漏了 —— 类型检查不会报，因为它是可选属性。
+           */
+          nameFailed={it.nameFailed}
           summary={it.summary}
           favorite={it.favorite}
           onClick={() => onOpen(it.id)}

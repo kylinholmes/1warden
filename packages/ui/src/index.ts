@@ -55,3 +55,4 @@ export * from './Generator';
 export * from './ImportView';
 export * from './FloatingPanel';
 export * from './ItemEditor';
+export * from './summary';
