@@ -3,6 +3,7 @@ import { VaultClient, type SessionStatus } from '@coffer/vault';
 import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
+import { Loading } from './screens/Loading';
 import { screenFor } from './screens/screen-for';
 import { IconAlert } from '@coffer/ui';
 import { ToastProvider } from './components/Toast';
@@ -55,6 +56,8 @@ export function App() {
     <ToastProvider>
       {screen === 'vault' ? (
         <VaultView client={client} onLock={handleLock} />
+      ) : screen === 'loading' ? (
+        <Loading account={session.account?.email ?? ''} />
       ) : screen === 'unlock' ? (
         <Unlock
           client={client}
