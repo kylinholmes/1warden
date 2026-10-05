@@ -10,6 +10,8 @@
     "build:desktop": "cd apps/desktop && bun run tauri build",
     "build:extension": "cd apps/desktop && bun run build:extension",
     "build:extension-firefox": "bun run build:extension && bun run scripts/build-extension-firefox.ts",
+    "check": "bun run typecheck && bun run test",
+    "check:all": "bun run check && bun run e2e:extension",
     "dev:desktop": "cd apps/desktop && bun run tauri dev",
     "dev:proxy": "bun run scripts/dev-proxy.ts",
     "e2e": "bun run scripts/e2e-desktop.ts",

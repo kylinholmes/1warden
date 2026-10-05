@@ -394,6 +394,24 @@ bun run scripts/e2e-extension.ts
 ⚠️ 这是**某一次运行**的结果，不是持续保证 —— 它依赖跑着的 Vaultwarden 和
 一份测试账号。放进 CI 之前得先把前置固化下来。
 
+## 三·七、提交前跑什么
+
+```
+bun run check        # typecheck + 838 个测试 —— 不需要任何前置
+bun run check:all    # 再加端到端（先跑一次 e2e:extension:setup）
+```
+
+## ⚠️ 这个仓库**没有 CI**，而且现在加不了
+
+查过了：根目录没有 `.github`、没有 `.gitlab-ci.yml`，
+**而且没有 git remote** —— 仓库是纯本地的。
+
+所以加一份 `.github/workflows/ci.yml` 是写一个**不会运行**的文件。
+那正是这一整个会话在防的那类东西：产物看起来是好的，实际什么都没做。
+
+`check` / `check:all` 就是那份 CI 会跑的内容。等有了 remote，
+配置本身是五行的事 —— 缺的是「这个仓库托管在哪」，那是决定，不是实现。
+
 ## 四、验收
 
 用户给的判据：
