@@ -18,7 +18,7 @@ import { useToast } from '../components/Toast';
 import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
-  IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash, TypeIcon,
+  IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash, ItemRow, TypeIcon,
 } from '@coffer/ui';
 
 interface Props {
@@ -291,13 +291,17 @@ export function VaultView({ client, onLock }: Props) {
 
             <ul className="flex-1 overflow-y-auto px-2 py-2">
               {filtered.map((item) => (
-                <ItemRow
-                  key={item.id}
-                  item={item}
-                  icons={icons}
-                  selected={item.id === selectedId}
-                  onClick={() => setSelectedId(item.id)}
-                />
+                <li key={item.id}>
+                  <ItemRow
+                    icon={<ItemIcon item={item} store={icons} />}
+                    name={item.name}
+                    nameFailed={item.nameFailed}
+                    summary={summaryOf(item)}
+                    favorite={item.favorite}
+                    selected={item.id === selectedId}
+                    onClick={() => setSelectedId(item.id)}
+                  />
+                </li>
               ))}
               {filtered.length === 0 && (
                 <li className="px-4 py-10 text-center">
@@ -794,50 +798,17 @@ function NavItem(props: {
   );
 }
 
-function ItemRow({ item, selected, onClick, icons }: {
-  item: VaultItem; selected: boolean; onClick: () => void; icons: IconStore | null;
-}) {
-  /*
-   * 第二行取自 `@coffer/vault` 的 `summaryOf`，不是在这里现推。
-   *
-   * 桌面端和浏览器插件显示同一个列表，各推各的迟早会出现
-   * 「同一条在插件里显示 bilibili、在桌面端显示 www.bilibili.com」。
-   * 那里也定了两条硬规则：卡号必须掩码、没有可显示的就返回 null
-   * （不填「登录信息」这种每行都一样的占位词）。
-   */
-  const subtitle = summaryOf(item);
-
-  return (
-    <li>
-      <button
-        onClick={onClick}
-        /*
-         * 行高：两行文字（名字 + 摘要）配上 34px 的图标。
-         * `items-start` 而不是 `items-center` —— 有摘要的那几行比没摘要的
-         * 高一截，居中对齐会让图标在列表里上下跳动。
-         */
-        className={`flex w-full items-start gap-2.5 rounded-[var(--radius-md)] px-2 py-1.5 text-left transition-colors duration-[var(--dur-fast)] ${
-          selected ? 'bg-[var(--surface-selected)]' : 'hover:bg-[var(--surface-hover)]'
-        }`}
-      >
-        <ItemIcon item={item} store={icons} />
-        <span className="min-w-0 flex-1 py-0.5">
-          <span className={`block truncate text-md leading-snug ${
-            item.nameFailed ? 'italic text-[var(--ink-tertiary)]' : ''
-          }`}>
-            {item.nameFailed ? '无法解密' : item.name}
-          </span>
-          {subtitle !== null && (
-            <span className="mt-0.5 block truncate text-xs leading-snug text-[var(--ink-tertiary)]">
-              {subtitle}
-            </span>
-          )}
-        </span>
-        {item.favorite && <IconStar size={13} filled className="mt-1.5 shrink-0 text-[var(--caution)]" />}
-      </button>
-    </li>
-  );
-}
+/*
+ * `ItemRow` 已经搬到 `@coffer/ui` —— 桌面端和浏览器插件**共用同一个**。
+ *
+ * 搬家的理由不是「少写点代码」：这一行决定「同一条记录看起来是什么样」，
+ * 两处各写一遍的后果是**同一条在两个地方显示成不同的东西**，
+ * 而用户会以为记错了、甚至以为丢数据。
+ *
+ * 组件本身不碰 `VaultItem` —— 图标由调用方给（两端的取法确实不同：
+ * 桌面跨源被 CORS 拦、得走 Rust，弹窗有 host_permissions、直接 fetch），
+ * 第二行由调用方传 `summaryOf` 的结果。
+ */
 
 /**
  * 就地输入 —— 新建 / 重命名文件夹用。

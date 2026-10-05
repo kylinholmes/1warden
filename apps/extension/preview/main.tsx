@@ -27,3 +27,20 @@ createRoot(document.getElementById('root')!).render(
     <Popup />
   </StrictMode>,
 );
+
+/*
+ * `?state=detail`：载入后**真的去点第一条**，好截图核对第三层。
+ *
+ * ⚠️ 不是直接渲染 `<ItemDetail>` —— 那样验的只是「这个组件单独长什么样」，
+ * 验不到「点进去」这件事本身（导航、返回、列表还在不在）。
+ * 走真实点击路径，验的才是真的。
+ *
+ * 弹窗自己的状态不该为截图开后门，所以这段留在 preview 里。
+ */
+if (new URLSearchParams(location.search).get('state') === 'detail') {
+  setTimeout(() => {
+    const row = [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('GitHub'));
+    row?.click();
+  }, 400);
+}

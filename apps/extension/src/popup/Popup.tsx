@@ -5,22 +5,28 @@ import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
   IconAlert, IconCheck, IconClose, IconCopy, IconGlobe, IconGlyph, IconKey, IconLock,
-  IconSearch, IconSpinner, IconStar,
+  IconSearch, IconSpinner, IconStar, ItemRow,
 } from '@coffer/ui';
+import { Rail, type Destination } from './Rail';
+import { ItemDetail } from './ItemDetail';
 
 /**
  * 扩展弹窗。
  *
- * 三种状态：未登录 / 已解锁但本站没有匹配条目 / 已解锁且匹配到了。
- * 无论哪种，用户最多两次点击就能拿到密码 —— 密码管理器弹窗的全部意义
- * 就是「别让我离开当前页面去做别的事」。
+ * 弹窗的**壳**：三层布局的装配与状态，加上中间那一层（列表）。
  *
- * ── 版面
+ * ── 三层（Material 的 navigation rail + list-detail）
  *
- * 360px 宽的一条，所以只做**一栏**：顶部一条 `.band` 放品牌和锁定，
- * 下面依次是提示、待确认的保存、当前站点、匹配到的条目、生成器。
- * 顺序就是优先级 —— 需要用户做决定的（保存 / 填充）排在上面，
- * 浏览性的（生成器）排在最后。
+ *   1. `Rail.tsx`        去哪一类 —— 全部 / 收藏 / 类别 / 生成器
+ *   2. 本文件            这一类里有什么 —— 搜索 + 分组列表
+ *   3. `ItemDetail.tsx`  这一条是什么 —— 盖住列表，带返回
+ *
+ * ⚠️ 早先是「把桌面端的三栏压成一栏」：分类、列表、详情全糊在一起，
+ * 于是每一行又宽又高、列表和详情都不像。三层的划分让每层只干一件事。
+ *
+ * 列表行本体来自 `@coffer/ui` 的 `ItemRow`，**和桌面端共用** ——
+ * 这一行决定「同一条记录看起来是什么样」，两处各写一遍的后果是
+ * 同一条在两个地方显示成不同的东西。
  */
 
 /** ⚠️ 导出是为了让 preview 的假数据用**同一个类型** —— 抄一份就会漂 */
@@ -117,6 +123,19 @@ export function Popup() {
   /** 搜索结果。`null` = 还没搜完 —— 和「搜到了 0 条」是两件事，不能混 */
   const [hits, setHits] = useState<ItemSummary[] | null>(null);
 
+  /*
+   * ── 三层的状态
+   *
+   * `dest`   第一层 rail 选中的分类
+   * `openId` 第三层正在看的那一条；`null` = 停在列表层
+   *
+   * 这两个都不是「模式」，是**位置** —— 详情盖住列表而不是换个模式，
+   * 所以退回来（onBack）只是把 openId 清掉，列表原样还在，搜索词也还在。
+   */
+  const [dest, setDest] = useState<Destination>('all');
+  const [railExpanded, setRailExpanded] = useState(false);
+  const [openId, setOpenId] = useState<string | null>(null);
+
   // 解锁后拉一次主列表。锁定或登出时清掉 —— 留着的话下次解锁会先闪出旧数据
   useEffect(() => {
     if (!status?.unlocked) { setBrowse([]); return; }
@@ -195,99 +214,156 @@ export function Popup() {
     );
   }
 
+  /*
+   * 详情层要找得到那一条 —— 从三个列表里找，而不是只看当前这一个：
+   * 用户可能搜完、点进去、又把搜索清掉，那时候当前列表里已经没有它了。
+   */
+  const openItem = openId === null ? null
+    : [...items, ...browse, ...(hits ?? [])].find((i) => i.id === openId) ?? null;
+
+  /** 当前分类里有没有这一条。分类体系和桌面端侧栏是同一套 —— 见 `Rail.tsx` */
+  const inDest = (i: ItemSummary): boolean => {
+    switch (dest) {
+      case 'all': return true;
+      case 'favorites': return i.favorite;
+      case 'generator': return false;
+      default: return i.type === dest;
+    }
+  };
+
   return (
-    <div className="screen-in flex flex-col">
-      <PopupBand unlocked={status.unlocked} onLock={async () => {
-        await send({ type: 'coffer:lock' });
-        await refresh();
-      }} />
+    /*
+      显式高度而不是让内容撑 —— 三层的内部滚动需要一个**确定**的高度，
+      而且弹窗应该是个稳定的「窗口」：切分类、进详情都不该让整个弹窗
+      忽高忽低。560 是留了余量的选择（Chrome 的弹窗上限是 600）。
+    */
+    <div className="screen-in flex h-[560px]">
+      <Rail
+        current={dest}
+        onSelect={(d) => { setDest(d); setOpenId(null); }}
+        expanded={railExpanded}
+        onToggleExpanded={() => setRailExpanded((v) => !v)}
+        onLock={() => {
+          void (async () => {
+            await send({ type: 'coffer:lock' });
+            setOpenId(null);
+            await refresh();
+          })();
+        }}
+      />
 
-      <div className="flex flex-col gap-3 p-3.5">
-        {error && <Note tone="risk">{error}</Note>}
-        {notice && <Note tone="accent">{notice}</Note>}
-
-        {status.unlocked && pending && (
-          <SavePrompt
-            pending={pending}
-            busy={busy}
-            onSave={async () => {
-              setBusy(true); setError(null);
-              try {
-                await send({ type: 'coffer:save-capture', ...(tabId === undefined ? {} : { tabId }) });
-                setPending(null);
-                setNotice(pending.action === 'update' ? '已更新' : '已保存');
-                window.close();
-              } catch (e) {
-                setError(e instanceof Error ? e.message : '保存失败');
-              } finally { setBusy(false); }
-            }}
-            onDismiss={async () => {
-              await send({ type: 'coffer:dismiss-capture', ...(tabId === undefined ? {} : { tabId }) });
-              setPending(null);
-            }}
-          />
+      <div className="flex min-w-0 flex-1 flex-col">
+        {error && (
+          <div className="shrink-0 px-3.5 pt-3"><Note tone="risk">{error}</Note></div>
+        )}
+        {notice && (
+          <div className="shrink-0 px-3.5 pt-3"><Note tone="accent">{notice}</Note></div>
         )}
 
         {!status.unlocked ? (
-          <ConnectForm busy={busy} onSubmit={async (p) => {
-            setBusy(true); setError(null);
-            try {
-              await send({ type: 'coffer:connect', ...p });
-              await refresh();
-            } catch (e) {
-              setError(e instanceof Error ? e.message : '连接失败');
-            } finally { setBusy(false); }
-          }} />
+          <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
+            <ConnectForm busy={busy} onSubmit={async (p) => {
+              setBusy(true); setError(null);
+              try {
+                await send({ type: 'coffer:connect', ...p });
+                await refresh();
+              } catch (e) {
+                setError(e instanceof Error ? e.message : '连接失败');
+              } finally { setBusy(false); }
+            }} />
+          </div>
+        ) : openItem !== null ? (
+          /* 第三层：盖住列表。顶上那条 app bar 是唯一的退路，所以它必须在 */
+          <ItemDetail
+            item={openItem}
+            icons={icons}
+            busy={busy}
+            onBack={() => setOpenId(null)}
+            onFill={() => { void fill(openItem.id); }}
+          />
         ) : (
           <>
-            <SiteLine url={tabUrl} account={status.account?.email ?? null} />
-            <SearchBox value={query} onChange={setQuery} />
+            <header className="flex h-14 shrink-0 items-center border-b border-[var(--border-subtle)] px-3.5">
+              <SiteLine url={tabUrl} account={status.account?.email ?? null} />
+            </header>
 
-            {/*
-              列表区**自己滚**，不让整个弹窗长起来 ——
-              否则几十条条目会把搜索框和生成器顶出可视范围，
-              而那两个恰恰是列表变长时更需要够得着的东西。
-            */}
-            <div className="flex max-h-[340px] flex-col gap-3 overflow-y-auto">
-              {query.trim() !== '' ? (
-                hits === null ? (
-                  <p className="px-1 py-4 text-center text-xs text-[var(--ink-tertiary)]">
-                    正在搜索…
-                  </p>
-                ) : hits.length === 0 ? (
-                  <Empty
-                    reason={`没有找到和「${query.trim()}」有关的条目`}
-                    hint="搜索会匹配名称、用户名、网址和备注"
-                  />
-                ) : (
-                  <ItemList label="搜索结果" items={hits} icons={icons} onFill={fill} />
-                )
+            <div className="flex min-h-0 flex-1 flex-col gap-3 p-3.5">
+              {pending && (
+                <SavePrompt
+                  pending={pending}
+                  busy={busy}
+                  onSave={async () => {
+                    setBusy(true); setError(null);
+                    try {
+                      await send({ type: 'coffer:save-capture', ...(tabId === undefined ? {} : { tabId }) });
+                      setPending(null);
+                      setNotice(pending.action === 'update' ? '已更新' : '已保存');
+                      window.close();
+                    } catch (e) {
+                      setError(e instanceof Error ? e.message : '保存失败');
+                    } finally { setBusy(false); }
+                  }}
+                  onDismiss={async () => {
+                    await send({ type: 'coffer:dismiss-capture', ...(tabId === undefined ? {} : { tabId }) });
+                    setPending(null);
+                  }}
+                />
+              )}
+
+              {dest === 'generator' ? (
+                <Generator />
               ) : (
                 <>
-                  {items.length > 0 && (
-                    <ItemList label="此站点" items={items} icons={icons} onFill={fill} />
-                  )}
-                  {/*
-                    ⚠️ 没有匹配时**不能只给一句空状态** —— 那是一条死胡同。
-                    改成一句提示 + 下面的完整列表：用户仍然够得到保险库里
-                    别的东西，而这本来就是打开弹窗的常见理由之一。
-                  */}
-                  {items.length === 0 && tabUrl !== '' && (
-                    <p className="px-1 text-2xs leading-relaxed text-[var(--ink-tertiary)]">
-                      这个站点还没有匹配的条目 —— 在 Coffer 里给条目加上网址，这里就能匹配到
-                    </p>
-                  )}
-                  <ItemList
-                    label={items.length > 0 ? '其他条目' : '全部条目'}
-                    items={browse.filter((b) => !items.some((m) => m.id === b.id))}
-                    icons={icons}
-                    onFill={fill}
-                  />
+                  <SearchBox value={query} onChange={setQuery} />
+
+                  <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+                    {query.trim() !== '' ? (
+                      hits === null ? (
+                        <p className="px-1 py-4 text-center text-xs text-[var(--ink-tertiary)]">
+                          正在搜索…
+                        </p>
+                      ) : hits.filter(inDest).length === 0 ? (
+                        <Empty
+                          reason={`没有找到和「${query.trim()}」有关的条目`}
+                          hint="搜索会匹配名称、用户名、网址和备注"
+                        />
+                      ) : (
+                        <ListSection
+                          label={null}
+                          items={hits.filter(inDest)}
+                          icons={icons}
+                          onOpen={setOpenId}
+                        />
+                      )
+                    ) : (
+                      <>
+                        {dest === 'all' && items.length > 0 && (
+                          <ListSection label="此站点" items={items} icons={icons} onOpen={setOpenId} />
+                        )}
+                        {/*
+                          ⚠️ 没有匹配时**不能只给一句空状态** —— 那是一条死胡同。
+                          改成一句提示 + 下面的完整列表：用户仍然够得到保险库里
+                          别的东西，而这本来就是打开弹窗的常见理由之一。
+                        */}
+                        {dest === 'all' && items.length === 0 && tabUrl !== '' && (
+                          <p className="px-2 text-2xs leading-relaxed text-[var(--ink-tertiary)]">
+                            这个站点还没有匹配的条目 —— 在 Coffer 里给条目加上网址，这里就能匹配到
+                          </p>
+                        )}
+                        <ListSection
+                          label={dest === 'all' && items.length > 0 ? '其他条目' : null}
+                          items={browse
+                            .filter(inDest)
+                            .filter((b) => !(dest === 'all' && items.some((m) => m.id === b.id)))}
+                          icons={icons}
+                          onOpen={setOpenId}
+                        />
+                      </>
+                    )}
+                  </div>
                 </>
               )}
             </div>
-
-            <Generator />
           </>
         )}
       </div>
@@ -376,83 +452,11 @@ function SiteLine({ url, account }: { url: string; account: string | null }) {
  * 用户常常是「复制密码 → 去别处粘贴」，而不是在网页表单里填。
  * 所以两者都得在，而且复制要够快（一次点击，不用展开菜单）。
  */
-function ItemRow({ item, icons, onFill }: { item: ItemSummary; icons: IconStore | null; onFill: () => void }) {
-  const [copied, setCopied] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
-
-  async function copy(field: 'username' | 'password' | 'totp') {
-    setError(null);
-    try {
-      // background 取出明文并安排好「30 秒后清理」，值回到这里由我们写剪贴板。
-      // 写在这里而不是 background：弹窗有用户手势，而且写失败时能当场报错 ——
-      // 放到离屏文档里写就没人能告诉用户「这次没复制上」。
-      const { value } = await send<{ value: string }>({ type: 'coffer:copy', itemId: item.id, field });
-      await navigator.clipboard.writeText(value);
-      setCopied(field);
-      setTimeout(() => setCopied(null), 2000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '复制失败');
-    }
-  }
-
-  const fields: { key: 'username' | 'password' | 'totp'; label: string }[] = [];
-  if (item.username) fields.push({ key: 'username', label: '用户名' });
-  if (item.hasPassword) fields.push({ key: 'password', label: '密码' });
-  if (item.hasTotp) fields.push({ key: 'totp', label: '验证码' });
-
-  return (
-    <div className="card p-2.5">
-      <div className="flex items-center gap-2.5">
-        <IconGlyph
-          domain={item.iconDomain}
-          text={item.avatarText}
-          hue={item.avatarHue}
-          type={item.type}
-          store={icons}
-        />
-        <span className="min-w-0 flex-1">
-          <span className="flex items-center gap-1.5">
-            <span className="min-w-0 truncate text-md leading-snug">{item.name}</span>
-            {item.favorite && <IconStar size={12} filled className="shrink-0 text-[var(--caution)]" />}
-          </span>
-          {item.username && (
-            <span className="mt-0.5 block truncate text-xs leading-snug text-[var(--ink-tertiary)]">
-              {item.username}
-            </span>
-          )}
-        </span>
-        {item.hasPassword && (
-          <button onClick={onFill} className="btn btn-primary shrink-0">填充</button>
-        )}
-      </div>
-
-      {fields.length > 0 && (
-        <div className="mt-2.5 flex flex-wrap items-center gap-1 border-t border-[var(--border-subtle)] pt-2">
-          {fields.map((f) => (
-            <button key={f.key} onClick={() => { void copy(f.key); }}
-              data-state={copied === f.key ? 'ok' : undefined}
-              className="btn btn-ghost gap-1.5">
-              {copied === f.key ? <IconCheck size={12} /> : <IconCopy size={12} />}
-              {copied === f.key ? '已复制' : `复制${f.label}`}
-            </button>
-          ))}
-          {/* 复制后会清空剪贴板，把这件事说出来 —— 否则用户过一会儿粘贴不出来
-              会以为是坏了 */}
-          <span className="ml-auto shrink-0 pr-1 text-2xs text-[var(--ink-tertiary)]">
-            30 秒后清空
-          </span>
-        </div>
-      )}
-
-      {error && (
-        <p className="mt-1.5 flex items-start gap-1.5 text-xs text-[var(--risk)]">
-          <IconAlert size={12} className="mt-0.5 shrink-0" />
-          <span>{error}</span>
-        </p>
-      )}
-    </div>
-  );
-}
+/*
+ * 条目在列表里的一行现在是 `@coffer/ui` 的 `ItemRow` —— 和桌面端**同一个**。
+ * 这里早先那份把「填充 / 复制用户名 / 复制密码 / 复制验证码 / 30 秒后清空」
+ * 全铺在行里，于是每条又宽又高。那些动作现在住第三层（`ItemDetail.tsx`）。
+ */
 
 /**
  * 搜索框。
@@ -495,18 +499,41 @@ function SearchBox({ value, onChange }: { value: string; onChange: (v: string) =
  * 「这些是本站的」和「这些是别的」只能靠一行小字说清楚。
  * 空组**整个不渲染**（包括标题）：标题下面什么都没有比没有标题更糟。
  */
-function ItemList({ label, items, icons, onFill }: {
-  label: string;
+/**
+ * 一组条目。
+ *
+ * 行的本体来自 `@coffer/ui` 的 `ItemRow`（桌面端用同一个），这里只负责
+ * 分组标题和「点进去」这件事。
+ */
+function ListSection({ label, items, icons, onOpen }: {
+  label: string | null;
   items: ItemSummary[];
   icons: IconStore | null;
-  onFill: (itemId: string) => void;
+  onOpen: (id: string) => void;
 }) {
   if (items.length === 0) return null;
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="px-1 text-2xs font-medium text-[var(--ink-tertiary)]">{label}</h2>
+    <section className="flex flex-col gap-0.5">
+      {label !== null && (
+        <h2 className="px-2 pb-1 text-2xs font-medium text-[var(--ink-tertiary)]">{label}</h2>
+      )}
       {items.map((it) => (
-        <ItemRow key={it.id} item={it} icons={icons} onFill={() => onFill(it.id)} />
+        <ItemRow
+          key={it.id}
+          icon={
+            <IconGlyph
+              domain={it.iconDomain}
+              text={it.avatarText}
+              hue={it.avatarHue}
+              type={it.type}
+              store={icons}
+            />
+          }
+          name={it.name}
+          summary={it.summary}
+          favorite={it.favorite}
+          onClick={() => onOpen(it.id)}
+        />
       ))}
     </section>
   );
