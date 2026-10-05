@@ -18,7 +18,7 @@ import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  ItemRow, SecretField, Section, TYPE_LABEL, TypeIcon, countByType,
+  ItemRow, NavRail, SecretField, Section, TYPE_LABEL, TypeIcon, countByType,
   scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
@@ -210,7 +210,7 @@ export function VaultView({ client, onLock }: Props) {
   const fullWidth = category.kind === 'security' || category.kind === 'import';
 
   return (
-    <div className="screen-in vault-shell h-full" data-bump={bump}>
+    <div className="screen-in vault-shell app-shell h-full" data-bump={bump}>
       {sidebar}
 
       {fullWidth ? (
@@ -538,6 +538,24 @@ function Sidebar(props: {
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
 }) {
+  /*
+   * 导航的键 ↔ `Category` 的映射。
+   * 类型和文件夹带前缀（`type:` / `folder:`），和固定项区分开 ——
+   * 共享的 `NavRail` 只认字符串键，它不该知道这个 app 的分类类型长什么样。
+   */
+  const currentKey = props.generatorOpen
+    ? 'generator'
+    : props.category.kind === 'type' ? `type:${props.category.type}`
+    : props.category.kind === 'folder' ? `folder:${props.category.id}`
+    : props.category.kind;
+
+  function onNavSelect(key: string): void {
+    if (key.startsWith('type:')) props.onSelect({ kind: 'type', type: key.slice('type:'.length) });
+    else if (key.startsWith('folder:')) props.onSelect({ kind: 'folder', id: key.slice('folder:'.length) });
+    else if (key === 'generator') props.onOpenGenerator();
+    else props.onSelect({ kind: key as 'all' | 'favorites' | 'security' | 'import' });
+  }
+
   const [creating, setCreating] = useState(false);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [renaming, setRenaming] = useState<string | null>(null);
@@ -550,22 +568,25 @@ function Sidebar(props: {
       材质，右边两块用不透明的表面盖住，只剩这一条把材质透出来。
       见 styles.css 的 --surface-glass —— α 是算出来的，不是调出来的。
     */
-    <nav className="app-sidebar below-titlebar flex shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-glass)]">
-      {/*
-        和列表栏、详情栏共用 `.band` 的高度 —— 三个面板的顶部对齐在同一条线上。
-
-        这条带子同时是**自绘标题栏**的那一段：`data-tauri-drag-region="deep"`
-        让整条带子都能拖窗口，而里面的按钮、输入框这些可交互元素自动豁免
-        （Tauri 的 drag.js 会认出 button/input/a/label）。
-        `pl-[var(--traffic-inset)]` 给系统红绿灯让位（只有 macOS 有）。
-      */}
-      <div className="band nav-band pl-[var(--traffic-inset)]" data-tauri-drag-region="deep">
-        <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
-          <IconLock size={13} />
-        </span>
-        <span className="nav-brand-text min-w-0 flex-1 truncate text-lg font-semibold tracking-[-0.01em]">Coffer</span>
-        {/* 设置入口在顶栏右端。**不放进底部账户区**：那里是「你是谁 / 离开」，
-            设置是「这个应用怎么运作」，和账户不是一类东西 */}
+    <NavRail
+      className="app-sidebar below-titlebar bg-[var(--surface-glass)]"
+      label="保险库导航"
+      /* 桌面端的折叠走**容器查询**（见 styles.css），不靠这个开关 ——
+         所以这里恒为 true，收起与否由宽度决定 */
+      expanded
+      brand={
+        <>
+          <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
+            <IconLock size={13} />
+          </span>
+          <span className="nav-brand-text min-w-0 flex-1 truncate text-lg font-semibold tracking-[-0.01em]">
+            Coffer
+          </span>
+        </>
+      }
+      brandAction={
+        /* 设置入口在顶栏右端。**不放进底部账户区**：那里是「你是谁 / 离开」，
+           设置是「这个应用怎么运作」，和账户不是一类东西 */
         <button
           onClick={props.onOpenSettings}
           title="设置  ⌘,"
@@ -574,206 +595,171 @@ function Sidebar(props: {
         >
           <IconGear size={15} />
         </button>
-      </div>
+      }
+      current={currentKey}
+      onSelect={onNavSelect}
+      groups={[
+        {
+          key: 'main',
+          entries: [
+            { key: 'all', label: '全部', icon: <IconItems size={16} />, count: props.counts.all },
+            { key: 'favorites', label: '收藏', icon: <IconStar size={16} />, count: props.counts.favorites },
+            /* 安全报告与导入都不是「列表筛选」，而是一整块内容 ——
+               选中它们时右侧不再显示条目列表，理由见渲染分支 */
+            { key: 'security', label: '安全报告', icon: <IconShield size={16} /> },
+            { key: 'generator', label: '生成器', icon: <IconDice size={16} /> },
+            { key: 'import', label: '导入', icon: <IconImport size={16} /> },
+          ],
+        },
+        {
+          key: 'folders',
+          title: '文件夹',
+          action: (
+            <button
+              onClick={() => { setCreating(true); setMenuFor(null); }}
+              title="新建文件夹"
+              aria-label="新建文件夹"
+              data-nav-new-folder
+              className="rounded-[var(--radius-sm)] p-1 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+            >
+              <IconPlus size={13} />
+            </button>
+          ),
+          /*
+           * ⚠️ 这一节**整个自己渲染** —— 它要就地改名、删除前还要确认，
+           * 是一个「带内联编辑的列表」，不是一组导航项。
+           * 分组的标题和「+」仍然由 `NavRail` 排版（见上面 action），
+           * 只有行是这边的。这是 `NavGroup.render` 存在的理由。
+           */
+          render: () => (
+            <ul className="space-y-0.5">
+              {props.folders.map((f) => {
+                const name = f.nameFailed ? '无法解密' : f.name;
+                if (renaming === f.id) {
+                  return (
+                    <li key={f.id} className="px-0.5 py-0.5">
+                      <InlineInput
+                        initial={f.nameFailed ? '' : name}
+                        placeholder="文件夹名"
+                        onCancel={() => setRenaming(null)}
+                        onCommit={async (v) => { await props.onRenameFolder(f.id, v); setRenaming(null); }}
+                      />
+                    </li>
+                  );
+                }
+                if (confirmDelete === f.id) {
+                  return (
+                    <li key={f.id} className="py-0.5">
+                      <div className="rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-2.5">
+                        {/* ⚠️ 删除文件夹**不会删掉里面的密码** —— 服务端只删关联行，
+                            条目变成「无文件夹」。措辞必须与这个事实一致 */}
+                        <p className="mb-2 text-xs leading-relaxed text-[var(--ink-secondary)]">
+                          里面的条目会变成「无文件夹」，<strong className="font-medium text-[var(--ink-primary)]">不会被删除</strong>。
+                        </p>
+                        <div className="flex gap-1.5">
+                          <button onClick={async () => { await props.onDeleteFolder(f.id); setConfirmDelete(null); }}
+                            className="btn btn-ghost px-2 py-1 text-[var(--risk)]">删除</button>
+                          <button onClick={() => setConfirmDelete(null)}
+                            className="btn btn-ghost px-2 py-1">取消</button>
+                        </div>
+                      </div>
+                    </li>
+                  );
+                }
+                return (
+                  /*
+                   * ⚠️ **不要再包一层 `<li>`** —— `NavItem` 自己渲染的就是 `<li>`，
+                   * 套起来会产生 `<li>` 嵌 `<li>`，React 会报 hydration 错误，
+                   * 而浏览器会把结构改写成别的东西，排 version 就跟着乱。
+                   * 菜单按钮与重命名输入框都挂到同一个 `<li>` 里。
+                   */
+                  <NavItem
+                    key={f.id}
+                    className="group relative"
+                    icon={<IconFolder size={16} />}
+                    label={name}
+                    active={props.category.kind === 'folder' && props.category.id === f.id}
+                    onClick={() => props.onSelect({ kind: 'folder', id: f.id })}
+                  >
+                    <button
+                      onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === f.id ? null : f.id); }}
+                      title="更多" aria-label="文件夹操作"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)] p-1 text-[var(--ink-tertiary)] opacity-0 transition-opacity duration-[var(--dur-fast)] focus:opacity-100 group-hover:opacity-100 hover:bg-[var(--surface-hover)]"
+                    >
+                      <IconMore size={14} />
+                    </button>
+                    {menuFor === f.id && (
+                      <div className="absolute right-1 top-full z-20 mt-1 flex gap-0.5 rounded-[var(--radius-md)] border border-[var(--border-overlay)] bg-[var(--surface-overlay)] p-1"
+                        style={{ boxShadow: 'var(--elev-pop)' }}>
+                        <button onClick={() => { setRenaming(f.id); setMenuFor(null); }}
+                          className="btn btn-ghost px-2 py-1 gap-1.5"><IconPencil size={12} />重命名</button>
+                        <button onClick={() => { setConfirmDelete(f.id); setMenuFor(null); }}
+                          className="btn btn-ghost px-2 py-1 gap-1.5 text-[var(--risk)]"><IconTrash size={12} />删除</button>
+                      </div>
+                    )}
+                  </NavItem>
+                );
+              })}
 
-      <div className="flex-1 overflow-y-auto px-2.5 py-2.5">
-        <ul className="space-y-0.5">
-          <NavItem
-            icon={<IconItems size={16} />}
-            label="全部" count={props.counts.all}
-            active={props.category.kind === 'all'}
-            onClick={() => props.onSelect({ kind: 'all' })}
-          />
-          <NavItem
-            icon={<IconStar size={16} />}
-            label="收藏" count={props.counts.favorites}
-            active={props.category.kind === 'favorites'}
-            onClick={() => props.onSelect({ kind: 'favorites' })}
-          />
-          {/* 安全报告不是一个「列表筛选」，而是一整块内容 —— 选中它时右侧
-              不再显示条目列表，理由见上面的渲染分支 */}
-          <NavItem
-            icon={<IconShield size={16} />}
-            label="安全报告"
-            active={props.category.kind === 'security'}
-            onClick={() => props.onSelect({ kind: 'security' })}
-          />
-          {/* 生成器也是「第二块内容」，但它开的是浮层 —— `active` 跟着浮层的
-              开合走，用户一眼能看到这一层是从哪儿点出来的 */}
-          <NavItem
-            icon={<IconDice size={16} />}
-            label="生成器"
-            active={props.generatorOpen}
-            onClick={props.onOpenGenerator}
-          />
-          <NavItem
-            icon={<IconImport size={16} />}
-            label="导入"
-            active={props.category.kind === 'import'}
-            onClick={() => props.onSelect({ kind: 'import' })}
-          />
-        </ul>
-
-        {/*
-          ⚠️ 这个分区**始终显示**，不以「已有文件夹」为前提。
-          之前的写法是 `props.folders.length > 0 && ...`，而那时没有任何途径
-          能建出第一个文件夹 —— 于是它对用户永远不会出现，整套文件夹功能等于不存在。
-        */}
-        <div className="mt-4 mb-1 flex items-center justify-between pl-2.5 pr-1">
-          <span className="nav-section-title text-xs font-medium text-[var(--ink-secondary)]">文件夹</span>
-          <button
-            onClick={() => { setCreating(true); setMenuFor(null); }}
-            title="新建文件夹"
-            aria-label="新建文件夹"
-            data-nav-new-folder
-            className="rounded-[var(--radius-sm)] p-1 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
-          >
-            <IconPlus size={13} />
-          </button>
-        </div>
-
-        <ul className="space-y-0.5">
-          {props.folders.map((f) => {
-            const name = f.nameFailed ? '无法解密' : f.name;
-            if (renaming === f.id) {
-              return (
-                <li key={f.id} className="px-0.5 py-0.5">
+              {creating && (
+                <li className="py-0.5">
                   <InlineInput
-                    initial={f.nameFailed ? '' : name}
-                    placeholder="文件夹名"
-                    onCancel={() => setRenaming(null)}
-                    onCommit={async (v) => { await props.onRenameFolder(f.id, v); setRenaming(null); }}
+                    placeholder="新文件夹名"
+                    onCancel={() => setCreating(false)}
+                    onCommit={async (v) => { await props.onCreateFolder(v); setCreating(false); }}
                   />
                 </li>
-              );
-            }
-            if (confirmDelete === f.id) {
-              return (
-                <li key={f.id} className="py-0.5">
-                  <div className="rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-2.5">
-                    {/* ⚠️ 删除文件夹**不会删掉里面的密码** —— 服务端只删关联行，
-                        条目变成「无文件夹」。措辞必须与这个事实一致 */}
-                    <p className="mb-2 text-xs leading-relaxed text-[var(--ink-secondary)]">
-                      里面的条目会变成「无文件夹」，<strong className="font-medium text-[var(--ink-primary)]">不会被删除</strong>。
-                    </p>
-                    <div className="flex gap-1.5">
-                      <button onClick={async () => { await props.onDeleteFolder(f.id); setConfirmDelete(null); }}
-                        className="btn btn-ghost px-2 py-1 text-[var(--risk)]">删除</button>
-                      <button onClick={() => setConfirmDelete(null)}
-                        className="btn btn-ghost px-2 py-1">取消</button>
-                    </div>
-                  </div>
-                </li>
-              );
-            }
-            return (
-              /*
-               * ⚠️ **不要再包一层 `<li>`** —— `NavItem` 自己渲染的就是 `<li>`，
-               * 套起来会产生 `<li>` 嵌 `<li>`，React 会报 hydration 错误，
-               * 而浏览器会把结构改写成别的东西，排 version 就跟着乱。
-               * 菜单按钮与重命名输入框都挂到同一个 `<li>` 里。
-               */
-              <NavItem
-                key={f.id}
-                className="group relative"
-                icon={<IconFolder size={16} />}
-                label={name}
-                active={props.category.kind === 'folder' && props.category.id === f.id}
-                onClick={() => props.onSelect({ kind: 'folder', id: f.id })}
-              >
-                <button
-                  onClick={(e) => { e.stopPropagation(); setMenuFor(menuFor === f.id ? null : f.id); }}
-                  title="更多" aria-label="文件夹操作"
-                  className="absolute right-1.5 top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)] p-1 text-[var(--ink-tertiary)] opacity-0 transition-opacity duration-[var(--dur-fast)] focus:opacity-100 group-hover:opacity-100 hover:bg-[var(--surface-hover)]"
-                >
-                  <IconMore size={14} />
-                </button>
-                {menuFor === f.id && (
-                  <div className="absolute right-1 top-full z-20 mt-1 flex gap-0.5 rounded-[var(--radius-md)] border border-[var(--border-overlay)] bg-[var(--surface-overlay)] p-1"
-                    style={{ boxShadow: 'var(--elev-pop)' }}>
-                    <button onClick={() => { setRenaming(f.id); setMenuFor(null); }}
-                      className="btn btn-ghost px-2 py-1 gap-1.5"><IconPencil size={12} />重命名</button>
-                    <button onClick={() => { setConfirmDelete(f.id); setMenuFor(null); }}
-                      className="btn btn-ghost px-2 py-1 gap-1.5 text-[var(--risk)]"><IconTrash size={12} />删除</button>
-                  </div>
-                )}
-              </NavItem>
-            );
-          })}
-
-          {creating && (
-            <li className="py-0.5">
-              <InlineInput
-                placeholder="新文件夹名"
-                onCancel={() => setCreating(false)}
-                onCommit={async (v) => { await props.onCreateFolder(v); setCreating(false); }}
+              )}
+            </ul>
+          ),
+        },
+        ...(props.showTypes && props.typeCounts.length > 0
+          ? [{
+              key: 'types',
+              title: '类别',
+              entries: props.typeCounts.map((t) => ({
+                key: `type:${t.type}`,
+                label: t.label,
+                icon: <TypeIcon type={t.type} size={16} />,
+                count: t.count,
+              })),
+            }]
+          : []),
+      ]}
+      footer={
+        <>
+          <div className="nav-account mb-1 flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5">
+            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-2xs font-semibold text-[var(--accent)]">
+              {props.account.slice(0, 1).toUpperCase() || '?'}
+            </span>
+            <span className="nav-label truncate text-xs text-[var(--ink-secondary)]" title={props.account}>
+              {props.account}
+            </span>
+            {/*
+              后台同步中的转圈。
+              ⚠️ 放在账户**后面**而不是盖住整个列表：列表此时是**可用的**
+              （缓存里那一版已经在显示），只是还在更新。盖一层遮罩会
+              把「可以用，正在更新」说成「不能用，等着」—— 那是两回事。
+            */}
+            {props.syncing && (
+              <IconSpinner
+                size={12}
+                className="shrink-0 text-[var(--ink-tertiary)]"
+                aria-label="正在同步"
               />
-            </li>
-          )}
-        </ul>
-      </div>
-
-      {/*
-        类别 —— 按**条目类型**过滤。
-
-        ⚠️ 和「文件夹」**同时存在**，不是互斥的两套导航：文件夹回答「我把它放哪了」，
-        类别回答「这是什么东西」。1Password 也是两者并列。
-
-        ⚠️ 计数为 0 的类别**不显示** —— 列一堆「0」既占地方，
-        又让人以为自己的东西少了。空库时这一节整个不出现。
-      */}
-      {props.showTypes && props.typeCounts.length > 0 && (
-        <div>
-          <div className="mb-1 mt-3 flex items-center px-2">
-            <span className="nav-section-title text-xs font-medium text-[var(--ink-secondary)]">类别</span>
+            )}
           </div>
-          <ul className="space-y-0.5">
-            {props.typeCounts.map((t) => (
-              <NavItem
-                key={t.type}
-                icon={<TypeIcon type={t.type} size={16} />}
-                label={t.label}
-                count={t.count}
-                active={props.category.kind === 'type' && props.category.type === t.type}
-                onClick={() => props.onSelect({ kind: 'type', type: t.type })}
-              />
-            ))}
-          </ul>
-        </div>
-      )}
-
-      <div className="border-t border-[var(--border-subtle)] p-2.5">
-        <div className="nav-account mb-1 flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5">
-          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-2xs font-semibold text-[var(--accent)]">
-            {props.account.slice(0, 1).toUpperCase() || '?'}
-          </span>
-          <span className="truncate text-xs text-[var(--ink-secondary)]" title={props.account}>
-            {props.account}
-          </span>
-          {/*
-            后台同步中的转圈。
-            ⚠️ 放在账户**后面**而不是盖住整个列表：列表此时是**可用的**
-            （缓存里那一版已经在显示），只是还在更新。盖一层遮罩会
-            把「可以用，正在更新」说成「不能用，等着」—— 那是两回事。
-          */}
-          {props.syncing && (
-            <IconSpinner
-              size={12}
-              className="shrink-0 text-[var(--ink-tertiary)]"
-              aria-label="正在同步"
-            />
-          )}
-        </div>
-        <button
-          onClick={props.onLock}
-          className="nav-item flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-sm text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
-        >
-          <IconLock size={15} />
-          <span className="nav-label flex-1">锁定</span>
-          <kbd className="nav-kbd text-2xs text-[var(--ink-secondary)]">⌘L</kbd>
-        </button>
-      </div>
-    </nav>
+          <button
+            onClick={props.onLock}
+            className="nav-item flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-sm text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+          >
+            <IconLock size={15} />
+            <span className="nav-label flex-1">锁定</span>
+            <kbd className="nav-kbd text-2xs text-[var(--ink-secondary)]">⌘L</kbd>
+          </button>
+        </>
+      }
+    />
   );
 }
 

@@ -101,12 +101,24 @@ export function NavRail({
   expanded, onToggleExpanded, collapsedWidth = COLLAPSED, expandedWidth = EXPANDED,
   className = '', label = '导航',
 }: NavRailProps) {
+  // 只有调用方给了**非默认**宽度时才写内联（那意味着它自己承担覆盖的责任）
+  const widthsEqualDefaults = expandedWidth === EXPANDED && collapsedWidth === COLLAPSED;
+
   return (
     <nav
       aria-label={label}
-      className={`vault-rail ${className} flex shrink-0 flex-col border-r border-[var(--border-subtle)] transition-[width] duration-[var(--dur-base)] ease-[var(--ease-enter)]`}
+      className={`vault-rail ${className} flex w-[var(--nav-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] transition-[width] duration-[var(--dur-base)] ease-[var(--ease-enter)]`}
       data-expanded={expanded}
-      style={{ width: expanded ? expandedWidth : collapsedWidth }}
+      /*
+       * ⚠️ **宽度不由内联样式给。**
+       *
+       * 内联的 `width` 和**内联的自定义属性**都压过样式表里的规则 ——
+       * 而桌面端要在**容器查询**里把它改窄（窗口窄了就把侧栏收成图标条）。
+       * 写成内联的话那条规则永远不生效，表现是「标签藏了、宽度没变」，
+       * 侧栏里空一大片。宽度定义在 `components.css` 的 `--nav-w` 上，
+       * 调用方用自己的规则覆盖它。
+       */
+      style={widthsEqualDefaults ? undefined : { '--nav-w': `${expanded ? expandedWidth : collapsedWidth}px` } as React.CSSProperties}
     >
       {brand !== undefined && (
         <div className="band nav-band pl-[var(--traffic-inset)]" data-tauri-drag-region="deep">

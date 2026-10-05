@@ -137,10 +137,26 @@ describe('两个 app 都告诉 Tailwind 去扫共享包', () => {
  * 外壳是 inline-size 容器 ⟹ 弹窗根元素有显式的宽度。
  */
 describe('弹窗外壳的尺寸约束', () => {
-  it('vault-shell 确实是 inline-size 容器（否则下面那条是空转的）', () => {
+  it('⚠️ 外壳本身**不是** inline-size 容器', () => {
     const css = sourceEndingWith('packages/ui/src/components.css')!;
-    expect(css).toContain('container-type: inline-size');
-    expect(css).toContain('container-name: shell');
+    const shell = css.match(/\.vault-shell \{[^}]*\}/)?.[0] ?? '';
+    expect(shell, '没找到 .vault-shell 规则 —— 选择器变了就要一起改').not.toBe('');
+    expect(
+      shell.includes('container-type'),
+      '`.vault-shell` 上不该有 container-type。\n' +
+        '它是**弹窗的根元素**，而浏览器弹窗是按内容撑开的 —— ' +
+        'inline-size 容器「算宽度时假装自己没有内容」，结果是整个弹窗被压成一条。\n' +
+        '（桌面端看不出来：Tauri 窗口有固定尺寸。截图工具也看不出来：' +
+        '它总是给固定视口宽度 —— 这个 bug 两次都是从用户截图发现的。）\n' +
+        '容器该挂在 `.vault-content` 上，或者桌面端自己的 `.app-shell` 上。',
+    ).toBe(false);
+  });
+
+  it('内容区仍然是容器（否则并排那条规则是空转的）', () => {
+    const css = sourceEndingWith('packages/ui/src/components.css')!;
+    const content = css.match(/\.vault-content \{[^}]*\}/)?.[0] ?? '';
+    expect(content).toContain('container-type: inline-size');
+    expect(content).toContain('container-name: vault');
   });
 
   it('弹窗根元素声明了显式宽度', () => {
@@ -149,9 +165,9 @@ describe('弹窗外壳的尺寸约束', () => {
     expect(root, '没找到弹窗根元素 —— 选择器变了就要一起改').not.toBe('');
     expect(
       /w-\[\d+px\]/.test(root),
-      '弹窗根元素没有显式宽度。`.vault-shell` 是 inline-size 容器，' +
-        '它算宽度时假装自己没有内容 —— 而弹窗是按内容撑开的，' +
-        '结果是整个弹窗缩成一条线。加一个 `w-[440px]`（并同步改高度那条注释）。\n' +
+      '弹窗根元素没有显式宽度。弹窗是个**稳定的窗口**：切分类、进详情、' +
+        '出错提示进出，都不该让它忽宽忽窄 —— 而长度不一的列表内容会让' +
+        '「按内容撑开」每次都给出不同的宽度。加一个 `w-[440px]`。\n' +
         '根元素：' + root,
     ).toBe(true);
   });

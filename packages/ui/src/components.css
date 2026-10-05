@@ -96,6 +96,15 @@
 
     /* ── 三栏 → 折叠 → 竖向 ──────────────────────────────────────
      *
+     * ⚠️ **外壳本身不是容器** —— `container-type` 挂在 `.vault-content` 上，
+     * 而且**只有那一个**。这里曾经也挂过一个（给侧栏折叠用），结果是
+     * 浏览器弹窗的内容区被压成一条：inline-size 容器「算宽度时假装自己
+     * 没有内容」，而弹窗是按内容撑开的。桌面端看不出来（窗口有固定尺寸），
+     * 我的截图工具也看不出来（它总是给固定视口宽度）。
+     *
+     * 侧栏折叠改用**桌面端自己的**容器（见那边 styles.css 的 `.app-sidebar`
+     * 区块），不占用共享的外壳。
+     *
      * ⚠️ 用**容器查询**，不是视口 `@media`。这一条是这段布局里唯一
      * 真正要紧的决定：
      *
@@ -117,13 +126,6 @@
       display: flex;
       height: 100%;
       min-height: 0;
-      /*
-       * 导航栏自己的折叠用它 —— 和 `.vault-content` 上那个 `vault` 是
-       * **两个不同的问题**：那个问「列表和详情放不放得下」，这个问
-       * 「侧栏该收起来了吗」。混成一个的话，rail 一展开就会让另一个也误判。
-       */
-      container-type: inline-size;
-      container-name: shell;
     }
 
     /* 列表 + 详情这一块。窄的时候详情绝对定位盖住它，所以这里要 relative */
@@ -167,6 +169,17 @@
      * 它浮在行尾，80px 里会盖住图标。
      */
     .vault-rail[data-expanded='false'] .nav-extra { display: none; }
+
+    /*
+     * 导航栏的两档宽度。
+     *
+     * ⚠️ 定义在**样式表**里而不是组件的内联样式里：桌面端要用容器查询
+     * 把它改窄（见下面 `.app-sidebar` 那段），而内联样式 —— 包括内联的
+     * 自定义属性 —— 压过一切样式表规则，那样改窄永远不生效。
+     */
+    .vault-rail { width: var(--nav-w, 80px); }
+    .vault-rail[data-expanded='true'] { --nav-w: 214px; }
+    .vault-rail[data-expanded='false'] { --nav-w: 80px; }
 
     .vault-content[data-detail='false'] .vault-detail {
       display: none;

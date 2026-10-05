@@ -247,10 +247,18 @@ input[type='range'] {
    * 折叠后**只留图标**，不留 tooltip 之外的信息 —— 计数、备注、快捷键提示
    * 全藏掉。塞不下的东西半显示比不显示更糟。
    */
-  .app-sidebar { width: var(--rail-w); }
+  /*
+   * ⚠️ 折叠用的容器挂**在这里**（桌面端自己的类），不挂在共享的
+   * `.vault-shell` 上 —— 那个是弹窗的根元素，inline-size 容器会让
+   * 「按内容撑开」的弹窗算出 0 宽，内容区被压成一条。
+   * 桌面端没这个问题：Tauri 窗口有固定尺寸。
+   */
+  .app-sidebar { --nav-w: var(--rail-w); }
+  .app-shell { container-type: inline-size; container-name: shell; }
 
   @container shell (max-width: 900px) {
-    .app-sidebar { width: 56px; }
+    /* 覆盖 NavRail 给的变量（它不能写内联 width，否则这条永远不生效） */
+    .app-sidebar { --nav-w: 56px; }
     .app-sidebar .nav-label,
     .app-sidebar .nav-count,
     .app-sidebar .nav-section-title,
