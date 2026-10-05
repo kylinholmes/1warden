@@ -418,41 +418,11 @@ input[type='range'] {
    *
    * 三条固定：overlay 表面、overlay 描边（比静态卡片强一档）、modal 阴影。
    */
-  .panel {
-    background: var(--surface-overlay);
-    border: 1px solid var(--border-overlay);
-    border-radius: var(--radius-lg);
-    box-shadow: var(--elev-modal);
-  }
 
   /* 浮层的顶栏 / 底栏 —— 内容自己排，这里只统一高度节奏与分隔线 */
-  .panel-head {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-height: 46px;
-    padding-inline: 14px;
-    border-bottom: 1px solid var(--border-subtle);
-  }
-  .panel-foot {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-height: 38px;
-    padding-inline: 14px;
-    border-top: 1px solid var(--border-subtle);
-    font-size: var(--text-xs);
-    color: var(--ink-tertiary);
-  }
 
   /* 遮罩 —— 只做「后面那层退下去」，不抢戏。不做模糊：
      backdrop-filter 在这种尺寸的窗口上比它带来的观感值钱 */
-  .scrim {
-    position: fixed;
-    inset: 0;
-    background: oklch(0 0 0 / 0.28);
-  }
 
   /*
    * ── 提示条（toast）
@@ -525,10 +495,6 @@ input[type='range'] {
 .screen-in { animation: coffer-screen-in var(--dur-base) var(--ease-enter) both; }
 
 /* 右侧详情换了一条记录 —— 只淡入，不位移：位移会让长内容显得在抖 */
-@keyframes coffer-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
-}
 .fade-in { animation: coffer-fade-in var(--dur-fast) var(--ease-enter) both; }
 
 /* 验证码换了一组 —— 提醒用户「这是新的了」，但别闪得刺眼 */
@@ -565,19 +531,6 @@ input[type='range'] {
  * 缓动也是两边不同：进场用 --ease-enter（快起慢收，像被放下），
  * 出场用更短的时长配线性收尾，不拖沓。
  */
-@keyframes coffer-panel-in {
-  from { opacity: 0; transform: translateY(4px) scale(0.97); }
-  to { opacity: 1; transform: none; }
-}
-@keyframes coffer-panel-out {
-  from { opacity: 1; transform: none; }
-  to { opacity: 0; transform: scale(0.985); }
-}
-.panel-in { animation: coffer-panel-in var(--dur-base) var(--ease-enter) both; }
-.panel-out { animation: coffer-panel-out var(--dur-fast) var(--ease-move) both; }
-
-.scrim-in { animation: coffer-fade-in var(--dur-base) var(--ease-enter) both; }
-.scrim-out { animation: coffer-fade-in var(--dur-fast) var(--ease-move) reverse both; }
 
 /*
  * 提示条。

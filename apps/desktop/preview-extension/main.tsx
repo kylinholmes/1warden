@@ -198,3 +198,13 @@ if (new URLSearchParams(location.search).get('state') === 'generator') {
     }, 700);
   }
 }
+
+/*
+ * `?state=new`：点列表头的「+」，核对**新建条目**那一屏
+ * （和桌面端同一个 `ItemEditor`，在 440px 里以浮层形式盖住整屏）。
+ */
+if (new URLSearchParams(location.search).get('state') === 'new') {
+  setTimeout(() => {
+    document.querySelector<HTMLButtonElement>('button[aria-label="新建条目"]')?.click();
+  }, 500);
+}

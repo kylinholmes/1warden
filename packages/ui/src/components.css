@@ -304,4 +304,65 @@
       }
     }
 
+
+    /*
+     * ── 浮层（FloatingPanel）
+     *
+     * ⚠️ 这几条原本住在 `apps/desktop/src/styles.css`。组件搬进共享包时
+     * **样式没跟着走** —— 扩展端渲染出来的浮层是**透明、没有遮罩**的，
+     * 内容直接叠在列表上。类型检查、构建、838 个测试**全都不报**：
+     * 类名在 DOM 上、规则不在产物里。
+     *
+     * 和 `shared-css-wiring.test.ts` 守的是同一个病，但那个守卫管不到
+     * —— 它管「共享包导出的 CSS 有没有被引进产物」，管不到
+     * 「**某条规则该不该从 app 搬到包**」。后者只有肉眼看得见。
+     * 这次是靠截图发现的。
+     */
+  .panel {
+    background: var(--surface-overlay);
+    border: 1px solid var(--border-overlay);
+    border-radius: var(--radius-lg);
+    box-shadow: var(--elev-modal);
+  }
+  .panel-head {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 46px;
+    padding-inline: 14px;
+    border-bottom: 1px solid var(--border-subtle);
+  }
+  .panel-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 38px;
+    padding-inline: 14px;
+    border-top: 1px solid var(--border-subtle);
+    font-size: var(--text-xs);
+    color: var(--ink-tertiary);
+  }
+  .scrim {
+    position: fixed;
+    inset: 0;
+    background: oklch(0 0 0 / 0.28);
+  }
+@keyframes coffer-panel-in {
+  from { opacity: 0; transform: translateY(4px) scale(0.97); }
+  to { opacity: 1; transform: none; }
+}
+@keyframes coffer-panel-out {
+  from { opacity: 1; transform: none; }
+  to { opacity: 0; transform: scale(0.985); }
+}
+@keyframes coffer-fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+.panel-in { animation: coffer-panel-in var(--dur-base) var(--ease-enter) both; }
+.panel-out { animation: coffer-panel-out var(--dur-fast) var(--ease-move) both; }
+.scrim-in { animation: coffer-fade-in var(--dur-base) var(--ease-enter) both; }
+.scrim-out { animation: coffer-fade-in var(--dur-fast) var(--ease-move) reverse both; }
+
 }

@@ -234,6 +234,7 @@ type Request =
   | { type: 'coffer:folders' }
   | { type: 'coffer:security' }
   | { type: 'coffer:breach-check' }
+  | { type: 'coffer:save-item'; draft: VaultItem }
   | { type: 'coffer:item'; itemId: string }
   | { type: 'coffer:import-parse'; dataBase64: string; format?: string }
   | { type: 'coffer:import-commit'; dataBase64: string; format?: string }
@@ -578,6 +579,22 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
      * 而扩展的消息通道只保证结构化克隆 —— 直接传 `Uint8Array` 在
      * 某些浏览器上会被转成 `{0:..,1:..}` 那种普通对象。
      */
+    /*
+     * 保存一条（新建或编辑）。
+     *
+     * ⚠️ 这一条**是**明文过消息通道 —— 和读那一条路**相反**。
+     *
+     * 读那条路上弹窗只收摘要（spec 不变量 S1）；而这里是用户在表单里
+     * 打的字，明文本来就在弹窗里，拦下来没有任何意义。**加密和落盘都在
+     * 后台**（`saveItem` → `client.ts`），弹窗不碰密钥。
+     */
+    case 'coffer:save-item': {
+      const c = await unlockedClient();
+      const saved = await c.saveItem(req.draft);
+      await refreshBadges();
+      return { item: saved };
+    }
+
     case 'coffer:import-parse': {
       const bytes = fromBase64(req.dataBase64);
       /*

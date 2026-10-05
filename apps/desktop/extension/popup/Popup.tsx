@@ -1,11 +1,11 @@
 import { ext } from '../ext-api';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { IconStore, detectImportFormat, type ImportFormatId } from '@coffer/vault';
+import { IconStore, detectImportFormat, type ImportFormatId, type VaultItem } from '@coffer/vault';
 
 import {
   IconAlert, IconClose, IconDice, IconGlobe, IconItems,
-  IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconStar,
-  ItemIcon, ItemRow, NavDrawer, NavRow, NavTrigger, Section,
+  IconFolder, IconImport, IconKeyboard, IconLock, IconPlus, IconSearch, IconShield, IconStar,
+  ItemEditor, ItemIcon, ItemRow, NavDrawer, NavRow, NavTrigger, Section,
   ConnectScreen, GeneratorBody, ImportView, SecurityReportView,
   apiMessageOf, countByType,
   host, iconStoreFor, rememberAccount, useAccounts,
@@ -202,6 +202,14 @@ export function Popup() {
     }
   }, []);
   const [openId, setOpenId] = useState<string | null>(null);
+  /**
+   * 新建条目那一屏开着没有。
+   *
+   * ⚠️ **只有新建，没有编辑** —— 编辑要先决定「打开时整条揭示给弹窗」
+   * 还是「密码留空 = 不改」（读那条不变量 S1 的口子开不开）。
+   * 新建不涉及这个问题：用户敲的是自己刚打的字。
+   */
+  const [editorOpen, setEditorOpen] = useState(false);
 
   // 解锁后拉一次主列表。锁定或登出时清掉 —— 留着的话下次解锁会先闪出旧数据
   useEffect(() => {
@@ -413,6 +421,27 @@ export function Popup() {
       />
       )}
 
+      {/*
+        ⚠️ **和桌面端同一个组件**（`@coffer/ui` 的 `ItemEditor`）。
+        这里以浮层形式盖住 440px 的弹窗，桌面端是同一个浮层的宽版 ——
+        要不要改成内联（不盖）是以后的事，先把「能新建」补上。
+
+        `folders` 从已经拉回来的那份映射，不为它多发一次请求。
+      */}
+      <ItemEditor
+        folders={folders.map((f) => ({ ...f, nameFailed: false, updatedAt: '' }))}
+        onSave={async (draft) => {
+          // 加密和落盘在后台 —— 弹窗不碰密钥
+          const r = await send<{ item: VaultItem }>({ type: 'coffer:save-item', draft });
+          await refresh();
+          return r.item;
+        }}
+        item={null}
+        open={editorOpen}
+        onCancel={() => setEditorOpen(false)}
+        onDone={() => setEditorOpen(false)}
+      />
+
       <div className="vault-content" data-detail={openItem !== null}>
         {/*
           ⚠️ 只在**已解锁**时走这条全局横幅。未解锁时错误由 `ConnectScreen`
@@ -549,6 +578,17 @@ export function Popup() {
                     <div className="min-w-0 flex-1">
                       <SearchBox value={query} onChange={setQuery} />
                     </div>
+                    {/* 新建。和桌面端一样在搜索框**后面** —— 主操作靠边，
+                        搜索靠内容 */}
+                    <button
+                      type="button"
+                      onClick={() => setEditorOpen(true)}
+                      aria-label="新建条目"
+                      title="新建条目"
+                      className="btn btn-quiet shrink-0 p-1.5"
+                    >
+                      <IconPlus size={16} />
+                    </button>
                   </div>
 
                   <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
