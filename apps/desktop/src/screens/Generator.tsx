@@ -4,7 +4,7 @@ import { FloatingPanel } from '../components/FloatingPanel';
 import { Segmented } from '../components/Segmented';
 import { CopyButton } from '../components/CopyButton';
 import { STRENGTH_COLORS, STRENGTH_LABELS, crackSentence } from '../components/strength';
-import { IconClose, IconDice } from '../components/icons';
+import { IconClose, IconDice } from '@coffer/ui';
 
 /**
  * 生成器 —— 侧栏里和「导入」并列的一块内容，做成浮层。

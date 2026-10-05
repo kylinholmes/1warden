@@ -831,7 +831,7 @@ function newLoginItem(url: string, username: string | null, password: string): V
   return {
     id: '', type: 'login', rawType: 1, name: nameFor(url), nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
+    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: {
       username, password, totp: null,
       uris: [{ uri: url, match: null }],
@@ -839,7 +839,7 @@ function newLoginItem(url: string, username: string | null, password: string): V
       // 新建的条目还没有 passkey —— 用户之后可以在站点上注册一个
       fido2Credentials: [],
     },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }

@@ -4,7 +4,7 @@ import { Segmented } from '../components/Segmented';
 import { getThemeMode, setThemeMode, subscribeTheme, type ThemeMode } from '../theme';
 import {
   IconClose, IconGear, IconIdentity, IconInfo, IconKeyboard, IconPalette, IconShield,
-} from '../components/icons';
+} from '@coffer/ui';
 
 /**
  * 设置面板 —— 容器、分组、交互是真的；**「外观」这一组已经接入**，

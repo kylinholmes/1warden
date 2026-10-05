@@ -4,7 +4,7 @@ import {
   autotypeStatus, autotypeType, autotypeOpenSettings,
   AUTOTYPE_SUCCESS_NOTE, type PermissionState,
 } from '../autotype';
-import { IconAlert, IconKeyboard } from './icons';
+import { IconAlert, IconKeyboard } from '@coffer/ui';
 
 /**
  * 「输入到其他应用」。

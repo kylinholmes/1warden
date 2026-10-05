@@ -1,5 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { generatePassword, passwordStrength } from '@coffer/crypto';
+import {
+  IconAlert, IconCheck, IconCopy, IconGlobe, IconKey, IconLock, IconSearch, IconStar,
+} from '@coffer/ui';
 
 /**
  * 扩展弹窗。
@@ -468,71 +471,13 @@ function Generator() {
   );
 }
 
-/* ── 图标 ─────────────────────────────────────────────────
+/* 图标从 `@coffer/ui` 来 —— 和桌面端**同一份**。
  *
- * 和桌面端 apps/desktop/src/components/icons.tsx 是同一套画法
- * （24 网格、1.75 描边、圆角端点），但只放弹窗用得到的这几个 ——
- * 两个 app 之间没有共享包，为一个图标集建一个不划算。
- * 弹窗这里上一版用的是 emoji（🔑★），理由见桌面端那份的说明。
+ * 这里原本有一份自己的拷贝，上面写着「两个 app 之间没有共享包，
+ * 为一个图标集建一个不划算」。现在有了，而那份拷贝已经开始长歪：
+ * 它的大小默认值是 14 而桌面端是 16；它不接受 `className`，
+ * 于是弹窗里四处 `className=` 一直是**类型错误** ——
+ * 只是从来没人在扩展端跑过 `tsc`（见根 tsconfig 的说明）。
+ *
+ * 「同一套画法写两遍」和「写一份」的差别，就在这几处。
  */
-
-function Svg({ size = 14, ...rest }: React.SVGProps<SVGSVGElement> & { size?: number }) {
-  return (
-    <svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor"
-      strokeWidth={1.75} strokeLinecap="round" strokeLinejoin="round"
-      aria-hidden focusable="false" {...rest} />
-  );
-}
-
-const IconKey = (p: { size?: number }) => (
-  <Svg {...p}>
-    <circle cx="8" cy="15" r="3.5" />
-    <path d="M10.6 12.4 19 4M16.5 6.5 19 9M14 9l2.5 2.5" />
-  </Svg>
-);
-
-const IconLock = (p: { size?: number }) => (
-  <Svg {...p}>
-    <rect x="4.5" y="10.5" width="15" height="10" rx="2.5" />
-    <path d="M8 10.5V7.8a4 4 0 0 1 8 0v2.7" />
-  </Svg>
-);
-
-const IconStar = ({ filled, ...p }: { size?: number; filled?: boolean }) => (
-  <Svg {...p} fill={filled ? 'currentColor' : 'none'}>
-    <path d="m12 3.6 2.6 5.3 5.9.9-4.3 4.1 1 5.8-5.2-2.7-5.2 2.7 1-5.8L3.5 9.8l5.9-.9z" />
-  </Svg>
-);
-
-const IconCopy = (p: { size?: number }) => (
-  <Svg {...p}>
-    <rect x="8.5" y="8.5" width="12" height="12" rx="2.5" />
-    <path d="M15.5 5.5v-1a2 2 0 0 0-2-2h-8a2 2 0 0 0-2 2v8a2 2 0 0 0 2 2h1" />
-  </Svg>
-);
-
-const IconCheck = (p: { size?: number }) => (
-  <Svg {...p}><path d="m5 12.5 4.5 4.5L19 7.5" /></Svg>
-);
-
-const IconAlert = (p: { size?: number }) => (
-  <Svg {...p}>
-    <path d="M10.3 3.9 1.9 18.3a2 2 0 0 0 1.7 3h16.8a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0" />
-    <path d="M12 9v4.5M12 17.5h.01" />
-  </Svg>
-);
-
-const IconGlobe = (p: { size?: number }) => (
-  <Svg {...p}>
-    <circle cx="12" cy="12" r="9" />
-    <path d="M3.2 9.5h17.6M3.2 14.5h17.6" />
-    <path d="M12 3a15 15 0 0 1 0 18 15 15 0 0 1 0-18" />
-  </Svg>
-);
-
-const IconSearch = (p: { size?: number }) => (
-  <Svg {...p}>
-    <circle cx="11" cy="11" r="6.5" />
-    <path d="m16 16 4.5 4.5" />
-  </Svg>
-);

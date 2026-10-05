@@ -8,7 +8,7 @@ import { STRENGTH_COLORS, STRENGTH_LABELS } from '../components/strength';
 import {
   IconCard, IconChevronDown, IconClose, IconIdentity, IconKey, IconNote,
   IconPlus, IconSpinner, IconStar, IconTerminal, IconTrash,
-} from '../components/icons';
+} from '@coffer/ui';
 
 interface Props {
   client: VaultClient;

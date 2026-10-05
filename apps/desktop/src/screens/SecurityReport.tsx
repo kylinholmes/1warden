@@ -3,7 +3,7 @@ import {
   buildReport, checkBreaches,
   type VaultItem, type SecurityReport as Report, type ScoreGrade,
 } from '@coffer/vault';
-import { IconAlert, IconCheck, IconSpinner } from '../components/icons';
+import { IconAlert, IconCheck, IconSpinner } from '@coffer/ui';
 
 /**
  * 安全报告（1Password 的 Watchtower 等价物）。

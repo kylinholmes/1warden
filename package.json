@@ -12,7 +12,7 @@
     "test:contract": "vitest run --config vitest.contract.config.ts",
     "test:interop": "bun scripts/interop-test.ts",
     "seed": "bun scripts/seed-account.ts",
-    "typecheck": "tsc --build --force",
+    "typecheck": "tsc -b --force && tsc -p apps/desktop --noEmit && tsc -p apps/extension --noEmit",
     "dev:proxy": "bun run scripts/dev-proxy.ts",
     "e2e": "bun run scripts/e2e-desktop.ts",
     "dev:desktop": "cd apps/desktop && bun run tauri dev",

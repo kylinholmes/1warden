@@ -3,7 +3,7 @@ import {
   parseImport, detectImportFormat, IMPORT_FORMATS,
   type VaultClient, type ImportResult, type ImportFormatId,
 } from '@coffer/vault';
-import { IconAlert, IconCheck, IconImport } from '../components/icons';
+import { IconAlert, IconCheck, IconImport } from '@coffer/ui';
 
 /**
  * 从别处导入。

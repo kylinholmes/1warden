@@ -14,7 +14,8 @@
     "@coffer/crypto": "workspace:*",
     "@coffer/vault": "workspace:*",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "@coffer/ui": "workspace:*"
   },
   "devDependencies": {
     "@types/chrome": "0.1.34",

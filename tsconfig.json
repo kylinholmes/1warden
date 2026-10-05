@@ -1,8 +1,27 @@
 {
+  "$comment": [
+    "⚠️ `references` 只列 packages —— apps 的 tsconfig 是 `composite: false`，",
+    "放进 references 会直接报错（references 要求被引用的工程可增量构建）。",
+    "所以 apps 由根 package.json 的 `typecheck` 脚本单独跑一遍。",
+    "",
+    "这条不是形式主义：apps/extension 曾经长时间**没有任何人跑过它的 tsc**，",
+    "于是 `VaultItem` 上早就删掉的 `hasItemKey` 字段和缺失的 `sshKey`",
+    "在三个构造点上一路潜伏，最后表现为「保存登录信息失败」，",
+    "而报错信息指向加密层（「独立密钥解不开」），和真实原因隔了三层。"
+  ],
   "files": [],
   "references": [
-    { "path": "./packages/crypto" },
-    { "path": "./packages/api" },
-    { "path": "./packages/vault" }
+    {
+      "path": "./packages/crypto"
+    },
+    {
+      "path": "./packages/api"
+    },
+    {
+      "path": "./packages/vault"
+    },
+    {
+      "path": "./packages/ui"
+    }
   ]
 }

@@ -1,7 +1,7 @@
 import {
   createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode,
 } from 'react';
-import { IconAlert, IconCheck, IconClose, IconInfo } from './icons';
+import { IconAlert, IconCheck, IconClose, IconInfo } from '@coffer/ui';
 
 /**
  * 提示条 —— 那些「没有别的地方可放」的即时反馈。

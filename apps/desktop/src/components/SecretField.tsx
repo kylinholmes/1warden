@@ -1,5 +1,5 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
-import { IconCheck, IconCopy, IconEye } from './icons';
+import { IconCheck, IconCopy, IconEye } from '@coffer/ui';
 
 interface Props {
   label: string;

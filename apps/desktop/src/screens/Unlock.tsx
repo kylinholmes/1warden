@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, type FormEvent } from 'react';
 import type { VaultClient } from '@coffer/vault';
-import { IconAlert, IconGlobe, IconSpinner } from '../components/icons';
+import { IconAlert, IconGlobe, IconSpinner } from '@coffer/ui';
 
 interface Props {
   client: VaultClient;

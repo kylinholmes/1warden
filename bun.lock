@@ -17,6 +17,7 @@
       "dependencies": {
         "@coffer/api": "workspace:*",
         "@coffer/crypto": "workspace:*",
+        "@coffer/ui": "workspace:*",
         "@coffer/vault": "workspace:*",
         "@tauri-apps/api": "2.12.1",
         "react": "19.3.0",
@@ -38,6 +39,7 @@
       "dependencies": {
         "@coffer/api": "workspace:*",
         "@coffer/crypto": "workspace:*",
+        "@coffer/ui": "workspace:*",
         "@coffer/vault": "workspace:*",
         "react": "19.3.0",
         "react-dom": "19.3.0",
@@ -64,6 +66,16 @@
       "version": "0.0.0",
       "dependencies": {
         "hash-wasm": "4.12.0",
+      },
+    },
+    "packages/ui": {
+      "name": "@coffer/ui",
+      "version": "0.0.0",
+      "dependencies": {
+        "react": "^19.0.0",
+      },
+      "devDependencies": {
+        "@types/react": "^19.0.0",
       },
     },
     "packages/vault": {
@@ -132,6 +144,8 @@
     "@coffer/desktop": ["@coffer/desktop@workspace:apps/desktop"],
 
     "@coffer/extension": ["@coffer/extension@workspace:apps/extension"],
+
+    "@coffer/ui": ["@coffer/ui@workspace:packages/ui"],
 
     "@coffer/vault": ["@coffer/vault@workspace:packages/vault"],
 

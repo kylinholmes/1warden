@@ -31,7 +31,7 @@
 import { useEffect, useState } from 'react';
 import { avatarOf, iconDomainOf, type VaultItem } from '@coffer/vault';
 import type { IconStore } from '@coffer/vault';
-import { TypeIcon } from './icons';
+import { TypeIcon } from '@coffer/ui';
 
 export function ItemIcon({ item, store }: { item: VaultItem; store: IconStore | null }) {
   const avatar = avatarOf(item);

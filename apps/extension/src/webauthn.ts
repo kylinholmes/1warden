@@ -272,14 +272,14 @@ function newPasskeyItem(
   return {
     id: '', type: 'login', rawType: 1, name: rpId, nameFailed: false,
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, hasItemKey: false,
+    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: {
       username: userName, password: null, totp: null,
       uris: [{ uri: origin, match: null }],
       passwordRevisionDate: null,
       fido2Credentials: [stored],
     },
-    card: null, identity: null, secureNote: null,
+    card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }

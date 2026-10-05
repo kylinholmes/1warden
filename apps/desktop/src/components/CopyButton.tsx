@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { IconCheck, IconCopy } from './icons';
+import { IconCheck, IconCopy } from '@coffer/ui';
 
 /**
  * 复制到剪贴板，**N 秒后自动清空**（若期间用户没复制别的东西）。

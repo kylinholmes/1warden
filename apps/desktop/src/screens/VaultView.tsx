@@ -18,7 +18,7 @@ import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   IconSearch, IconShield, IconStar, IconTrash, TypeIcon,
-} from '../components/icons';
+} from '@coffer/ui';
 
 interface Props {
   client: VaultClient;

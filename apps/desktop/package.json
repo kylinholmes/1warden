@@ -16,7 +16,8 @@
     "@coffer/vault": "workspace:*",
     "@tauri-apps/api": "2.12.1",
     "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "react-dom": "19.3.0",
+    "@coffer/ui": "workspace:*"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.1",

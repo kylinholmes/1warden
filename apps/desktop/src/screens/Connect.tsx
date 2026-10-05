@@ -4,7 +4,7 @@ import { probeCertificate, trustCertificate, type CertInfo } from '../trust';
 import {
   IconAlert, IconArrowLeft, IconChevronDown, IconGlobe, IconLock,
   IconPlus, IconServer, IconSpinner,
-} from '../components/icons';
+} from '@coffer/ui';
 
 interface Props {
   client: VaultClient;

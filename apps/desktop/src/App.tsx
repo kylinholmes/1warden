@@ -4,7 +4,7 @@ import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
 import { screenFor } from './screens/screen-for';
-import { IconAlert } from './components/icons';
+import { IconAlert } from '@coffer/ui';
 import { ToastProvider } from './components/Toast';
 import { useQuickBridge } from './use-quick-bridge';
 import { listen } from '@tauri-apps/api/event';
