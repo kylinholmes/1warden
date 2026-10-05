@@ -3,6 +3,7 @@ import { searchItems, totpCode, hasTotp, summaryOf, type VaultItem, type VaultFo
 import type { VaultClient, IconStore } from '@coffer/vault';
 import { saveFile } from '../save';
 import { iconStoreFor } from '../icon-store';
+import { useShowTypes } from '../prefs';
 import { ItemIcon } from '@coffer/ui';
 import { SecretField } from '../components/SecretField';
 import { AutotypeAction } from '../components/AutotypeAction';
@@ -29,6 +30,13 @@ type Category =
   | { kind: 'all' }
   | { kind: 'favorites' }
   | { kind: 'folder'; id: string }
+  /*
+   * 按**条目类型**过滤（登录 / 信用卡 / 安全笔记 …）。
+   *
+   * 和「文件夹」是两个维度：文件夹是用户自己划的，类型是数据本身的属性。
+   * 它们回答的是不同的问题 ——「我把它放哪了」 vs 「这是什么东西」。
+   */
+  | { kind: 'type'; type: string }
   | { kind: 'security' }
   | { kind: 'import' };
 
@@ -54,6 +62,9 @@ export function VaultView({ client, onLock }: Props) {
    * `iconStoreFor` 内部是模块级单例：每次渲染新建一个的话缓存等于没有，
    * 滚动一次就要把每个域名重新请求一遍，而服务端首次抓取要 1.5 秒。
    */
+  // 侧栏「类别」那一节的开关，偏好存在 localStorage，改了立刻生效
+  const [showTypes] = useShowTypes();
+
   const serverUrl = session.account?.serverUrl ?? '';
   const icons = useMemo(() => (serverUrl === '' ? null : iconStoreFor(serverUrl)), [serverUrl]);
 
@@ -76,10 +87,27 @@ export function VaultView({ client, onLock }: Props) {
   const items = session.items;
   const folders = session.folders;
 
+  /*
+   * 每个类别有多少条。
+   *
+   * ⚠️ 计数取**全部条目**，不跟着当前筛选变 —— 侧栏上那个数字的意思是
+   * 「这个分类里有多少东西」。跟着筛选变的话，用户点进「登录」会看到
+   * 其他分类的数字全变成 0，像是数据在丢。
+   */
+  const typeCounts = useMemo(() => {
+    const m = new Map<string, number>();
+    for (const i of items) m.set(i.type, (m.get(i.type) ?? 0) + 1);
+    // 按数量降序 —— 条目多的类别是用户更常用的，排前面少找一次
+    return [...m.entries()]
+      .map(([type, count]) => ({ type, count }))
+      .sort((a, b) => b.count - a.count);
+  }, [items]);
+
   const filtered = useMemo(() => {
     let pool = items;
     if (category.kind === 'favorites') pool = pool.filter((i) => i.favorite);
     else if (category.kind === 'folder') pool = pool.filter((i) => i.folderId === category.id);
+    else if (category.kind === 'type') pool = pool.filter((i) => i.type === category.type);
     return searchItems(pool, folders, query).map((h) => h.item);
   }, [items, folders, query, category]);
 
@@ -138,6 +166,8 @@ export function VaultView({ client, onLock }: Props) {
       })}
       onOpenSettings={() => setSettingsOpen(true)}
       syncing={session.syncing}
+      typeCounts={typeCounts}
+      showTypes={showTypes}
       generatorOpen={generatorOpen}
       onOpenGenerator={() => setGeneratorOpen(true)}
     />
@@ -416,6 +446,10 @@ function Sidebar(props: {
   onOpenGenerator: () => void;
   /** 后台正在同步 —— 列表已可用，只是在更新 */
   syncing: boolean;
+  /** 各类别的条目数，**只含 count > 0 的**（侧栏不渲染空类别） */
+  typeCounts: { type: string; count: number }[];
+  /** 设置里的开关 —— 关掉整节不显示 */
+  showTypes: boolean;
   onCreateFolder: (name: string) => Promise<void>;
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
@@ -593,6 +627,35 @@ function Sidebar(props: {
           )}
         </ul>
       </div>
+
+      {/*
+        类别 —— 按**条目类型**过滤。
+
+        ⚠️ 和「文件夹」**同时存在**，不是互斥的两套导航：文件夹回答「我把它放哪了」，
+        类别回答「这是什么东西」。1Password 也是两者并列。
+
+        ⚠️ 计数为 0 的类别**不显示** —— 列一堆「0」既占地方，
+        又让人以为自己的东西少了。空库时这一节整个不出现。
+      */}
+      {props.showTypes && props.typeCounts.length > 0 && (
+        <div>
+          <div className="mb-1 mt-3 flex items-center px-2">
+            <span className="text-[var(--text-xs)] font-medium text-[var(--ink-secondary)]">类别</span>
+          </div>
+          <ul className="space-y-0.5">
+            {props.typeCounts.map((t) => (
+              <NavItem
+                key={t.type}
+                icon={<TypeIcon type={t.type} size={16} />}
+                label={TYPE_LABEL[t.type] ?? t.type}
+                count={t.count}
+                active={props.category.kind === 'type' && props.category.type === t.type}
+                onClick={() => props.onSelect({ kind: 'type', type: t.type })}
+              />
+            ))}
+          </ul>
+        </div>
+      )}
 
       <div className="border-t border-[var(--border-subtle)] p-2.5">
         <div className="mb-1 flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5">

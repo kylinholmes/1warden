@@ -1,6 +1,7 @@
 import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { FloatingPanel } from '../components/FloatingPanel';
 import { Segmented } from '../components/Segmented';
+import { useShowTypes } from '../prefs';
 import { getThemeMode, setThemeMode, subscribeTheme, type ThemeMode } from '../theme';
 import {
   IconClose, IconGear, IconIdentity, IconInfo, IconKeyboard, IconPalette, IconShield,
@@ -58,10 +59,12 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
 }) {
   const [section, setSection] = useState<SectionId>(initialSection);
   /*
-   * 主题的真相在 theme.ts（模块级 + localStorage），组件只是它的视图 ——
+   * 主题的真相在 theme.ts、类别开关的真相在 prefs.ts（都是模块级 +
+   * localStorage），组件只是它们的视图 ——
    * 用 useState 在这里存一份的话，预览页或别处改了主题，这个控件不会知道。
    */
   const theme = useSyncExternalStore(subscribeTheme, getThemeMode);
+  const [showTypes, setShowTypes] = useShowTypes();
 
   return (
     <FloatingPanel
@@ -191,6 +194,19 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
                     { value: 'light', label: '亮色' },
                     { value: 'dark', label: '暗色' },
                   ]}
+                />
+              </Row>
+              {/*
+                侧栏「类别」那一节。
+                ⚠️ 默认**开着** —— 这个开关藏在设置里，而关掉之后侧栏
+                完全没有入口。默认关等于这个功能不存在。
+              */}
+              <Row label="侧栏按类别分组" hint="在「文件夹」下面按条目类型（登录 / 信用卡 …）再分一组">
+                <Segmented<'on' | 'off'>
+                  label="侧栏按类别分组"
+                  value={showTypes ? 'on' : 'off'}
+                  onChange={(v) => setShowTypes(v === 'on')}
+                  options={[{ value: 'on', label: '显示' }, { value: 'off', label: '隐藏' }]}
                 />
               </Row>
               <Row label="列表密度" hint="一行里显示多少条记录">
