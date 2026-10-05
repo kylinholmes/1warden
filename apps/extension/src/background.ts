@@ -26,6 +26,7 @@ import {
   totpCode,
 } from '@coffer/vault';
 import { SessionStore, type StorageArea } from './session-store';
+import { extensionSyncCache } from './sync-cache';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
 import { handleWebauthn, type WebauthnPayload } from './webauthn';
 
@@ -109,6 +110,11 @@ function newClient(): VaultClient {
     deviceStore,
     autoLockMs: 15 * 60 * 1000,
     onLock: () => { void sessions.clear(); },
+    /*
+     * 上次同步的密文缓存 —— 解锁后先拿它把界面填上，再去问服务端。
+     * 桌面端早就有，扩展端一直缺（每次解锁都要等一整轮网络）。
+     */
+    syncCache: extensionSyncCache,
   });
 }
 
