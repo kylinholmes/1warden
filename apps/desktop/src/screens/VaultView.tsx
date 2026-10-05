@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { searchItems, totpCode, hasTotp, summaryOf, sortItems, SORT_BY, SORT_LABEL, type SortBy, type VaultItem, type VaultFolder, type Attachment } from '@coffer/vault';
 import type { VaultClient, IconStore } from '@coffer/vault';
 import { saveFile } from '../save';
-import { iconStoreFor } from '../icon-store';
+import { iconStoreFor } from '@coffer/ui';
 import { useShowTypes } from '../prefs';
 import { ItemIcon } from '@coffer/ui';
 import { AutotypeAction } from '../components/AutotypeAction';

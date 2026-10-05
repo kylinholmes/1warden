@@ -9,7 +9,7 @@ import { createRoot } from 'react-dom/client';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { QuickAccess } from '../screens/QuickAccess';
-import { iconStoreFor } from '../icon-store';
+import { iconStoreFor } from '@coffer/ui';
 import { initPlatform } from '../platform';
 import { installDesktopHost } from '../host-impl';
 import { initNativeFeel } from '../native';

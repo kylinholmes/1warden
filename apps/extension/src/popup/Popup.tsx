@@ -2,12 +2,12 @@ import { ext } from '../ext-api';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generatePassword, passwordStrength } from '@coffer/crypto';
 import { IconStore } from '@coffer/vault';
-import { iconStoreFor } from '../icon-store';
+
 import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, Section,
-  countByType, host, scheduleClipboardClear, typeDestinations,
+  countByType, host, iconStoreFor, scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
@@ -128,11 +128,8 @@ export function Popup() {
   const icons = useMemo(() => {
     const url = status?.account?.serverUrl;
     if (!url) return null;
-    return iconStoreFor(url, async (u) => {
-      const r = await host().fetch(u);
-      if (!r.ok) return null;
-      return new Uint8Array(await r.arrayBuffer());
-    });
+    /* 取图标走宿主 —— 桌面端走 Rust、扩展端直接 fetch，差异已被宿主吸收 */
+    return iconStoreFor(url);
   }, [status?.account?.serverUrl]);
   const [tabUrl, setTabUrl] = useState('');
   const [tabId, setTabId] = useState<number | undefined>(undefined);
