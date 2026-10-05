@@ -18,7 +18,7 @@ import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  ItemRow, NavRail, SecretField, Section, TYPE_LABEL, TypeIcon, countByType,
+  ItemRow, NavDrawer, SecretField, Section, TYPE_LABEL, TypeIcon, countByType,
   scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
@@ -568,12 +568,14 @@ function Sidebar(props: {
       材质，右边两块用不透明的表面盖住，只剩这一条把材质透出来。
       见 styles.css 的 --surface-glass —— α 是算出来的，不是调出来的。
     */
-    <NavRail
-      className="app-sidebar below-titlebar bg-[var(--surface-glass)]"
+    /*
+      ⚠️ 包在 `NavDrawer` 里 —— **和扩展端同一个结构**。
+      宽屏时 CSS 把它变回常驻侧栏（见 components.css 的 `@container shell`），
+      窄屏时它就是悬停抽屉。两端因此是同一份标记，只是宽度不同。
+    */
+    <NavDrawer
+      className="app-sidebar below-titlebar"
       label="保险库导航"
-      /* 桌面端的折叠走**容器查询**（见 styles.css），不靠这个开关 ——
-         所以这里恒为 true，收起与否由宽度决定 */
-      expanded
       brand={
         <>
           <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">

@@ -236,6 +236,31 @@
     /* 抽屉里的导航栏不受折叠态影响 —— 它只在滑出来时可见 */
     .nav-drawer-panel .vault-rail { height: 100%; }
 
+    /*
+     * ── 宽屏时，抽屉变回**常驻侧栏** ──────────────────────────
+     *
+     * 这一步是「不同端本质是一个东西」的落点：
+     * 桌面端拖宽 → 侧栏；拖窄 → 抽屉；扩展弹窗 → 恒为抽屉
+     * （它 440px，永远低于这条线，所以不需要开关）。
+     *
+     * **同一份标记、同一个组件**，只是宽度不同。
+     *
+     * ⚠️ 容器是 `.app-shell`（桌面端自己的类），不是共享的 `.vault-shell` ——
+     * 后者是弹窗的根元素，而弹窗按内容撑开，inline-size 容器会让它塌成 0 宽。
+     */
+    @container shell (min-width: 900px) {
+      .nav-drawer { display: flex; flex: none; }
+      /* 触发器藏起来：这一档导航常驻，不需要入口 */
+      .nav-drawer-trigger { display: none; }
+      .nav-drawer-panel {
+        position: static;
+        transform: none;
+        box-shadow: none;
+        /* 常驻侧栏背后是壁纸，所以这一档才用玻璃（见 --surface-glass） */
+        background: var(--surface-glass);
+      }
+    }
+
     .vault-rail { width: var(--nav-w, 80px); }
     .vault-rail[data-expanded='true'] { --nav-w: 214px; }
     .vault-rail[data-expanded='false'] { --nav-w: 80px; }
