@@ -350,6 +350,7 @@ export function VaultView({ client, onLock }: Props) {
                 key={selected.id}
                 client={client}
                 item={selected}
+                icons={icons}
                 onEdit={() => setMode({ kind: 'edit', item: selected })}
                 onDelete={() => setConfirmDelete(selected)}
                 onToggleFavorite={() => {
@@ -895,7 +896,9 @@ function EmptyDetail({ hasItems }: { hasItems: boolean }) {
   );
 }
 
-function ItemDetail({ client, item, onEdit, onDelete, onToggleFavorite }: {
+function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }: {
+  /** 图标缓存 —— 详情栏头部复用列表那套图标，不是再画一个类型图标 */
+  icons: IconStore | null;
   client: VaultClient;
   item: VaultItem;
   onEdit: () => void;
@@ -921,8 +924,13 @@ function ItemDetail({ client, item, onEdit, onDelete, onToggleFavorite }: {
     <article className="screen-in mx-auto w-full px-8 pb-12" style={{ maxWidth: 'calc(var(--detail-w) + 64px)' }}>
       {/* 头部跟着滚 —— 长条目滚到下面时，用户仍然看得到自己在看哪一条 */}
       <header className="sticky top-0 z-10 -mx-8 flex items-start gap-3.5 border-b border-[var(--border-subtle)] bg-[var(--surface-paper)] px-8 pb-4 pt-5">
-        <span className="tile mt-0.5 h-9 w-9" data-type={item.type}>
-          <TypeIcon type={item.type} size={18} />
+        {/*
+          ⚠️ 和列表用**同一个** ItemIcon，不是再画一个类型图标。
+          之前这里是按类型上色的旧写法，于是同一条记录在列表里显示站点图标、
+          在详情栏里却是一把钥匙 —— 明明是同一条。
+        */}
+        <span className="mt-0.5">
+          <ItemIcon item={item} store={icons} size={36} />
         </span>
         <div className="min-w-0 flex-1">
           <h2 className={`truncate text-[var(--text-xl)] font-semibold tracking-[-0.015em] ${

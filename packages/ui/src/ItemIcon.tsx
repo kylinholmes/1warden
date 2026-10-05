@@ -34,7 +34,11 @@ import { avatarOf, iconDomainOf, type VaultItem } from '@coffer/vault';
 import type { IconStore } from '@coffer/vault';
 import { TypeIcon } from './icons';
 
-export function ItemIcon({ item, store }: { item: VaultItem; store: IconStore | null }) {
+export function ItemIcon({ item, store, size }: {
+  item: VaultItem; store: IconStore | null;
+  /** 块边长。默认 34px（列表行）—— 详情栏头部用 36 */
+  size?: number;
+}) {
   const avatar = avatarOf(item);
   return (
     <IconGlyph
@@ -43,16 +47,18 @@ export function ItemIcon({ item, store }: { item: VaultItem; store: IconStore | 
       hue={avatar.hue}
       type={item.type}
       store={store}
+      {...(size === undefined ? {} : { size })}
     />
   );
 }
 
-export function IconGlyph({ domain, text, hue, type, store }: {
+export function IconGlyph({ domain, text, hue, type, store, size }: {
   domain: string | null;
   text: string;
   hue: number;
   type: string;
   store: IconStore | null;
+  size?: number;
 }) {
   const [url, setUrl] = useState<string | null>(null);
 
@@ -75,7 +81,14 @@ export function IconGlyph({ domain, text, hue, type, store }: {
     return <img src={url} alt="" className="tile-img" draggable={false} />;
   }
 
-  const style = { '--h': String(hue) } as React.CSSProperties;
+  /*
+   * 尺寸走 CSS 变量而不是内联 width/height —— 三个类各自就是那个方块，
+   * 内联尺寸会和它们的规则打架（谁赢取决于顺序，而那不是能靠读代码看出来的）。
+   */
+  const style = {
+    '--h': String(hue),
+    ...(size === undefined ? {} : { '--tile-size': `${size}px` }),
+  } as React.CSSProperties;
 
   // 没有站点的条目（卡片、笔记、身份、SSH 密钥）保留类型形状 ——
   // 「ZA 信用卡」和「我的邮箱」都变成两个汉字的话，就看不出哪个是卡了

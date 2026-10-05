@@ -391,7 +391,7 @@ createRoot(document.getElementById('root')!).render(
       <ImportScreen client={fakeClient} onImported={() => {}} />
     ) : which === 'detail' ? (
       <DetailPane>
-        <ItemDetail client={fakeClient} item={DETAIL} onEdit={() => {}} onDelete={() => {}} onToggleFavorite={() => {}} />
+        <ItemDetail icons={null} client={fakeClient} item={DETAIL} onEdit={() => {}} onDelete={() => {}} onToggleFavorite={() => {}} />
       </DetailPane>
     ) : which === 'detail-empty' ? (
       <DetailPane><EmptyDetail hasItems /></DetailPane>
