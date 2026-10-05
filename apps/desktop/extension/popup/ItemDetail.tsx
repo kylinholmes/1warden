@@ -1,9 +1,9 @@
 import { useEffect, useState } from 'react';
 import { ext } from '../ext-api';
 import {
-  IDENTITY_LABEL, IconPencil, ItemIcon, IconAlert, IconArrowLeft, IconStar, Section, SecretField,
+  IDENTITY_LABEL, IconAlert, IconArrowLeft, IconImport, IconPencil, IconStar, ItemIcon, Section, SecretField,
 } from '@coffer/ui';
-import { IconStore } from '@coffer/vault';
+import { IconStore, attachmentBytes } from '@coffer/vault';
 import type { ItemSummary } from './Popup';
 
 /**
@@ -48,8 +48,19 @@ interface ExtraFields {
   customFields: { name: string; type: number; value: string | null }[];
   /** 只有日期 —— 值要走 `coffer:reveal-history` 才拿得到 */
   passwordHistory: { lastUsedDate: string }[];
+  /** 只有元数据 —— 字节要单独要（见 `download`） */
+  attachments: { id: string; fileName: string; size: string }[];
 }
 
+
+/** 字节数说人话 —— 附件列表里「1234567」没人读得出来是多大 */
+function sizeText(size: string): string {
+  const n = attachmentBytes({ size });
+  if (n === null) return '';
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(0)} KB`;
+  return `${(n / 1024 / 1024).toFixed(1)} MB`;
+}
 
 export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
   item: ItemSummary;
@@ -84,6 +95,37 @@ export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
    * 「30 秒后按值清空」则交给**后台**安排 —— 弹窗一关它的定时器就没了，
    * 而「复制完忘了剪贴板里还有密码」正是弹窗已经关掉的那种情况。
    */
+  /**
+   * 下载一个附件。
+   *
+   * 字节从后台来（解密也在那边 —— 附件是加密存的，密钥在会话里）。
+   * 拿到之后拼一个 Blob、造一个对象 URL、让一个隐藏的 `<a download>` 去点。
+   *
+   * ⚠️ **对象 URL 不能马上回收** —— 下载还没开始就把 blob 撤了，
+   * 用户拿到的是一个失败。60 秒是个折中：足够大的文件起步，
+   * 又不至于让几 MB 的字节在内存里躺到弹窗关掉。
+   */
+  async function download(a: { id: string; fileName: string }): Promise<void> {
+    setError(null);
+    try {
+      const r = await ext.runtime.sendMessage({
+        type: 'coffer:download-attachment', itemId: item.id, attachmentId: a.id,
+      }) as { fileName?: string; base64?: string; error?: string };
+      if (r?.error) throw new Error(r.error);
+      const bin = atob(r.base64 ?? '');
+      const bytes = new Uint8Array(bin.length);
+      for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i);
+      const url = URL.createObjectURL(new Blob([bytes]));
+      const el = document.createElement('a');
+      el.href = url;
+      el.download = r.fileName || a.fileName;
+      el.click();
+      setTimeout(() => URL.revokeObjectURL(url), 60_000);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '下载失败');
+    }
+  }
+
   /*
    * 取一个字段的值。`copy` 那条会**顺手安排剪贴板清理**，揭示那条不会 ——
    * 所以这里按用途分成两个，而不是共用一个（见 SecretField 的 `revealValue`）。
@@ -254,6 +296,28 @@ export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
                 onCopied={noLocalClear}
                 onCopyError={(e) => setError(e instanceof Error ? e.message : '复制失败')}
               />
+            ))}
+          </Section>
+        )}
+
+        {extra && extra.attachments.length > 0 && (
+          <Section title="附件">
+            {extra.attachments.map((a) => (
+              <div key={a.id} className="flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-b-0">
+                <span className="min-w-0 flex-1 truncate text-md" title={a.fileName}>{a.fileName}</span>
+                <span className="shrink-0 text-xs tabular-nums text-[var(--ink-tertiary)]">
+                  {sizeText(a.size)}
+                </span>
+                <button
+                  type="button"
+                  onClick={() => { void download(a); }}
+                  aria-label={`下载 ${a.fileName}`}
+                  title="下载"
+                  className="shrink-0 rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+                >
+                  <IconImport size={14} />
+                </button>
+              </div>
             ))}
           </Section>
         )}

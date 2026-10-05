@@ -164,11 +164,20 @@ export function stubChrome(): void {
                  passwordHistory: [
                    { lastUsedDate: '2025-06-01T00:00:00Z' },
                    { lastUsedDate: '2024-11-14T00:00:00Z' },
+                 ],
+                 /* 三种量级各一个 —— 大小那一栏的 formatting 才验得到 */
+                 attachments: [
+                   { id: 'att1', fileName: '恢复代码.txt', size: '312' },
+                   { id: 'att2', fileName: '公司证件扫描件.pdf', size: '284160' },
+                   { id: 'att3', fileName: '备份.zip', size: '5242880' },
                  ] };
       }
       case 'coffer:reveal-custom':
         return { value: '482913' };
       /* 每条回不同的值 —— 和 `coffer:reveal` 同一个理由：桩不能骗人 */
+      case 'coffer:download-attachment':
+        /* 内容无所谓，形状要对 —— 弹窗那侧要 base64 解回字节 */
+        return { fileName: '恢复代码.txt', base64: btoa('preview attachment') };
       case 'coffer:reveal-history':
         return { value: msg.index === 0 ? 'old-pass-123' : 'older-pass-456' };
       /*

@@ -247,6 +247,7 @@ type Request =
   | { type: 'coffer:reveal'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: 'coffer:reveal-custom'; itemId: string; index: number }
   | { type: 'coffer:reveal-history'; itemId: string; index: number }
+  | { type: 'coffer:download-attachment'; itemId: string; attachmentId: string }
   | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: 'coffer:webauthn'; payload: unknown };
 
@@ -585,6 +586,10 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
          * 明文只在用户点开那一刻过一次手。
          */
         passwordHistory: i.passwordHistory.map((h) => ({ lastUsedDate: h.lastUsedDate })),
+        /* 附件的**元数据** —— 名字和大小是安全的，字节要单独要（见下面那条） */
+        attachments: i.attachments.map((a) => ({
+          id: a.id, fileName: a.fileName, size: a.size,
+        })),
       };
     }
 
@@ -964,6 +969,25 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const field = item?.customFields[req.index];
       if (!field) throw new Error('找不到这个自定义字段');
       return { value: field.value };
+    }
+
+    /**
+     * 下载一个附件。
+     *
+     * 字节必须过消息通道 —— 和导入那条路**相反**方向而已（那边是文件进来，
+     * 这里是文件出去）。都要 base64，因为结构化克隆不支持 `Uint8Array`
+     * 之外的东西，而消息层对二进制的处理各浏览器不一致。
+     *
+     * ⚠️ 解密在后台（`downloadAttachment` → `client.ts`）：附件是加密存的，
+     * 密钥要用会话里的。弹窗从头到尾只拿到**已经解开的字节**，
+     * 而且只在用户点了下载那一刻。
+     */
+    case 'coffer:download-attachment': {
+      const c = await unlockedClient();
+      const got = await c.downloadAttachment(req.itemId, req.attachmentId);
+      let bin = '';
+      for (const b of got.bytes) bin += String.fromCharCode(b);
+      return { fileName: got.fileName, base64: btoa(bin) };
     }
 
     /* 历史密码的揭示 —— 和自定义字段同一个理由：单独一条，不并进上面那个 */
