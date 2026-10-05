@@ -20,7 +20,7 @@
  * 而不是随手挑的。
  */
 import { host } from '@coffer/ui';
-import type { SyncCache } from '@coffer/vault';
+import type { SyncCache, KdfCache, KdfCacheEntry } from '@coffer/vault';
 import type { AccountInfo } from '@coffer/vault';
 import type { SyncResult } from '@coffer/api';
 
@@ -50,6 +50,41 @@ export const extensionSyncCache: SyncCache = {
     } catch {
       // 多半是超配额（10MB 量级）。不缓存是**可用**的，只是慢 —— 不能抛，
       // 抛了会让一次成功的同步看起来失败
+    }
+  },
+};
+
+/**
+ * 缓存 KDF 参数 —— 省掉解锁时的一次 `prelogin` 往返。
+ *
+ * ⚠️ **扩展端一直没有这一份**，所以每次解锁都比桌面端多一次网络往返。
+ * 而 `prelogin` 是**未认证**的公开端点（只要账户标识），缓存它不涉及
+ * 任何秘密 —— 项目里曾经为「离线解锁」在本地存过 `wrappedUserKey`，
+ * 那条路已经删掉（旧密码能打开本地缓存，而服务端改密码时本地不会跟着变）。
+ * 这里只有公开参数，和那个被删掉的东西不是一回事。
+ *
+ * 走宿主存储：两端同一份逻辑，差异只在「存哪」那一个调用上。
+ */
+export const kdfCache: KdfCache = {
+  async load(serverUrl, email) {
+    try {
+      const raw = await host().storage.get(`kdf.${serverUrl}|${email}`);
+      if (raw === null) return null;
+      const parsed = JSON.parse(raw) as KdfCacheEntry;
+      // 形状不对就当没有 —— 下一次解锁多一次往返而已
+      return typeof parsed.kdf?.iterations === 'number' ? parsed : null;
+    } catch {
+      return null;
+    }
+  },
+  async save(entry) {
+    try {
+      await host().storage.set(
+        `kdf.${entry.serverUrl}|${entry.email}`,
+        JSON.stringify(entry),
+      );
+    } catch {
+      // 存不下只是下次多一次往返 —— 不能抛，抛了会让一次成功的解锁看起来失败
     }
   },
 };
