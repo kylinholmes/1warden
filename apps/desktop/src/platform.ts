@@ -11,10 +11,33 @@
  * 一层异步（插件是异步的，而这件事必须在首次渲染之前就有答案）不划算。
  * UA 在 WKWebView 与 WebView2 里都稳定地带着系统名。
  */
-export type Os = 'mac' | 'win' | 'other';
+export type Os = 'mac' | 'win' | 'ios' | 'android' | 'other';
 
-export function detectOs(): Os {
-  const ua = navigator.userAgent;
+/**
+ * ⚠️ UA 是**参数**而不是直接读 `navigator` —— 因为这个判断必须能被测试。
+ *
+ * 它原来读全局，而它守着的那个 bug **在开发机上永远不复现**：
+ * 桌面浏览器的 UA 里没有 "like Mac OS X"，只有 iPhone 的才有。
+ * 于是类型检查、全部单测、构建全绿，而真机上顶部白白空掉 28px。
+ * 详见 platform.test.ts。
+ */
+export function detectOs(ua: string = navigator.userAgent): Os {
+  /*
+   * ⚠️ 顺序是**语义的一部分**，不是风格问题。
+   *
+   * iPhone 的 UA 长这样：
+   *
+   *     Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) AppleWebKit/605.1.15 …
+   *                        ^^^^^^^^^^^^^^^^
+   *
+   * 它**含有** "Mac OS X"。先判 Mac 就会把每一台 iPhone 都吃掉 ——
+   * 而 `data-os='mac'` 意味着 `--titlebar-h: 28px`，那是给**三个红绿灯圆点**
+   * 留的高度。iPhone 上没有那三个点，于是顶部白白空掉 28px。
+   *
+   * 所以：先认那些「UA 里混着别的系统名」的平台，再认桌面系统。
+   */
+  if (ua.includes('iPhone') || ua.includes('iPad') || ua.includes('iPod')) return 'ios';
+  if (ua.includes('Android')) return 'android';
   if (ua.includes('Mac OS X') || ua.includes('Macintosh')) return 'mac';
   if (ua.includes('Windows')) return 'win';
   return 'other';
