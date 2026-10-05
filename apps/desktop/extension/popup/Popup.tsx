@@ -1,16 +1,16 @@
 import { ext } from '../ext-api';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { IconStore } from '@coffer/vault';
+import { IconStore, detectImportFormat, type ImportFormatId } from '@coffer/vault';
 
 import {
   IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconStar,
   ItemRow, NavDrawer, NavRow, NavTrigger, Section,
-  ConnectScreen, GeneratorBody, SecurityReportView,
+  ConnectScreen, GeneratorBody, ImportView, SecurityReportView,
   apiMessageOf, countByType,
   host, iconStoreFor, rememberAccount, useAccounts,
   typeDestinations,
-  type BreachState, type ReportBrief,
+  type BreachState, type ImportOutcome, type ImportPreview, type ReportBrief,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
@@ -807,114 +807,102 @@ function ListSection({ label, items, icons, onOpen }: {
  * ⚠️ **两步，不是一步**：选完文件先看预览（多少条、多少文件夹、跳过多少行），
  * 确认了才真写。选错文件会让库里多出一堆垃圾，而删除比导入麻烦得多。
  */
+/**
+ * 导入 —— **界面本体和桌面端同一份**（`@coffer/ui` 的 `ImportView`）。
+ *
+ * 这里只有数据通道：弹窗**刻意**拿不到解析出来的明文条目（spec 不变量 S1），
+ * 所以文件字节 base64 之后发给后台，由后台解析。
+ *
+ * ⚠️ 这份以前是个只报个数的简化版：「跳过 3 行 / 格式不认」、
+ * 「已导入 187 条，3 条失败」—— **没有行号、没有原因、没有名字**。
+ * 而导入是一次性、不可重来的操作，一条丢掉的密码要到几个月后登录
+ * 某个网站时才会被发现，那时候已经无从回想是哪一步丢的。
+ */
 function ImportScreen({ onImported }: { onImported: () => void }) {
-  const [data, setData] = useState<{ name: string; base64: string } | null>(null);
-  const [preview, setPreview] = useState<Preview | null>(null);
-  const [done, setDone] = useState<{ created: number; failed: number } | null>(null);
-  const [busy, setBusy] = useState(false);
+  const [data, setData] = useState<{ name: string; base64: string; bytes: Uint8Array } | null>(null);
+  const [preview, setPreview] = useState<ImportPreview | null>(null);
+  const [result, setResult] = useState<ImportOutcome | null>(null);
+  const [progress, setProgress] = useState<{ done: number; total: number } | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function pick(file: File): Promise<void> {
-    setBusy(true); setError(null); setPreview(null); setDone(null);
+  /**
+   * 解析一份（或**换一个格式重解析同一份**）。
+   *
+   * ⚠️ `format` 一定要传下去：后台那边**用户显式选择压过自动识别**。
+   * 不传的话换格式那个下拉就是个摆设。
+   */
+  async function parse(base64: string, fileName: string, format: ImportFormatId): Promise<void> {
+    setError(null); setResult(null); setPreview(null);
     try {
-      const buf = new Uint8Array(await file.arrayBuffer());
+      const r = await send<Omit<ImportPreview, 'fileName'>>({
+        type: 'coffer:import-parse', dataBase64: base64, format,
+      });
+      setPreview({ ...r, fileName });
+    } catch (e) {
+      // 解析失败**留在原地**（文件还在），用户可以直接换个格式再试 ——
+      // 而不是被退回选文件那一步，让他以为自己选错了文件
+      setError(apiMessageOf(e));
+    }
+  }
+
+  async function pick(file: File): Promise<void> {
+    setError(null); setResult(null); setPreview(null);
+    try {
+      const bytes = new Uint8Array(await file.arrayBuffer());
       // 二进制过消息通道必须 base64 —— 见后台 `coffer:import-parse` 的说明
       let bin = '';
-      for (const b of buf) bin += String.fromCharCode(b);
+      for (const b of bytes) bin += String.fromCharCode(b);
       const base64 = btoa(bin);
-      setData({ name: file.name, base64 });
-      setPreview(await send<Preview>({ type: 'coffer:import-parse', dataBase64: base64 }));
+      setData({ name: file.name, base64, bytes });
+      await parse(base64, file.name, 'auto');
     } catch (e) {
       setError(e instanceof Error ? e.message : '读不出这个文件');
-    } finally { setBusy(false); }
+    }
   }
 
   async function commit(): Promise<void> {
-    if (data === null) return;
-    setBusy(true); setError(null);
+    if (data === null || preview === null) return;
+    setProgress({ done: 0, total: preview.total });
+    setError(null);
     try {
-      const r = await send<{ created: number; failed: unknown[] }>({
-        type: 'coffer:import-commit', dataBase64: data.base64,
+      const r = await send<ImportOutcome>({
+        type: 'coffer:import-commit', dataBase64: data.base64, format: preview.format,
       });
-      setDone({ created: r.created, failed: r.failed.length });
+      setResult(r);
       setPreview(null);
       onImported();
     } catch (e) {
-      setError(e instanceof Error ? e.message : '导入失败');
-    } finally { setBusy(false); }
+      setError(apiMessageOf(e));
+    } finally { setProgress(null); }
   }
 
+  /*
+   * 自动识别在这里算，不在后台 —— `detectImportFormat` 只看文件头，
+   * 而**字节本来就在弹窗手里**（是它读的文件）。让后台多回一个字段的话，
+   * 那个字段的含义会随「用户有没有手动选过」而变，是个容易搞错的状态。
+   */
+  const autoFormat = data === null ? null : detectImportFormat(data.bytes);
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
-      <label className={`btn btn-quiet w-full cursor-default py-2.5 ${busy ? 'opacity-45' : ''}`}>
-        选择文件
-        <input
-          type="file" accept=".1pux,.csv,.json,.kdbx,.xml" className="hidden"
-          disabled={busy}
-          onChange={(e) => {
-            const f = e.target.files?.[0];
-            if (f) void pick(f);
-            e.target.value = '';   // 同一个文件选两次也要能触发
-          }}
-        />
-      </label>
-
-      {preview !== null && (
-        <Section title="将要导入">
-          <div className="flex items-center gap-3 py-2">
-            <span className="min-w-0 flex-1 truncate text-md">{data?.name}</span>
-            <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">{preview.formatLabel}</span>
-          </div>
-          <div className="flex items-center gap-3 border-t border-[var(--border-subtle)] py-2">
-            <span className="min-w-0 flex-1 text-md">{preview.items} 条记录</span>
-            <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">
-              {preview.folders} 个文件夹
-            </span>
-          </div>
-          {preview.skipped > 0 && (
-            <div className="flex items-center gap-3 border-t border-[var(--border-subtle)] py-2">
-              <span className="min-w-0 flex-1 text-md text-[var(--caution)]">
-                跳过 {preview.skipped} 行
-              </span>
-              <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">格式不认</span>
-            </div>
-          )}
-        </Section>
-      )}
-
-      {preview !== null && (
-        <button type="button" onClick={() => { void commit(); }} disabled={busy}
-          className="btn btn-primary w-full py-2.5">
-          {busy ? '正在导入…' : `导入 ${preview.items} 条`}
-        </button>
-      )}
-
-      {done && (
-        <Note tone="accent">
-          已导入 {done.created} 条{done.failed > 0 ? `，${done.failed} 条失败` : ''}
-        </Note>
-      )}
-
-      {error && <Note tone="risk">{error}</Note>}
-
-      <p className="px-1 text-2xs leading-relaxed text-[var(--ink-tertiary)]">
-        支持 1PUX（1Password）、Bitwarden JSON、KeePass、CSV。
-        文件在本地解析，不会上传到任何地方。
-      </p>
+    <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5">
+      <ImportView
+        preview={preview}
+        progress={progress}
+        result={result}
+        error={error}
+        hasFile={data !== null}
+        autoFormat={autoFormat}
+        onPick={(f) => { void pick(f); }}
+        onFormatChange={(f) => {
+          if (data !== null) void parse(data.base64, data.name, f);
+        }}
+        onRun={() => { void commit(); }}
+        onReset={() => { setPreview(null); setResult(null); setError(null); setData(null); }}
+      />
     </div>
   );
 }
 
-/** `coffer:import-parse` 回的预览 */
-interface Preview {
-  format: string;
-  formatLabel: string;
-  folders: number;
-  items: number;
-  skipped: number;
-}
-
-/** 详情栏的占位。宽屏下这一栏一直在这儿，空着要有话说 */
 function EmptyDetail() {
   return (
     <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">

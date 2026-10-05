@@ -52,3 +52,4 @@ export * from './accounts';
 export * from './ConnectScreen';
 export * from './Segmented';
 export * from './Generator';
+export * from './ImportView';

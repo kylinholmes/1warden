@@ -580,7 +580,19 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
      */
     case 'coffer:import-parse': {
       const bytes = fromBase64(req.dataBase64);
-      const format = detectImportFormat(bytes) ?? (req.format as ImportFormatId | undefined) ?? null;
+      /*
+       * ⚠️ **用户显式选的格式要压过自动识别**，不是反过来。
+       *
+       * 原来写的是 `detectImportFormat(bytes) ?? req.format` —— 自动识别先手。
+       * 于是手动换格式时，只要自动识别还能认出来，用户的选择就被**静静忽略**，
+       * 界面看起来像「改了没反应」。而这一段存在的全部理由就是
+       * 「自动识别不可靠时用户能自己指定」（1Password 和 Chrome 的 CSV
+       * 列名一样，光看列名分不开）。
+       */
+      const requested = req.format && req.format !== 'auto'
+        ? (req.format as ImportFormatId)
+        : null;
+      const format = requested ?? detectImportFormat(bytes);
       if (format === null) {
         throw new Error('认不出这个文件的格式（支持 1PUX / Bitwarden / KeePass / CSV）');
       }
@@ -590,9 +602,15 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
         formatLabel: IMPORT_FORMATS.find((f) => f.id === format)?.label ?? format,
         /* 文件夹只有名字（`ImportResult` 不单独给一份），按名字去重 */
         folders: new Set(parsed.items.map((i) => i.folderName).filter((n) => n !== null)).size,
-        items: parsed.items.length,
-        /* 被跳过的行也要报 —— 静默丢掉是最容易被当成「导入坏了」的那种 */
-        skipped: parsed.skipped.length,
+        total: parsed.items.length,
+        /*
+         * ⚠️ 被跳过的行**逐条回**（行号 + 原因），不是只回个数。
+         *
+         * 只回个数的话界面只能显示「跳过 3 行」—— 而导入是**一次性、不可重来**
+         * 的操作，用户既不知道是哪三行、也无从补救。这条是
+         * `@coffer/ui/ImportView` 顶部那三条硬要求里的第二条。
+         */
+        skipped: parsed.skipped,
         /* 按类型分一下，让用户在确认前知道「里面有 3 张卡」这种 */
         byType: parsed.items.reduce<Record<string, number>>((m, i) => {
           m[i.type] = (m[i.type] ?? 0) + 1;
