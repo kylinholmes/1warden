@@ -133,3 +133,56 @@ apps/app/
 
 **现在已经成立**：桌面端拖窄 = 扩展端（左上角导航按钮、列表铺满、
 详情盖住列表）。重组之后这条**不能退化** —— 它是这次整理唯一的验收标准。
+
+---
+
+## 附录：第 3 步的界面清单（逐个判定）
+
+判定标准只有一条：**两端是否渲染同一份代码**。是 → 搬；否 → 留在各自目标里。
+
+### 已经在共享包里（`packages/ui`）—— 不用动
+
+`icons` / `ItemIcon` / `ItemRow` / `NavRail` / `NavDrawer` / `NavTrigger` /
+`SecretField` / `Section` / `CopyButton` / `clipboard` / `destinations` /
+`host` / `icon-disk` / `icon-store` / `sync-cache` / `platform` +
+`theme.css` / `components.css`
+
+### 桌面端 `screens/` —— 逐个判定
+
+| 文件 | 扩展端有对应物吗 | 结论 |
+|---|---|---|
+| `VaultView.tsx` | 有，但散在 `Popup.tsx` + `ItemDetail.tsx` | **最大的一块**。先拆 `VaultView` 的列表层/详情层，再和弹窗那份对齐 —— 这一步做完，「一个界面层」才算成立 |
+| `Connect.tsx` | 有（`Popup.tsx` 里的 `ConnectForm`） | **合并**。扩展端那份要跟着桌面端的字段（可见标签、脚注位置）走 |
+| `SecurityReport.tsx` | 有（`Popup.tsx` 里的 `SecurityReport`） | **合并**。两边的数据来源不同（桌面本地 / 后台消息），但**显示**该是同一份 |
+| `Import.tsx` | 有（`Popup.tsx` 里的 `ImportScreen`） | **合并**。同上 |
+| `Generator.tsx` | 有（`Popup.tsx` 里的 `Generator`） | **只共享逻辑**。桌面是浮层、弹窗是内联 —— 两个外壳，一个 `@coffer/crypto` |
+| `ItemEditor.tsx` | **没有** | 留桌面端。⚠️ 但用户要求过功能对齐 —— 将来扩展也要，那时再搬 |
+| `Settings.tsx` | **没有** | 留桌面端 |
+| `Unlock.tsx` | **没有**（扩展的解锁在连接表单里） | 留桌面端 |
+| `QuickAccess.tsx` | **没有**（那是桌面独有的快速面板） | 留桌面端 |
+| `screen-for.ts` | — | 跟着 `VaultView` 走 |
+
+### 桌面端 `components/`
+
+| 文件 | 结论 |
+|---|---|
+| `Segmented.tsx` | **可搬** —— 通用小组件，两端都用得上 |
+| `strength.ts` | **可搬** —— 密码强度的显示词表，弹窗生成器也要 |
+| `AutotypeAction.tsx` | 留桌面端（原生自动输入） |
+| `FloatingPanel.tsx` | 留桌面端 |
+| `Toast.tsx` | 留桌面端 |
+
+### 扩展端 `popup/`
+
+| 文件 | 结论 |
+|---|---|
+| `Popup.tsx`（约 900 行） | **必须拆**。里面混了六样东西：外壳、列表层、连接表单、生成器、安全报告、导入。前两样进共享界面层，后四样和桌面端对应的那份合并 |
+| `ItemDetail.tsx` | **搬** —— 和桌面端的详情是同一个东西 |
+| `main.tsx` | 入口，留在扩展目标里 |
+
+### ⚠️ 拆 `Popup.tsx` 时最容易搞错的一件事
+
+它里面的 `ConnectForm` / `SecurityReport` / `ImportScreen` / `Generator`
+**不是「扩展端的版本」**，是「还没有和桌面端对齐的版本」。合并的方向是
+**以桌面端那份为准**（它是参考实现），而不是把两份揉在一起 ——
+用户在这一轮里明确说过「复用桌面端的大部分 UI」。
