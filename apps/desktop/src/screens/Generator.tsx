@@ -3,7 +3,7 @@ import { generatePassword, generatePassphrase, passwordStrength } from '@coffer/
 import { FloatingPanel } from '../components/FloatingPanel';
 import { Segmented } from '../components/Segmented';
 
-import { STRENGTH_COLORS, STRENGTH_LABELS, crackSentence } from '../components/strength';
+import { STRENGTH_COLORS, STRENGTH_LABELS, crackSentence } from '@coffer/ui';
 import { CopyButton, IconClose, IconDice, scheduleClipboardClear } from '@coffer/ui';
 
 /**
@@ -27,7 +27,7 @@ import { CopyButton, IconClose, IconDice, scheduleClipboardClear } from '@coffer
  *
  * 强度反馈不报「熵 128 位」。用户要判断的是「这事会不会发生在我身上」，
  * 所以给的是**时间**：换算到秒 / 分钟 / 天 / 年 / 万年 / 亿年，
- * 直到「比宇宙现在的年龄还长」为止。见 components/strength.ts。
+ * 直到「比宇宙现在的年龄还长」为止。见 `@coffer/ui` 的 `strength.ts`。
  */
 
 type Kind = 'password' | 'passphrase';

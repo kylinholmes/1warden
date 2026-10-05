@@ -7,7 +7,8 @@ import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, Section,
-  countByType, host, iconStoreFor, scheduleClipboardClear, typeDestinations,
+  STRENGTH_LABELS, countByType, crackSentence, host, iconStoreFor,
+  scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
@@ -1079,10 +1080,20 @@ function Generator() {
               background: strength.score >= 3 ? 'var(--safe)' : strength.score >= 2 ? 'var(--caution)' : 'var(--risk)',
             }} />
           </div>
-          <span className="shrink-0 text-2xs tabular-nums text-[var(--ink-tertiary)]">
-            约 {Math.round(strength.entropyBits)} 位熵
+          {/*
+            ⚠️ 说的是**结论**，不只是熵值。
+            「约 131 位熵」是个没有结论的数字 —— 普通用户不知道 131 是好还是坏。
+            词表和桌面端共用（`@coffer/ui` 的 `strength.ts`），两端同一套说法。
+          */}
+          <span className="shrink-0 text-2xs text-[var(--ink-tertiary)]">
+            {STRENGTH_LABELS[strength.score] ?? ''}
           </span>
         </div>
+      )}
+      {strength && (
+        <p className="mt-1 text-2xs text-[var(--ink-tertiary)]">
+          {crackSentence(strength.entropyBits, strength.score)}
+        </p>
       )}
     </div>
   );

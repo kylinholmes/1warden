@@ -4,7 +4,7 @@ import { writeTotpSecret } from '@coffer/vault';
 import type { VaultItem, ItemType, CustomField } from '@coffer/vault';
 import type { VaultClient } from '@coffer/vault';
 import { FloatingPanel } from '../components/FloatingPanel';
-import { STRENGTH_COLORS, STRENGTH_LABELS } from '../components/strength';
+import { STRENGTH_COLORS, STRENGTH_LABELS } from '@coffer/ui';
 import {
   IconCard, IconChevronDown, IconClose, IconIdentity, IconKey, IconNote,
   IconPlus, IconSpinner, IconStar, IconTerminal, IconTrash,
@@ -457,7 +457,7 @@ function Select({ value, onChange, options }: {
  * `P@ssw0rd1!` 算得偏高。真正用于「弱密码报告」的判定必须是词典式的
  * （见 @coffer/vault 的 health 模块），否则字典密码会被报成安全。
  *
- * 说法与颜色取自 `components/strength.ts` —— 生成器那边说的是同一套话。
+ * 说法与颜色取自 `@coffer/ui` 的 `strength.ts` —— 生成器那边说的是同一套话。
  */
 function StrengthMeter({ value }: { value: string }) {
   if (value.length === 0) return null;
