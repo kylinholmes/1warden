@@ -5,12 +5,39 @@ import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
-  IconFolder, IconKeyboard, IconLock, IconSearch, IconSpinner, IconStar, ItemRow, NavDrawer, NavRow,
+  IconFolder, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
+  ItemRow, NavDrawer, NavRow, Section,
   countByType, scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
-type Destination = 'all' | 'favorites' | 'generator' | `type:${string}` | `folder:${string}`;
+type Destination =
+  | 'all' | 'favorites' | 'generator' | 'security'
+  | `type:${string}` | `folder:${string}`;
+
+/**
+ * 安全报告的**展示形态** —— 后台把 `VaultItem` 降级成了 id/名字，
+ * 完整条目不出后台（见 `coffer:security` 的说明）。
+ */
+interface ReportBrief {
+  total: number;
+  score: number;
+  grade: 'excellent' | 'good' | 'fair' | 'poor' | 'critical';
+  reused: { itemIds: string[]; count: number }[];
+  weak: { itemId: string; reason: string }[];
+  expiring: { itemId: string; expiresAt: string }[];
+  unsecured: { id: string; name: string }[];
+}
+
+const GRADE_LABEL: Record<ReportBrief['grade'], string> = {
+  excellent: '优秀', good: '良好', fair: '一般', poor: '差', critical: '危险',
+};
+
+/** 弱密码的机器可读原因 → 人话。和 `@coffer/vault` 的 `WeakFinding.reason` 对齐 */
+const WEAK_REASON: Record<string, string> = {
+  tooShort: '太短', common: '常见密码', commonWithSuffix: '常见密码加后缀',
+  leetSubstitution: '字符替换后的常见密码', digitsOnly: '全是数字', repeatedChar: '重复字符',
+};
 
 import { ItemDetail } from './ItemDetail';
 
@@ -151,6 +178,8 @@ export function Popup() {
    * 而且它和条目的变化频率完全不同。
    */
   const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
+  /** 安全报告。只在切到那一项时拉 —— 它要跑一遍全库扫描 */
+  const [report, setReport] = useState<ReportBrief | null>(null);
   const [openId, setOpenId] = useState<string | null>(null);
 
   // 解锁后拉一次主列表。锁定或登出时清掉 —— 留着的话下次解锁会先闪出旧数据
@@ -172,6 +201,15 @@ export function Popup() {
       .catch(() => { if (alive) setFolders([]); });
     return () => { alive = false; };
   }, [status?.unlocked]);
+
+  useEffect(() => {
+    if (dest !== 'security' || !status?.unlocked) { setReport(null); return; }
+    let alive = true;
+    void send<{ report: ReportBrief | null }>({ type: 'coffer:security' })
+      .then((r) => { if (alive) setReport(r.report); })
+      .catch(() => { if (alive) setReport(null); });
+    return () => { alive = false; };
+  }, [dest, status?.unlocked]);
 
   useEffect(() => {
     const q = query.trim();
@@ -253,6 +291,8 @@ export function Popup() {
       case 'all': return true;
       case 'favorites': return i.favorite;
       case 'generator': return false;
+      /* 安全报告和生成器一样**不是筛选** —— 它整屏替换列表，不在条目里挑 */
+      case 'security': return false;
       default:
         return dest.startsWith('folder:')
           ? i.folderId === dest.slice('folder:'.length)
@@ -320,7 +360,10 @@ export function Popup() {
             : []),
           {
             key: 'tools',
-            entries: [{ key: 'generator', label: '生成', icon: <IconDice size={20} /> }],
+            entries: [
+              { key: 'security', label: '安全报告', icon: <IconShield size={20} /> },
+              { key: 'generator', label: '生成', icon: <IconDice size={20} /> },
+            ],
           },
         ]}
         footer={
@@ -389,7 +432,12 @@ export function Popup() {
                 />
               )}
 
-              {dest === 'generator' ? (
+              {dest === 'security' ? (
+                <SecurityReport
+                  report={report}
+                  nameOf={(id) => browse.find((b) => b.id === id)?.name ?? '(已不在列表里)'}
+                />
+              ) : dest === 'generator' ? (
                 <Generator />
               ) : (
                 <>
@@ -641,6 +689,89 @@ function ListSection({ label, items, icons, onOpen }: {
         />
       ))}
     </section>
+  );
+}
+
+/**
+ * 安全报告 —— 和桌面端**同一份逻辑**（`@coffer/vault` 的 `buildReport`），
+ * 只是算在后台、这里只负责显示。
+ *
+ * ⚠️ 每一项都只列**名字**：报告里的条目引用在后台就降级成了 id/名字，
+ * 完整条目（带明文密码）不出后台。
+ */
+function SecurityReport({ report, nameOf }: {
+  report: ReportBrief | null;
+  /** 报告里只有 id —— 名字从已经加载的列表里查 */
+  nameOf: (id: string) => string;
+}) {
+  if (report === null) {
+    return <p className="px-1 py-6 text-center text-xs text-[var(--ink-tertiary)]">正在检查…</p>;
+  }
+
+  const risk = report.grade === 'critical' || report.grade === 'poor';
+  const groups: { key: string; title: string; rows: { id: string; label: string; note: string }[] }[] = [
+    {
+      key: 'weak',
+      title: `弱密码（${report.weak.length}）`,
+      rows: report.weak.map((w) => ({
+        id: w.itemId,
+        label: nameOf(w.itemId),
+        note: WEAK_REASON[w.reason] ?? w.reason,
+      })),
+    },
+    {
+      key: 'reused',
+      title: `重复使用（${report.reused.reduce((n, g) => n + g.count, 0)}）`,
+      rows: report.reused.flatMap((g) => g.itemIds.map((id) => ({
+        id, label: nameOf(id), note: `${g.count} 条共用`,
+      }))),
+    },
+    {
+      key: 'unsecured',
+      title: `明文站点（${report.unsecured.length}）`,
+      rows: report.unsecured.map((u) => ({ id: u.id, label: u.name, note: '网址是 http' })),
+    },
+  ].filter((g) => g.rows.length > 0);
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+      {/*
+        ⚠️ `shrink-0` 不能省：这是 flex 纵列的子项，而 flex 子项默认
+        `flex-shrink: 1` —— 内容比容器高时它会被**压扁**，加上 `.card`
+        自带的 `overflow: hidden`，分数就被裁掉一半。
+      */}
+      <div className="card shrink-0 p-3.5">
+        <div className="flex items-baseline gap-2">
+          <span className={`text-2xl font-semibold tabular-nums ${risk ? 'text-[var(--risk)]' : 'text-[var(--safe)]'}`}>
+            {report.score}
+          </span>
+          <span className="text-md text-[var(--ink-secondary)]">{GRADE_LABEL[report.grade]}</span>
+          <span className="ml-auto text-xs text-[var(--ink-tertiary)]">{report.total} 条记录</span>
+        </div>
+      </div>
+
+      {groups.length === 0 ? (
+        <p className="px-1 py-6 text-center text-xs text-[var(--ink-tertiary)]">
+          没有发现明显的问题
+        </p>
+      ) : (
+        groups.map((g) => (
+          <Section key={g.key} title={g.title}>
+            {g.rows.map((r, i) => (
+              <div key={`${r.id}-${i}`} className="flex items-center gap-3 border-b border-[var(--border-subtle)] py-2 last:border-b-0">
+                <span className="min-w-0 flex-1 truncate text-md">{r.label}</span>
+                <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">{r.note}</span>
+              </div>
+            ))}
+          </Section>
+        ))
+      )}
+
+      <p className="px-1 text-2xs leading-relaxed text-[var(--ink-tertiary)]">
+        这只是本地检查。已泄露密码的查询（Have I Been Pwned）需要单独开启，
+        因为它是本应用唯一会联系第三方的功能。
+      </p>
+    </div>
   );
 }
 

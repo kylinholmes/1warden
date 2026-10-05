@@ -127,6 +127,14 @@ export function stubChrome(): void {
        * ⚠️ 空 query 是「浏览整个保险库」，不是「搜不到」——
        * 桩也要照这个语义回，否则预览里看到的是产品不会有的样子。
        */
+      case 'coffer:security':
+        return { report: {
+          total: ITEMS.length, score: 72, grade: 'fair',
+          reused: [{ itemIds: ['1', '2'], count: 2 }],
+          weak: [{ itemId: '7', reason: 'digitsOnly' }, { itemId: '8', reason: 'commonWithSuffix' }],
+          expiring: [],
+          unsecured: [{ id: '6', name: 'AWS 生产环境' }],
+        } };
       case 'coffer:folders':
         return { folders: [
           { id: 'f1', name: '工作' },

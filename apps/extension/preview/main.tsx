@@ -61,3 +61,9 @@ if (new URLSearchParams(location.search).get('state') === 'copy') {
   setTimeout(() => clickText('生成'), 400);
   setTimeout(() => clickText('复制'), 800);
 }
+
+/* `?state=security`：点开安全报告那一项，好截图核对 */
+if (new URLSearchParams(location.search).get('state') === 'security') {
+  setTimeout(() => [...document.querySelectorAll('button')]
+    .find((b) => b.textContent?.includes('安全报告'))?.click(), 500);
+}
