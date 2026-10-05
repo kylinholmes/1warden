@@ -11,6 +11,7 @@
  *   · `./CopyButton`    复制按钮（界面与反馈）
  *   · `./SecretField`   可复制/可揭示的字段 + 详情分组 `Section`
  *   · `./platform`      编译期平台常量（`__PLATFORM__`，见那个文件顶部）
+ *   · `./host`          **运行时**宿主接口（发请求 / 落盘存储）—— 唯一的两处真差异
  *   · `./NavRail`       导航栏（折叠 80 / 展开 214，两端共用）
  *
  * 每一样都是**先发现了两份拷贝**才搬过来的：令牌那份扩展端已经落后一版，
@@ -36,4 +37,5 @@ export * from './CopyButton';
 export * from './SecretField';
 export * from './destinations';
 export * from './platform';
+export * from './host';
 export * from './NavRail';
