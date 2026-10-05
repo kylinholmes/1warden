@@ -63,10 +63,32 @@ function toHex(bytes: Uint8Array): string {
   return out;
 }
 
+/**
+ * 磁盘缓存。**只存图标**（公开资源，不含任何用户数据）。
+ *
+ * ⚠️ 和密文缓存分开一个接口，是因为它们的**体量与寿命完全不同**：
+ * 密文缓存一个账户一份、几百 KB；图标是每个域名一份、几十 KB，
+ * 而域名可能有几百个。混在一个存储里会互相挤配额。
+ *
+ * 实现方用 IndexedDB 而不是 localStorage —— 后者 5MB 的配额
+ * 在 250 个域名面前不够（每个 data URL 约 40KB）。
+ */
+export interface IconDiskCache {
+  get(domain: string): Promise<string | null>;
+  set(domain: string, dataUrl: string): Promise<void>;
+}
+
 export interface IconStoreOptions {
   serverUrl: string;
   /** 取字节。桌面端走 Rust 的原生 HTTP（WebView 跨源拿不到这个接口） */
   fetchBytes: (url: string) => Promise<Uint8Array | null>;
+  /**
+   * 磁盘缓存。不给就只在内存里缓存 —— 每次启动会重新拉一遍。
+   *
+   * ⚠️ 图标是**公开资源**（服务端那个接口不需要认证），所以存盘没有任何
+   * 隐私顾虑 —— 这和一些人的直觉相反，值得写下来：它不是凭据。
+   */
+  disk?: IconDiskCache;
 }
 
 /**
@@ -102,6 +124,10 @@ export class IconStore {
   }
 
   private async load(domain: string): Promise<string | null> {
+    // ① 磁盘。比网络快几个数量级，而这条链路上一次往返是 1.5~10 秒
+    const onDisk = await this.opts.disk?.get(domain).catch(() => null);
+    if (onDisk != null) return onDisk;
+
     // ⚠️ **整段**都在 try 里，不只是取字节那一步。
     // 判别占位图要算 SHA-256，而那需要 `crypto.subtle`（只在安全上下文里有）。
     // 万一它不在，异常必须在这里止住 —— 图标少一个只是回退到彩色徽标，
@@ -110,7 +136,10 @@ export class IconStore {
       const bytes = await this.opts.fetchBytes(iconUrlFor(this.opts.serverUrl, domain));
       if (bytes === null || bytes.length === 0) return null;
       if (await isPlaceholderIcon(bytes)) return null;
-      return `data:image/png;base64,${toBase64(bytes)}`;
+      const dataUrl = `data:image/png;base64,${toBase64(bytes)}`;
+      // 写盘失败不该影响这次显示 —— 只是下次还得重新拉
+      void this.opts.disk?.set(domain, dataUrl).catch(() => {});
+      return dataUrl;
     } catch {
       return null;
     }

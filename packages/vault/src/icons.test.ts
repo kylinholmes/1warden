@@ -190,6 +190,55 @@ describe('IconStore', () => {
     expect(a).toBe(b);
   });
 
+  /**
+   * ⚠️ **磁盘缓存要先于网络查。**
+   *
+   * 这是「打开就快」的关键：磁盘读是微秒级，而这条链路上一次网络往返
+   * 实测 1.5~10 秒。顺序反了（先问网络、磁盘只当兜底）等于没做。
+   */
+  it('★ 磁盘上有就直接用，不发请求', async () => {
+    let calls = 0;
+    const store = new IconStore({
+      serverUrl: 'https://vault.test',
+      disk: {
+        get: async () => 'data:image/png;base64,AAAA',
+        set: async () => {},
+      },
+      fetchBytes: async () => { calls++; return fakeBytes(); },
+    });
+    expect(await store.get('github.com')).toBe('data:image/png;base64,AAAA');
+    expect(calls).toBe(0);
+  });
+
+  /** 磁盘没有就拉，拉到了要写回去 —— 否则下次还得再拉一遍 */
+  it('磁盘未命中时拉到并写回磁盘', async () => {
+    const written: [string, string][] = [];
+    const store = new IconStore({
+      serverUrl: 'https://vault.test',
+      disk: {
+        get: async () => null,
+        set: async (d, u) => { written.push([d, u]); },
+      },
+      fetchBytes: async () => fakeBytes(2048),
+    });
+    const url = await store.get('a.com');
+    expect(url).toMatch(/^data:image\/png;base64,/);
+    expect(written).toEqual([['a.com', url]]);
+  });
+
+  /** 磁盘坏了不该让图标也坏掉 —— 它只是「快一点」，不是「能不能用」 */
+  it('磁盘读写抛错时仍然能取到图标', async () => {
+    const store = new IconStore({
+      serverUrl: 'https://vault.test',
+      disk: {
+        get: async () => { throw new Error('IndexedDB 打不开'); },
+        set: async () => { throw new Error('配额满了'); },
+      },
+      fetchBytes: async () => fakeBytes(2048),
+    });
+    await expect(store.get('a.com')).resolves.toMatch(/^data:/);
+  });
+
   /** 失败也要缓存 —— 否则一个没有图标的域名会在每次重渲时重试 */
   it('缓存失败的结果，不反复重试', async () => {
     let calls = 0;
