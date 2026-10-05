@@ -363,6 +363,37 @@ bun run scripts/ui-shot.ts apps/desktop/dist-preview '/?screen=vault' m.png 390 
 
 ⚠️ 扩展弹窗是**固定** 440×560，不参与这件事 —— 它已经在这个档位里了。
 
+## 三·六、端到端：真实浏览器里跑过一遍
+
+这一整个会话的验证一直是「单测 + 截图」。那两样都有一个共同的盲区：
+**它们不碰真实浏览器的扩展运行时** —— content script 的注入时序、
+`executeScript` 在真实页面里能不能取到 DOM、service worker 被杀了又醒、
+`navigator.credentials` 的替换。这些单测证不了。
+
+仓库里有 `scripts/e2e-extension.ts`（CDP 驱动真实 Chromium），
+这一轮跑了一次：
+
+```
+./scripts/dev-server.sh start      # Vaultwarden
+bun run build:extension
+bun run scripts/e2e-extension.ts
+```
+
+**42 项检查全过，0 失败，退出码 0。** 七个环节：
+
+| | |
+|---|---|
+| 1 | 扩展加载与页面注入 |
+| 2 | 解锁扩展 |
+| 3 | 提交表单 → 捕获 → 保存 |
+| 4 | 自动填充 |
+| 5 | 复制到剪贴板 · 已存过的密码不该再提示 |
+| 6 | passkey（create/get、**断言签名用注册时的公钥验过**、rpId 越权拒绝） |
+| 7 | 清理 |
+
+⚠️ 这是**某一次运行**的结果，不是持续保证 —— 它依赖跑着的 Vaultwarden 和
+一份测试账号。放进 CI 之前得先把前置固化下来。
+
 ## 四、验收
 
 用户给的判据：
