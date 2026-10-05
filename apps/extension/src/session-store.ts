@@ -6,7 +6,7 @@
  * MV3 的 service worker 会在约 30 秒空闲后被浏览器杀掉。把解锁会话放在
  * 模块变量里，用户每半分钟就要重新解锁一次 —— 不可用。
  *
- * ## 为什么是 `chrome.storage.session`
+ * ## 为什么是 `ext.storage.session`
  *
  * 三个候选，只有一个合格：
  *
@@ -19,17 +19,18 @@
  * 而且 `storage.session` **默认对 content script 不可见**（只有受信任上下文
  * 能读）—— 页面里的脚本拿不到密钥。
  *
- * ⚠️ 这个模块**只**通过注入的 `StorageArea` 读写，不直接碰 `chrome.*`。
+ * ⚠️ 这个模块**只**通过注入的 `StorageArea` 读写，不直接碰 `ext.*`。
  * 这样它能在 node 里测，也让「用的是哪个存储区」变成一个显式、可审查的选择，
- * 而不是散落在代码里的一行 `chrome.storage.local`。
+ * 而不是散落在代码里的一行 `ext.storage.local`。
  */
+import { ext } from './ext-api';
 import { fromBase64, toBase64, type SymmetricKey } from '@coffer/crypto';
 import type { AccountInfo, VaultFolder, VaultItem, VaultClientState } from '@coffer/vault';
 
 /** 存储键。带前缀，避免与其他扩展数据撞名 */
 const KEY = 'coffer.session';
 
-/** `chrome.storage` 里用得到的那几个方法 */
+/** `ext.storage` 里用得到的那几个方法 */
 export interface StorageArea {
   get(keys: string | string[] | null): Promise<Record<string, unknown>>;
   set(items: Record<string, unknown>): Promise<void>;

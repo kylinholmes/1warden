@@ -3,7 +3,7 @@
  *
  * ## 职责
  *
- * - 持有解锁会话（`chrome.storage.session`，见 session-store.ts）
+ * - 持有解锁会话（`ext.storage.session`，见 session-store.ts）
  * - 响应 popup 的解锁 / 查询 / 填充 / 锁定请求
  * - **计算填哪个字段**，并把值直接注入页面（值不经过 content script）
  *
@@ -18,6 +18,7 @@
  * 约 30 秒空闲后浏览器就会终止它。所以**任何跨请求的状态都必须落在
  * storage 里**，模块变量随时可能归零。
  */
+import { ext } from './ext-api';
 import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
   summaryOf, iconDomainOf, avatarOf,
@@ -32,10 +33,10 @@ import { handleWebauthn, type WebauthnPayload } from './webauthn';
 
 /** 会话区：只在内存、浏览器重启即清空 */
 const sessionArea: StorageArea = {
-  get: (keys) => chrome.storage.session.get(keys as string | string[]),
-  set: (items) => chrome.storage.session.set(items),
-  remove: (keys) => chrome.storage.session.remove(keys as string | string[]),
-  clear: () => chrome.storage.session.clear(),
+  get: (keys) => ext.storage.session.get(keys as string | string[]),
+  set: (items) => ext.storage.session.set(items),
+  remove: (keys) => ext.storage.session.remove(keys as string | string[]),
+  clear: () => ext.storage.session.clear(),
 };
 
 const sessions = new SessionStore(sessionArea);
@@ -45,7 +46,7 @@ const INSTANCE = Math.random().toString(36).slice(2, 6);
 console.debug('[coffer] SW 实例 ' + INSTANCE + ' 启动');
 
 /**
- * 追踪缓冲 —— 把诊断写进 `chrome.storage.session` 而不是只打控制台。
+ * 追踪缓冲 —— 把诊断写进 `ext.storage.session` 而不是只打控制台。
  *
  * ⚠️ **为什么必须这样**：MV3 的 service worker 会被杀又被唤醒，
  * 实测一次运行里能出现**两个实例**，而调试器只连得上其中一个 ——
@@ -59,10 +60,10 @@ const TRACE_KEY = 'coffer.trace';
 
 async function trace(line: string): Promise<void> {
   try {
-    const got = await chrome.storage.session.get(TRACE_KEY);
+    const got = await ext.storage.session.get(TRACE_KEY);
     const arr = Array.isArray(got[TRACE_KEY]) ? (got[TRACE_KEY] as string[]) : [];
     arr.push(`[${INSTANCE}] ${line}`);
-    await chrome.storage.session.set({ [TRACE_KEY]: arr.slice(-120) });
+    await ext.storage.session.set({ [TRACE_KEY]: arr.slice(-120) });
   } catch (e) {
     // 追踪本身绝不能影响功能 —— 但**也不能完全静默**：
     // 早先这里是空 catch，于是「缓冲是空的」既可能是没写、也可能是写失败，
@@ -83,21 +84,21 @@ let traceBroken = false;
  * 不该依赖某个 API 的默认值不被人改。将来若有人为了别的功能调宽它，
  * 至少得先删掉这行、看见这段注释。
  */
-void chrome.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {
+void ext.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {
   // 老版本 Chrome 没有这个方法；默认值本来就是安全的，忽略
 });
 
 /** 设备标识不是秘密，落盘无妨；但也不能每次启动都换（会在设备列表里堆一堆） */
 const deviceStore = {
   async get(): Promise<string | null> {
-    const got = await chrome.storage.local.get('coffer.deviceId');
+    const got = await ext.storage.local.get('coffer.deviceId');
     return typeof got['coffer.deviceId'] === 'string' ? got['coffer.deviceId'] : null;
   },
   async set(id: string): Promise<void> {
-    await chrome.storage.local.set({ 'coffer.deviceId': id });
+    await ext.storage.local.set({ 'coffer.deviceId': id });
   },
   async clear(): Promise<void> {
-    await chrome.storage.local.remove('coffer.deviceId');
+    await ext.storage.local.remove('coffer.deviceId');
   },
 };
 
@@ -122,7 +123,7 @@ function newClient(): VaultClient {
  * ⚠️ **进程重启后的恢复**，而且时机必须是确定的。
  *
  * service worker 每次被唤醒都会重新执行这个模块，此时 `client` 是新的、
- * 会话是 `loggedOut` —— 而 `chrome.storage.session` 里的密钥**还在**。
+ * 会话是 `loggedOut` —— 而 `ext.storage.session` 里的密钥**还在**。
  * 不灌回去的话，所有已解锁的操作都会报「保险库未解锁」，而用户刚刚才解锁过。
  *
  * 消息可能在这段恢复完成**之前**就到达，所以 `handle()` 一律先 await 它。
@@ -196,18 +197,18 @@ interface PendingCapture {
 }
 
 async function setPending(p: PendingCapture | null, tabId?: number): Promise<void> {
-  const got = await chrome.storage.session.get(PENDING_KEY);
+  const got = await ext.storage.session.get(PENDING_KEY);
   const map = (got[PENDING_KEY] ?? {}) as Record<string, PendingCapture>;
   if (p === null) {
     if (tabId !== undefined) delete map[String(tabId)];
   } else {
     map[String(p.tabId)] = p;
   }
-  await chrome.storage.session.set({ [PENDING_KEY]: map });
+  await ext.storage.session.set({ [PENDING_KEY]: map });
 }
 
 async function getPending(tabId: number): Promise<PendingCapture | null> {
-  const got = await chrome.storage.session.get(PENDING_KEY);
+  const got = await ext.storage.session.get(PENDING_KEY);
   const map = (got[PENDING_KEY] ?? {}) as Record<string, PendingCapture>;
   return map[String(tabId)] ?? null;
 }
@@ -227,7 +228,7 @@ type Request =
   | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: 'coffer:webauthn'; payload: unknown };
 
-chrome.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
+ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
   const req = msg as { type?: string };
 
   // content script 的字段上报：记下来，顺手回一个空响应
@@ -261,7 +262,7 @@ chrome.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
 /**
  * 已完成的 passkey 请求结果，按「标签页 + 帧 + 请求 id」索引。
  *
- * ## ⚠️ 为什么必须落在 `chrome.storage.session` 而不是模块变量里
+ * ## ⚠️ 为什么必须落在 `ext.storage.session` 而不是模块变量里
  *
  * MV3 的 service worker 会被杀又被唤醒，每次唤醒都**重新求值一次这个模块**。
  * 模块级的 `Map` 那时是空的 —— 于是同一个请求会被再处理一遍。
@@ -286,7 +287,7 @@ function waKey(sender: chrome.runtime.MessageSender, id: number): string {
 }
 
 async function readDone(key: string): Promise<Record<string, unknown> | null> {
-  const got = await chrome.storage.session.get(WA_DONE_KEY);
+  const got = await ext.storage.session.get(WA_DONE_KEY);
   const map = (got[WA_DONE_KEY] ?? {}) as Record<string, Record<string, unknown>>;
   return map[key] ?? null;
 }
@@ -294,12 +295,12 @@ async function readDone(key: string): Promise<Record<string, unknown> | null> {
 /**
  * 抢一个「我正在处理这个请求」的认领。
  *
- * ⚠️ `chrome.storage` 没有原子的比较并写入 —— 只写不读会有竞态，
+ * ⚠️ `ext.storage` 没有原子的比较并写入 —— 只写不读会有竞态，
  * 所以**写完再读回来确认赢的是自己**。两个实例同时写时后写的赢，
  * 先写的那次读回来会发现不是自己，于是让位。
  */
 async function claim(key: string): Promise<boolean> {
-  const got = await chrome.storage.session.get(WA_CLAIM_KEY);
+  const got = await ext.storage.session.get(WA_CLAIM_KEY);
   const map = (got[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
 
   // ⚠️ 认领**必须会过期**。持有它的实例可能半路被杀（这正是我们面对的那个
@@ -310,7 +311,7 @@ async function claim(key: string): Promise<boolean> {
   // 只留最近几十个，别让这张表无限长
   for (const k of Object.keys(map).slice(0, Math.max(0, Object.keys(map).length - 32))) delete map[k];
   map[key] = Date.now();
-  await chrome.storage.session.set({ [WA_CLAIM_KEY]: map });
+  await ext.storage.session.set({ [WA_CLAIM_KEY]: map });
 
   // ⚠️ 写完要**等一小段随机时间再读回来**。
   //
@@ -322,17 +323,17 @@ async function claim(key: string): Promise<boolean> {
   // 一次全绿一次红），而这种「偶尔丢凭据」的 bug 正是最难被用户说清楚的。
   await new Promise((r) => setTimeout(r, 30 + Math.floor(Math.random() * 70)));
 
-  const back = await chrome.storage.session.get(WA_CLAIM_KEY);
+  const back = await ext.storage.session.get(WA_CLAIM_KEY);
   const after = (back[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
   // 不是自己写的 → 有人抢先。两个实例同时写时后写的赢，先写的读到不是自己就让位
   return after[key] === map[key];
 }
 
 async function releaseClaim(key: string): Promise<void> {
-  const got = await chrome.storage.session.get(WA_CLAIM_KEY);
+  const got = await ext.storage.session.get(WA_CLAIM_KEY);
   const map = (got[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
   delete map[key];
-  await chrome.storage.session.set({ [WA_CLAIM_KEY]: map });
+  await ext.storage.session.set({ [WA_CLAIM_KEY]: map });
 }
 
 const WA_CLAIM_KEY = 'coffer.webauthnClaim';
@@ -341,13 +342,13 @@ const WA_CLAIM_KEY = 'coffer.webauthnClaim';
 const CLAIM_TTL_MS = 30_000;
 
 async function writeDone(key: string, reply: Record<string, unknown>): Promise<void> {
-  const got = await chrome.storage.session.get(WA_DONE_KEY);
+  const got = await ext.storage.session.get(WA_DONE_KEY);
   const map = (got[WA_DONE_KEY] ?? {}) as Record<string, Record<string, unknown>>;
   map[key] = reply;
   // 只留最近几十条 —— 页面开一整天的话这个表不该无限长下去
   const keys = Object.keys(map);
   for (const k of keys.slice(0, Math.max(0, keys.length - 32))) delete map[k];
-  await chrome.storage.session.set({ [WA_DONE_KEY]: map });
+  await ext.storage.session.set({ [WA_DONE_KEY]: map });
 }
 
 async function runWebauthn(payload: unknown, senderOrigin: string | undefined): Promise<Record<string, unknown>> {
@@ -441,7 +442,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const entries = await buildEntries(plan, item);
       if (entries.length === 0) throw new Error('这个页面上找不到可以填的字段');
 
-      const [injection] = await chrome.scripting.executeScript({
+      const [injection] = await ext.scripting.executeScript({
         target: { tabId, allFrames: false },
         func: fillFields,
         args: [entries],
@@ -518,7 +519,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       if (c.getSession().getKey()) await sessions.save(c.exportState());
 
       await setPending(null, tabId);
-      await chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+      await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
       return { ok: true };
     }
 
@@ -647,7 +648,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       // 让离屏文档把清理定时器挂上。**发完不管** —— 它的应答回不来
       // （见 offscreen.ts 顶部）。清理失败不影响这次复制本身。
       void ensureOffscreen()
-        .then(() => chrome.runtime.sendMessage({
+        .then(() => ext.runtime.sendMessage({
           type: 'coffer-internal:schedule-clear', value,
         }))
         .catch((e: unknown) => console.warn('[coffer] 剪贴板清理未能安排：', e));
@@ -661,7 +662,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const tabId = req.tabId ?? sender.tab?.id;
       if (tabId === undefined) return { ok: true };
       await setPending(null, tabId);
-      await chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+      await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
       return { ok: true };
     }
 
@@ -741,7 +742,7 @@ async function buildEntries(
 
 async function readFieldsFrom(tabId: number): Promise<FieldDescriptor[]> {
   try {
-    const [res] = await chrome.scripting.executeScript({
+    const [res] = await ext.scripting.executeScript({
       target: { tabId },
       func: () => {
         const nodes = Array.from(document.querySelectorAll<HTMLInputElement>('input, textarea'));
@@ -796,7 +797,7 @@ async function onSubmitted(tabId: number | undefined, url: string | undefined): 
   }
 
   const indices = plan.username === undefined ? [plan.password] : [plan.username, plan.password];
-  const [injection] = await chrome.scripting.executeScript({
+  const [injection] = await ext.scripting.executeScript({
     target: { tabId },
     func: readFieldValues,
     args: [indices],
@@ -819,14 +820,14 @@ async function onSubmitted(tabId: number | undefined, url: string | undefined): 
   if (decision.kind === 'none') {
     // 没变化就清掉上一次的提示 —— 用户可能刚手动改好了
     await setPending(null, tabId);
-    await chrome.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+    await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
     return;
   }
 
   await setPending({ tabId, url, username, password, decision });
   // 角标只提示「有事可做」，不放数字 —— 数字会让人以为是待办事项
-  await chrome.action.setBadgeText({ tabId, text: '●' }).catch(() => {});
-  await chrome.action.setBadgeBackgroundColor({ color: '#3E7C8C' }).catch(() => {});
+  await ext.action.setBadgeText({ tabId, text: '●' }).catch(() => {});
+  await ext.action.setBadgeBackgroundColor({ color: '#3E7C8C' }).catch(() => {});
 }
 
 /** 站点的显示名：用主机名，与 1Password 的默认命名一致 */
@@ -869,11 +870,29 @@ let offscreenReady: Promise<void> | null = null;
 
 function ensureOffscreen(): Promise<void> {
   offscreenReady ??= (async () => {
-    const contexts = await chrome.runtime.getContexts({
+    /*
+     * ⚠️ **Firefox 系没有 offscreen API。**
+     *
+     * 没有它 = 复制密码之后**没有地方活一个「30 秒后清空剪贴板」的定时器**。
+     * 直接调会抛 `Cannot read properties of undefined`，而那会让
+     * **整个复制流程失败** —— 一个「清理得不及时」的问题升级成「复制用不了」。
+     *
+     * 所以这里降级：复制照常，只是不安排自动清理。
+     * 用户拿到的密码仍在剪贴板里，直到他自己覆盖 —— 和大多数密码管理器
+     * 在没有 offscreen 时的行为一致。
+     *
+     * ⚠️ 这是**已知的缺口**，不是解。真正的解要么用 `alarms`（最小 30 秒，
+     * 正好），要么改成「下次唤醒时清理」。两条都要改行为，得单独决定。
+     */
+    if (!ext.offscreen || !ext.runtime.getContexts) {
+      console.warn('[offscreen] 这个浏览器没有 offscreen API —— 复制可用，但不会自动清空剪贴板');
+      return;
+    }
+    const contexts = await ext.runtime.getContexts({
       contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
     });
     if (contexts.length === 0) {
-      await chrome.offscreen.createDocument({
+      await ext.offscreen.createDocument({
         url: 'offscreen.html',
         reasons: ['CLIPBOARD' as chrome.offscreen.Reason],
         justification: '复制密码后需要在弹窗关闭的情况下也能按时清空剪贴板',
@@ -894,7 +913,7 @@ function ensureOffscreen(): Promise<void> {
 
 async function updateBadge(tabId: number, isLoginForm: boolean): Promise<void> {
   const session = await sessions.load();
-  await chrome.action.setBadgeText({
+  await ext.action.setBadgeText({
     tabId,
     text: isLoginForm && session ? '•' : '',
   }).catch(() => {});
@@ -912,35 +931,35 @@ async function updateBadge(tabId: number, isLoginForm: boolean): Promise<void> {
  */
 async function refreshBadges(): Promise<void> {
   const session = await sessions.load();
-  const tabs = await chrome.tabs.query({});
+  const tabs = await ext.tabs.query({});
 
   await Promise.all(tabs.map(async (t) => {
     if (t.id === undefined) return;
     let isLoginForm = false;
     try {
-      const res = await chrome.tabs.sendMessage(t.id, { type: 'coffer:read-fields' }) as
+      const res = await ext.tabs.sendMessage(t.id, { type: 'coffer:read-fields' }) as
         { isLoginForm?: boolean } | undefined;
       isLoginForm = res?.isLoginForm === true;
     } catch {
       // 这个标签页没有我们的 content script（chrome:// 之类）—— 正常
       return;
     }
-    await chrome.action.setBadgeText({
+    await ext.action.setBadgeText({
       tabId: t.id, text: session !== null && isLoginForm ? '•' : '',
     }).catch(() => {});
   }));
 }
 
 async function clearBadges(): Promise<void> {
-  const tabs = await chrome.tabs.query({});
+  const tabs = await ext.tabs.query({});
   await Promise.all(tabs.map((t) =>
-    t.id === undefined ? Promise.resolve() : chrome.action.setBadgeText({ tabId: t.id, text: '' }).catch(() => {})));
+    t.id === undefined ? Promise.resolve() : ext.action.setBadgeText({ tabId: t.id, text: '' }).catch(() => {})));
 }
 
 // worker 醒来时把标签页角标补上 —— 被杀期间状态是丢的
-chrome.tabs.onActivated.addListener(({ tabId }) => {
+ext.tabs.onActivated.addListener(({ tabId }) => {
   const state = tabFields.get(tabId);
   if (state) void updateBadge(tabId, state.isLoginForm);
 });
 
-chrome.tabs.onRemoved.addListener((tabId) => { tabFields.delete(tabId); });
+ext.tabs.onRemoved.addListener((tabId) => { tabFields.delete(tabId); });

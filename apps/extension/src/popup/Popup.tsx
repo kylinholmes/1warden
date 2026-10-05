@@ -1,3 +1,4 @@
+import { ext } from '../ext-api';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generatePassword, passwordStrength } from '@coffer/crypto';
 import { IconStore } from '@coffer/vault';
@@ -65,7 +66,7 @@ interface Pending {
 
 /** 与 background 约定的调用方式 */
 async function send<T>(msg: Record<string, unknown>): Promise<T> {
-  const res = await chrome.runtime.sendMessage(msg) as T & { error?: string };
+  const res = await ext.runtime.sendMessage(msg) as T & { error?: string };
   if (res && typeof res === 'object' && 'error' in res && res.error) throw new Error(res.error);
   return res;
 }
@@ -100,7 +101,7 @@ export function Popup() {
   const [pending, setPending] = useState<Pending | null>(null);
 
   const refresh = useCallback(async () => {
-    const tabs = await chrome.tabs.query({ active: true, currentWindow: true });
+    const tabs = await ext.tabs.query({ active: true, currentWindow: true });
     const tab = tabs[0];
     setTabUrl(tab?.url ?? '');
     setTabId(tab?.id);

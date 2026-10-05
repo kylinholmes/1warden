@@ -17,11 +17,11 @@
  *
  * ## ⚠️ 这个脚本**还没有解决**的事
  *
- * `offscreen` 权限：Firefox 系**没有** offscreen API，而扩展用它做
- * 「剪贴板 30 秒后自动清理」（定时器要有地方活）。这一版**保留**了那个
- * 权限声明 —— 目的是先让它**能装进去**，看真正坏在哪，再决定怎么替。
+ * `offscreen`：Firefox 系**没有**这个 API，而扩展用它做「剪贴板 30 秒后
+ * 自动清理」。运行时代码里已经**降级**了 —— 复制照常，只是不安排自动清理。
  *
- * 所以产物是**可加载但不完整**的。别把它当成可用版本发出去。
+ * 真正的解（`alarms` 或「下次唤醒时清理」）还没做，那要改行为、得单独决定。
+ * 所以产物**可用但不完整**。
  */
 import { cpSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -61,5 +61,5 @@ m['browser_specific_settings'] = {
 
 writeFileSync(manifestPath, JSON.stringify(m, null, 2) + '\n');
 console.log('✅ 已产出 Firefox 版：apps/extension/dist-firefox');
-console.log('   ⚠️ 仍带着 offscreen 权限 —— 可加载，但剪贴板清理那部分跑不通。');
+console.log('   ⚠️ 复制可用，但**不会自动清空剪贴板**（Firefox 没有 offscreen）。');
 console.log('   装入方式：Zen/Firefox 的 about:debugging → 临时载入 → 选 dist-firefox/manifest.json');
