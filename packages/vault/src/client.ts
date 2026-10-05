@@ -83,6 +83,20 @@ export class VaultClient {
   /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
   private readonly fetchImpl: typeof fetch;
   private readonly syncCache: SyncCache | undefined;
+  private readonly onPhase: ((label: string, ms: number) => void) | undefined;
+  /** 连接起点。只给 `mark` 用 —— 诊断用，不参与任何逻辑 */
+  private connectT0 = 0;
+
+  /**
+   * 报一次「从点登录到现在」的累计耗时。
+   *
+   * 报**累计**而不是分段：这条链路上各段的耗时差着量级（KDF 一秒、
+   * 一次往返可能几百毫秒），累计值一眼能看出「时间堆在哪一段之前」，
+   * 而分段值要自己在脑子里加。
+   */
+  private mark(label: string): void {
+    this.onPhase?.(label, performance.now() - this.connectT0);
+  }
   private readonly deviceStore: DeviceIdStore;
   /** 设备标识要读存储，所以第一次用的时候才异步取 */
   private deviceId: Promise<string> | null = null;
@@ -110,9 +124,12 @@ export class VaultClient {
     syncCache?: SyncCache;
     /** 同步开始/结束。与 `onStatus` 分开 —— 见 `VaultSession.syncing` */
     onSync?: (syncing: boolean) => void;
+    /** 连接各阶段的耗时。只用于诊断「登录慢」这类问题，不参与任何逻辑 */
+    onPhase?: (label: string, ms: number) => void;
   }) {
     this.fetchImpl = opts.fetchImpl;
     this.syncCache = opts.syncCache;
+    this.onPhase = opts.onPhase;
     this.deviceStore = opts.deviceStore ?? localStorageDeviceStore;
     this.device = {
       // 用桌面端的值而不是 CLI —— 服务端日志里能看出这是我们的应用
@@ -161,7 +178,29 @@ export class VaultClient {
     this.pendingConnect = params;
     const bare = this.makeHttp(params.serverUrl);
 
+    /*
+     * ⚠️ **先亮出「正在解锁」，再去干那些慢活。**
+     *
+     * 早先 `beginUnlock()` 排在登录**之后**，于是 prelogin、主密钥派生
+     * （PBKDF2 600k 在本机实测 1.1 秒）、登录往返全都发生在
+     * `loggedOut`/`locked` 状态下 —— 界面按 `screenFor` 渲染的是**连接屏**，
+     * 也就是用户刚点过的那个表单，一动不动。
+     *
+     * 用户报的是「completeUnlock 这步也要几秒」。`completeUnlock` 本身
+     * 只做「落下密钥 + 翻状态」，微秒级 —— 他量到的其实是这段时间的总和。
+     *
+     * 全程计时（`console.info`）留着：这条链路牵涉三次网络往返加一次 KDF，
+     * 而「慢」在每一段上的处置完全不同，不量就只能猜。
+     */
+    this.connectT0 = performance.now();
+
+    this.session.setAccount({
+      serverUrl: params.serverUrl, email: params.email, userId: '', kdf: { kdf: 0, iterations: 0 },
+    });
+    this.session.beginUnlock();
+
     const pl = await prelogin(bare, params.email);
+    this.mark('prelogin（取 KDF 参数）');
     const kdf: KdfConfig = pl.kdf === KDF_TYPE_ARGON2ID
       ? {
         kdf: KDF_TYPE_ARGON2ID, iterations: pl.iterations,
@@ -171,9 +210,22 @@ export class VaultClient {
       : { kdf: KDF_TYPE_PBKDF2, iterations: pl.iterations };
 
     const masterKey = await deriveMasterKey(params.masterPassword, params.email, kdf);
+    this.mark('派生主密钥');
     const masterPasswordHash = await hashMasterPassword(masterKey, params.masterPassword);
 
-    await this.finishConnect(bare, params, masterKey, masterPasswordHash, undefined);
+    try {
+      await this.finishConnect(bare, params, masterKey, masterPasswordHash, undefined);
+    } catch (e) {
+      /*
+       * ⚠️ 失败必须把状态退回去。
+       *
+       * 上面提前翻了 `unlocking` —— 失败时不退的话界面会永远停在加载屏，
+       * 而真实原因（密码错了、服务器连不上）没有任何地方显示得出来。
+       * 这是「提前亮加载态」的代价，得在这里付掉。
+       */
+      this.session.lock();
+      throw e;
+    }
   }
 
   async connectWithTwoFactor(code: string, provider: number, remember: boolean): Promise<void> {
@@ -203,6 +255,7 @@ export class VaultClient {
     }
 
     const stretched = await stretchMasterKey(masterKey);
+    this.mark('登录往返 + 解出用户密钥');
     // ⚠️ 用户密钥是**原始 64 字节**，必须用 decryptBytes；
     // decryptString 会尝试 UTF-8 解码而失败
     const raw = await decryptBytes(token.key, stretched);
@@ -255,7 +308,9 @@ export class VaultClient {
      * `hydrateThenSync` 内部吞掉同步失败，所以这里不会因为网络问题
      * 把一个已经可用的客户端判成登录失败。
      */
+    this.mark('开始同步');
     await this.hydrateThenSync(userKey);
+    this.mark('同步完成');
   }
 
   /**

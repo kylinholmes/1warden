@@ -27,6 +27,14 @@ export function App() {
     onStatus: () => forceRender(),
     onSync: () => forceRender(),
     /*
+     * 连接各段的累计耗时。
+     *
+     * 打 `console.info` 而不是界面提示：这是**诊断**信息，用户看不懂也不需要看。
+     * vite 会把 webview 的 console 转进 dev 日志，所以「登录慢」能直接读日志定位，
+     * 不用靠猜。
+     */
+    onPhase: (label, ms) => { console.info(`[连接] ${label} — 累计 ${ms.toFixed(0)}ms`); },
+    /*
      * 上次同步的密文缓存 —— 让「解锁后立刻看到条目」成为可能。
      *
      * ⚠️ 账户信息要等到**登录成功之后**才有，而这里是在构造时。
