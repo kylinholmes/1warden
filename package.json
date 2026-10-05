@@ -7,20 +7,21 @@
     "apps/*"
   ],
   "scripts": {
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:contract": "vitest run --config vitest.contract.config.ts",
-    "test:interop": "bun scripts/interop-test.ts",
-    "seed": "bun scripts/seed-account.ts",
-    "typecheck": "tsc -b --force && tsc -p apps/desktop --noEmit",
+    "build:desktop": "cd apps/desktop && bun run tauri build",
+    "build:extension": "cd apps/desktop && bun run build:extension",
+    "build:extension-firefox": "bun run build:extension && bun run scripts/build-extension-firefox.ts",
+    "dev:desktop": "cd apps/desktop && bun run tauri dev",
     "dev:proxy": "bun run scripts/dev-proxy.ts",
     "e2e": "bun run scripts/e2e-desktop.ts",
-    "dev:desktop": "cd apps/desktop && bun run tauri dev",
-    "build:desktop": "cd apps/desktop && bun run tauri build",
     "e2e:extension": "bun run scripts/e2e-extension.ts",
-    "ui:shot": "bun run scripts/ui-shot.ts",
-    "build:extension": "cd apps/desktop && bun run build:extension",
-    "build:extension-firefox": "bun run build:extension && bun run scripts/build-extension-firefox.ts"
+    "e2e:extension:setup": "./scripts/dev-server.sh start && bun run seed && bun run build:extension",
+    "seed": "bun scripts/seed-account.ts",
+    "test": "vitest run",
+    "test:contract": "vitest run --config vitest.contract.config.ts",
+    "test:interop": "bun scripts/interop-test.ts",
+    "test:watch": "vitest",
+    "typecheck": "tsc -b --force && tsc -p apps/desktop --noEmit",
+    "ui:shot": "bun run scripts/ui-shot.ts"
   },
   "devDependencies": {
     "@bitwarden/cli": "2025.2.0",

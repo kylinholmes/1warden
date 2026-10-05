@@ -10,12 +10,13 @@
  * 图形界面一次要几十秒还依赖窗口焦点，这里几秒钟就能跑完一轮，
  * 而且失败时拿到的是确切的异常，不是一张截图。
  *
- * 前置：
- *   ./scripts/dev-server.sh start     # Vaultwarden
- *   bun run build:extension
+ * 前置三样，一条命令备齐（幂等）：
  *
- * 跑：
- *   bun run scripts/e2e-extension.ts
+ *   bun run e2e:extension:setup        # 起服务器 + 播种账号 + 构建扩展
+ *   bun run e2e:extension
+ *
+ * 缺哪一样都由下面的 `preflight()` 直说，并附上补的命令 ——
+ * 不让它伪装成「登录失败」或者「注入没生效」。
  */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
@@ -301,19 +302,21 @@ async function preflight(): Promise<void> {
   const missing: string[] = [];
 
   if (!existsSync(join(DIST, 'manifest.json'))) {
-    missing.push(`扩展还没构建 —— 找不到 ${DIST}/manifest.json\n    → bun run build:extension`);
+    missing.push(`扩展还没构建 —— 找不到 ${DIST}/manifest.json\n    → bun run e2e:extension:setup`);
   }
 
   try {
     const r = await fetch(`${SERVER}/api/config`, { signal: AbortSignal.timeout(3000) });
     if (!r.ok) throw new Error(`HTTP ${r.status}`);
   } catch (e) {
-    missing.push(`连不上 ${SERVER}（${String(e)}）\n    → ./scripts/dev-server.sh start`);
+    missing.push(`连不上 ${SERVER}（${String(e)}）\n    → bun run e2e:extension:setup`);
   }
 
   if (missing.length > 0) {
     console.error('\n❌ 前置没满足：\n');
     for (const m of missing) console.error(`  · ${m}\n`);
+    console.error('  一次备齐三样（起服务器 + 播种账号 + 构建扩展）：');
+    console.error('    bun run e2e:extension:setup\n');
     process.exit(1);
   }
   console.log(`  前置就绪：扩展 ${DIST}、服务器 ${SERVER}`);
