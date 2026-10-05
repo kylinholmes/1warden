@@ -28,11 +28,16 @@ export function App() {
     /*
      * 连接各段的累计耗时。
      *
-     * 打 `console.info` 而不是界面提示：这是**诊断**信息，用户看不懂也不需要看。
-     * vite 会把 webview 的 console 转进 dev 日志，所以「登录慢」能直接读日志定位，
-     * 不用靠猜。
+     * 打日志而不是界面提示：这是**诊断**信息，用户看不懂也不需要看。
+     *
+     * ⚠️ 用 `console.warn` 而不是 `console.info` —— **vite 只把 warn/error
+     * 转发到终端**，info 和 log 会被直接丢掉。第一版用的就是 info，
+     * 结果「加了计时」和「没加」在日志里长得一模一样（都是什么都没有），
+     * 差一点据此去怀疑计时代码没被调用。
+     *
+     * 代价是这几行会混在真正的警告里。前缀 `[连接]` 是给它们做区分的。
      */
-    onPhase: (label, ms) => { console.info(`[连接] ${label} — 累计 ${ms.toFixed(0)}ms`); },
+    onPhase: (label, ms) => { console.warn(`[连接] ${label} — 累计 ${ms.toFixed(0)}ms`); },
     /*
      * 上次同步的密文缓存 —— 让「解锁后立刻看到条目」成为可能。
      *
