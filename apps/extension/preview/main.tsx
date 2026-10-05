@@ -67,3 +67,9 @@ if (new URLSearchParams(location.search).get('state') === 'security') {
   setTimeout(() => [...document.querySelectorAll('button')]
     .find((b) => b.textContent?.includes('安全报告'))?.click(), 500);
 }
+
+/* `?state=card`：点开那张卡片，核对卡片字段有没有铺出来 */
+if (new URLSearchParams(location.search).get('state') === 'card') {
+  setTimeout(() => [...document.querySelectorAll('button')]
+    .find((b) => b.textContent?.includes('招商银行 Visa'))?.click(), 500);
+}

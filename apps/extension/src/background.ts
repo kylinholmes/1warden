@@ -220,6 +220,7 @@ type Request =
   | { type: 'coffer:search'; query: string }
   | { type: 'coffer:folders' }
   | { type: 'coffer:security' }
+  | { type: 'coffer:item'; itemId: string }
   | { type: 'coffer:fill'; itemId: string; tabId: number }
   | { type: 'coffer:generate'; length?: number; digits?: boolean; symbols?: boolean }
   | { type: 'coffer:pending'; tabId?: number }
@@ -469,6 +470,30 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
      * `breached`（HIBP 查询）**不在这里触发** —— 它是网络请求、需要用户
      * 明确开启，而且是这个应用唯一会联系第三方的功能。默认空。
      */
+    /**
+     * **单条**条目的详情字段 —— 按需取一条，不是把整库送过去。
+     *
+     * ⚠️ 列表接口刻意只回摘要（见 `coffer:matches` 的说明），所以摘要里
+     * 没有卡片号、身份信息、SSH 密钥这些。详情要显示它们，就得单独取 ——
+     * 但取的是**这一条**，而且是用户点开哪条取哪条。
+     *
+     * ⚠️ **仍然只回展示用的字段，不回明文密码。** 密码照旧只在点「复制」
+     * 那一刻由 `coffer:copy` 取一次。详情屏没有理由看到它。
+     */
+    case 'coffer:item': {
+      const session = await sessions.load();
+      if (!session) throw new Error('保险库未解锁');
+      const i = session.items.find((x) => x.id === req.itemId);
+      if (!i) throw new Error('找不到这条记录');
+      return {
+        notes: i.notes,
+        card: i.card,
+        identity: i.identity,
+        sshKey: i.sshKey,
+        secureNote: i.secureNote,
+      };
+    }
+
     case 'coffer:security': {
       const session = await sessions.load();
       if (!session) return { unlocked: false, report: null };

@@ -127,6 +127,11 @@ export function stubChrome(): void {
        * ⚠️ 空 query 是「浏览整个保险库」，不是「搜不到」——
        * 桩也要照这个语义回，否则预览里看到的是产品不会有的样子。
        */
+      case 'coffer:item': {
+        const it = ITEMS.find((x) => x.id === String(msg.itemId));
+        return { notes: it?.notes ?? null, card: it?.card ?? null, identity: it?.identity ?? null,
+                 sshKey: it?.sshKey ?? null, secureNote: it?.secureNote ?? null };
+      }
       case 'coffer:security':
         return { report: {
           total: ITEMS.length, score: 72, grade: 'fair',

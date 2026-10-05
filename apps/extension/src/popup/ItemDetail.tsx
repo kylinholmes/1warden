@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ext } from '../ext-api';
 import { IconGlyph, IconAlert, IconArrowLeft, IconStar, Section, SecretField } from '@coffer/ui';
 import { IconStore } from '@coffer/vault';
@@ -34,6 +34,25 @@ import type { ItemSummary } from './Popup';
  */
 const noLocalClear = (): void => {};
 
+/** `coffer:item` 回的展示字段 —— 没有密码，密码只在「复制」那一刻取 */
+interface ExtraFields {
+  notes: string | null;
+  card: { cardholderName: string | null; brand: string | null; number: string | null;
+          expMonth: string | null; expYear: string | null; code: string | null } | null;
+  identity: Record<string, unknown> | null;
+  sshKey: { publicKey: string | null; fingerprint: string | null; privateKey: string | null } | null;
+  secureNote: { type: number } | null;
+}
+
+/** 身份信息的字段名 → 人话。和桌面端同一份词表的口径 */
+const IDENTITY_LABEL: Record<string, string> = {
+  title: '称谓', firstName: '名', middleName: '中间名', lastName: '姓',
+  address1: '地址', address2: '地址 2', address3: '地址 3',
+  city: '城市', state: '省/州', postalCode: '邮编', country: '国家',
+  company: '公司', email: '邮箱', phone: '电话', ssn: '证件号',
+  username: '用户名', passportNumber: '护照号', licenseNumber: '驾照号',
+};
+
 export function ItemDetail({ item, icons, busy, onBack, onFill }: {
   item: ItemSummary;
   icons: IconStore | null;
@@ -42,6 +61,21 @@ export function ItemDetail({ item, icons, busy, onBack, onFill }: {
   onFill: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
+  /*
+   * 摘要里**没有**卡片号、身份信息、SSH 密钥 —— 列表接口刻意只回摘要。
+   * 详情要用，就按需取**这一条**（见后台 `coffer:item` 的说明）。
+   * 明文密码仍然不在这里：它只在点「复制」那一刻由后台取一次。
+   */
+  const [extra, setExtra] = useState<ExtraFields | null>(null);
+
+  useEffect(() => {
+    let alive = true;
+    setExtra(null);
+    void ext.runtime.sendMessage({ type: 'coffer:item', itemId: item.id })
+      .then((r) => { if (alive) setExtra(r as ExtraFields); })
+      .catch(() => { if (alive) setExtra(null); });
+    return () => { alive = false; };
+  }, [item.id]);
 
   /**
    * 取值那一步 —— 明文**只在复制那一刻过手**，不躺在组件状态里。
@@ -135,6 +169,42 @@ export function ItemDetail({ item, icons, busy, onBack, onFill }: {
               ))}
             </Section>
           </div>
+        )}
+
+        {extra?.card && (
+          <Section title="信用卡">
+            {extra.card.cardholderName && <SecretField label="持卡人" value={extra.card.cardholderName} />}
+            {extra.card.brand && <SecretField label="卡组织" value={extra.card.brand} />}
+            {extra.card.number && <SecretField label="卡号" value={extra.card.number} masked />}
+            {(extra.card.expMonth || extra.card.expYear) && (
+              <SecretField label="有效期" value={`${extra.card.expMonth ?? ''}/${extra.card.expYear ?? ''}`} />
+            )}
+            {extra.card.code && <SecretField label="安全码" value={extra.card.code} masked />}
+          </Section>
+        )}
+
+        {extra?.sshKey && (
+          <Section title="SSH 密钥">
+            {extra.sshKey.publicKey && <SecretField label="公钥" value={extra.sshKey.publicKey} />}
+            {extra.sshKey.fingerprint && <SecretField label="指纹" value={extra.sshKey.fingerprint} />}
+            {extra.sshKey.privateKey && <SecretField label="私钥" value={extra.sshKey.privateKey} masked />}
+          </Section>
+        )}
+
+        {extra?.identity && (
+          <Section title="身份信息">
+            {Object.entries(extra.identity)
+              .filter(([, v]) => typeof v === 'string' && v !== '')
+              .map(([k, v]) => (
+                <SecretField key={k} label={IDENTITY_LABEL[k] ?? k} value={v as string} />
+              ))}
+          </Section>
+        )}
+
+        {extra?.notes && (
+          <Section title="备注">
+            <p className="secret whitespace-pre-wrap py-2.5 text-md leading-relaxed">{extra.notes}</p>
+          </Section>
         )}
 
         {item.uris.length > 0 && (
