@@ -20,10 +20,30 @@
 //!   I2. 合成按键**没有**读回验证的可能（看不到目标控件），所以界面上
 //!       只能说「按键已发送」，**不能**说「已填充」。
 
+/*
+ * 模块的平台归属 —— 三种情况，别混。
+ *
+ * | | 怎么写 | 为什么 |
+ * |---|---|---|
+ * | 两端都要 | 不写 cfg | `http` 是网络层，移动端一样要走 |
+ * | **自己管自己** | 不写 cfg | `autotype` / `hotkey` 在文件顶上写了 `#![cfg(...)]`，别处不用再写一遍 |
+ * | **要在这里管** | `#[cfg(desktop)]` | `save` / `tray` —— 它们**自己不知道**自己只属于桌面端 |
+ *
+ * ⚠️ 第三种是最容易漏的：`save.rs` 里没有任何 `cfg`，它只是**用了** `rfd`。
+ * 而 `rfd` 在 iOS 上编不过（见 Cargo.toml 那一节），于是错会报在依赖里 ——
+ * 指向一个和我们代码无关的地方。所以「用了桌面专属的 crate」这件事，
+ * 必须在这张表上体现出来。
+ *
+ * ⚠️ `cfg(desktop)` / `cfg(mobile)` 是 `tauri_build::build()` 通过 build script
+ * 发的（tauri-build 的 `cfg_alias`，实测确认过），所以在这个 crate 里可用。
+ * 这和 Cargo.toml 里**不能**用它们是同一件事的两面 —— 那边只有 target triple。
+ */
 mod http;
 mod autotype;
+#[cfg(desktop)]
 mod save;
 mod hotkey;
+#[cfg(desktop)]
 mod tray;
 #[cfg(target_os = "macos")]
 mod biometric;
@@ -35,6 +55,20 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+/*
+ * ⚠️ 下面这三条是**桌面端专属**的，因为它们都是「第二个窗口」这件事的一部分 ——
+ * 快速面板是一个 `alwaysOnTop` / `skipTaskbar` 的常驻小窗（见 tauri.conf.json），
+ * 移动端没有这个形态：那边一个应用就是一块屏幕。
+ *
+ * 这里的 `#[cfg(desktop)]` 不是我加的洁癖 —— 不加**编不过**：
+ * `WebviewWindow::minimize` / `unminimize` 在 Tauri 里本身就是桌面端才有的方法。
+ * 换句话说，这条 cfg 只是把「本来就成立的事实」写出来。
+ *
+ * 调用方（`quick/main.tsx`、`AutotypeAction.tsx`）也都在桌面端专属的入口里，
+ * 所以移动端不会出现「调一个不存在的命令」那种失败 —— 那种失败报的是
+ * 一句英文的 `command not found`，和真正的原因离得很远。
+ */
+
 /// 最小化主窗口。
 ///
 /// ⚠️ 走 Rust 命令而不是前端的 `getCurrentWindow().minimize()`：
@@ -44,6 +78,7 @@ fn app_version() -> String {
 /// 自动输入倒计时结束时主窗口根本没让出焦点，按键有可能敲进我们自己的界面。
 ///
 /// 自定义命令不受 ACL 约束，所以这条路既安全又不用放宽权限。
+#[cfg(desktop)]
 #[tauri::command]
 fn main_minimize(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("main") {
@@ -52,6 +87,7 @@ fn main_minimize(app: tauri::AppHandle) {
 }
 
 /// 收起快速面板。Esc、选中条目、失焦都走它。
+#[cfg(desktop)]
 #[tauri::command]
 fn quick_hide(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("quick") {
@@ -60,6 +96,7 @@ fn quick_hide(app: tauri::AppHandle) {
 }
 
 /// 从快速面板切到主窗口 —— 面板一次只够做一件事，需要完整界面时把主窗口叫出来。
+#[cfg(desktop)]
 #[tauri::command]
 fn quick_open_main(app: tauri::AppHandle) {
     if let Some(w) = app.get_webview_window("quick") {
@@ -85,9 +122,15 @@ pub fn run() {
             autotype::autotype_set_enabled,
             autotype::autotype_open_settings,
             autotype::autotype_type,
+            #[cfg(desktop)]
             main_minimize,
+            #[cfg(desktop)]
             quick_hide,
+            #[cfg(desktop)]
             quick_open_main,
+            // 存附件要弹系统对话框（`rfd`），移动端没有这个概念 ——
+            // 那边走的是分享面板，是另一套东西，不是这一套的移植
+            #[cfg(desktop)]
             save::save_file,
             #[cfg(target_os = "macos")]
             biometric::biometric_status,
@@ -106,10 +149,12 @@ pub fn run() {
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             app.manage(state);
 
-            // 开发期打开 devtools 会方便很多；发布版刻意没有这个入口 ——
-            // 密码管理器不该在正式版里留一个能看到内存中明文的调试器。
             // 菜单栏图标。密码管理器大部分时间不在前台，用户需要它的时候
             // 正在别处登录一个网站 —— 常驻入口比主窗口重要。
+            //
+            // ⚠️ 移动端**没有对应物**，不是「还没做」：iOS 的常驻入口是主屏幕
+            // 图标，那属于系统，不属于应用。所以这里不是降级，是这一节整个不存在。
+            #[cfg(desktop)]
             if let Err(e) = tray::install(app.handle()) {
                 eprintln!("[coffer] 菜单栏图标不可用：{e}");
             }
@@ -128,7 +173,10 @@ pub fn run() {
 
             // 开发期打开 devtools 会方便很多；发布版刻意没有这个入口 ——
             // 密码管理器不该在正式版里留一个能看到内存中明文的调试器。
-            #[cfg(debug_assertions)]
+            //
+            // ⚠️ 移动端另一个概念：那边是 Safari 的 Web Inspector，由**构建设置**
+            // 决定能不能连，不是一个可以在运行时「打开」的窗口。
+            #[cfg(all(debug_assertions, desktop))]
             if let Some(w) = app.get_webview_window("main") {
                 w.open_devtools();
             }

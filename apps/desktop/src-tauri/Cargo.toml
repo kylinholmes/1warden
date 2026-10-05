@@ -16,17 +16,14 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# ⚠️ 基础声明**不带** `tray-icon` / `image-png` —— 那两个是桌面端专属，
+# 在下面按 target 加。理由见那一节。
+tauri = { version = "2" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 二进制体经 IPC 传输要编码 —— Tauri 的 IPC 是 JSON。
 # 附件上传走这条：直接传字节会被 UTF-8 解码静默改掉
 base64 = "0.22"
-
-# 系统保存对话框 —— 附件的「取回」要用。
-# 直接引 crate 而不是 Tauri 的 dialog 插件：插件要额外的权限声明与
-# 打包配置，而我们需要的只是「问用户存哪」这一件事。
-rfd = "0.15"
 
 # ── 网络 ──
 # 网络请求必须在 Rust 侧发出：WebView 的 origin 是 tauri://localhost，
@@ -51,6 +48,28 @@ rustls-native-certs = "0.8"
 sha2 = "0.10"
 # 解析证书的签发者/有效期 —— 只给指纹的话，普通用户没法判断该不该信任
 x509-parser = "0.16"
+
+# ══ 桌面端专属的依赖 ══════════════════════════════════════════════════
+#
+# ⚠️ **这里不能用 `cfg(desktop)` / `cfg(mobile)`。**
+#
+# 那两个 cfg 是 `tauri-build` 通过 build script 发给 **rustc** 的，只对 `.rs`
+# 里的 `#[cfg(...)]` 有效。Cargo 解析 `Cargo.toml` 的时候还没有 build script
+# 这回事 —— 它只看 target triple。所以在依赖表里，「桌面端」只能写成
+# target_os 的**否定式**。（这是同一个东西的两种写法，别的地方容易混。）
+#
+# 下面这些在移动端不是「换个实现」，是**那个概念不存在**：
+# · `rfd`       —— 系统文件对话框。iOS 没有「另存为」，走的是分享面板
+# · `tray-icon` —— 托盘。iOS 的等价物是主屏幕，不属于应用
+# · `image-png` —— 只为托盘图标而开
+#
+# ⚠️ 症状很值得记：`rfd` 在 iOS 上是**编不过**的，报的是 12 条
+# 「the trait bound `FileDialog: FilePickerDialogImpl` is not satisfied」——
+# 那是**它自己**没有 iOS 后端，和我们写的代码一个字都没关系。
+# 这类错在依赖里，不在我们的文件里，所以第一反应会去翻自己的代码。
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+rfd = "0.15"
+tauri = { version = "2", features = ["tray-icon", "image-png"] }
 
 # ── 原生自动输入（spec §7.4）──
 # 只做「往当前焦点合成按键」，不读任何应用的界面内容。

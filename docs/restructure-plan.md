@@ -397,9 +397,34 @@ bun run scripts/e2e-extension.ts
 ## 三·七、提交前跑什么
 
 ```
-bun run check        # typecheck + 838 个测试 —— 不需要任何前置
+bun run check        # typecheck + 843 个测试 —— 不需要任何前置
 bun run check:all    # 再加端到端（先跑一次 e2e:extension:setup）
 ```
+
+### ⚠️ 一条**没查清**的观察：`keys.test.ts` 有过一次偶发失败
+
+记在这里而不是假装没发生：`bun run check` 有一次报
+
+```
+packages/crypto/src/keys.test.ts
+  it('throws DecryptError (not DOMException) for a wrong-size key')
+  Tests  1 failed | 842 passed
+```
+
+**之后 27 次运行（6 次全量 + 20 次单跑 + 1 次单包）一次都没复现。**
+当时没抓到断言原文，所以下面这些只是**待查的方向，不是结论**：
+
+- 最可疑的是 `expect(decryptString(...), '消息').rejects` 这种写法里，
+  被拒的 promise 和挂上去的处理器之间的**微任务时序** —— 拒得太早会变成
+  unhandled rejection，而它报出来的样子和断言失败不一样、也不稳定
+- 其次是 57 个 worker 并行时的超时
+
+**为什么值得记而不是划掉**：这是**密码学**的测试，守的是
+「MAC 校验失败时不能吐出一个像明文的串」。一条会偶发失败的 MAC 测试，
+比一条没有的 MAC 测试更危险 —— 它让人习惯性地重跑，而真正的间歇性
+bug 就藏在「又是它，重跑一下」里面。
+
+下次再出现时**先把断言原文留下**，再决定是修测试还是修实现。
 
 ## ⚠️ 这个仓库**没有 CI**，而且现在加不了
 
@@ -411,6 +436,60 @@ bun run check:all    # 再加端到端（先跑一次 e2e:extension:setup）
 
 `check` / `check:all` 就是那份 CI 会跑的内容。等有了 remote，
 配置本身是五行的事 —— 缺的是「这个仓库托管在哪」，那是决定，不是实现。
+
+## 三·八、跨目标构建：一个指向**反方向**的错
+
+装好 iOS 目标、然后
+
+```
+cargo check --target aarch64-apple-ios-sim
+```
+
+得到的是：
+
+```
+error[E0463]: can't find crate for `core`
+  = help: consider downloading the target with `rustup target add aarch64-apple-ios-sim`
+```
+
+**这个提示是错的，照它做也没用。** 目标确实装着 —— `rustup target list
+--installed` 里有，`~/.rustup/toolchains/stable-aarch64-apple-darwin/lib/rustlib/
+aarch64-apple-ios-sim/lib/` 里 `libcore-*.rlib` 也在。我按提示重装了一遍，
+仍然是同一个错。
+
+真正的原因在这台机器的 PATH 上：
+
+```
+$ which -a rustc
+/opt/homebrew/bin/rustc          ← 胜出的是这个
+/Users/kylin/.cargo/bin/rustc
+```
+
+Homebrew 的 rustc（1.98.1）是一份**独立发行版**，sysroot 在
+`/opt/homebrew/Cellar/rust/`，里面没有 rustup 装的那些目标。而 cargo 是用
+**裸名字**去调编译器的 —— `cargo check -v` 打出来的命令行就是
+`rustc --crate-name libc ...`，于是 PATH 解析到 Homebrew 那份，
+**rustup 装的目标对它根本不可见**。
+
+至于 rustup 的 shim 为什么没把工具链的 bin 顶到前面，没查出确凿原因
+（`~/.cargo/bin/cargo` 确实是 shim，自报 1.98.0，`~/.cargo/bin/rustc
+--print sysroot` 也指对了工具链）。但事实很清楚：**cargo 调的是裸
+`rustc`，PATH 上胜出的是 Homebrew 那份**。
+
+### 怎么办
+
+不改用户的 PATH（那是他的机器，而且桌面端构建一直靠它正常工作 ——
+Homebrew 的 rustc 编自己的宿主目标是没问题的），只在需要跨目标的命令里让路：
+
+```
+PATH="$HOME/.cargo/bin:$PATH" cargo check --target aarch64-apple-ios-sim
+```
+
+同一棵树，加前缀就 `Finished`，不加就 E0463 —— 这一条是**验过的**。
+
+⚠️ 对 `tauri ios build` 同样成立：它自己去调 cargo，继承的是调用者的 PATH。
+所以移动端的构建脚本里必须带上这个前缀，否则失败的样子还是「找不到 core」，
+而那个样子会让人去查目标装没装 —— 一个已经查过、且结论是「装了」的地方。
 
 ## 四、验收
 
