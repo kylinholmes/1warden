@@ -18,6 +18,7 @@ import { Generator } from '../src/screens/Generator';
 import { Connect } from '../src/screens/Connect';
 import { Unlock } from '../src/screens/Unlock';
 import { ToastProvider, useToast, type ToastInput } from '../src/components/Toast';
+import { installHost } from '@coffer/ui';
 import { initPlatform } from '../src/platform';
 import { initTheme, setThemeMode, type ThemeMode } from '../src/theme';
 import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
@@ -132,7 +133,32 @@ const params = new URLSearchParams(location.search);
 const which = params.get('screen') ?? 'messy';
 
 /*
- * 「记住的账户」是存在 localStorage 里的，而无头浏览器每次都是全新 profile ——
+ * ⚠️ 预览也**必须装宿主**，否则「记住的账户」在预览里恒为空。
+ *
+ * 账户存储搬进 `@coffer/ui` 之后走的是 `host().storage`。宿主没装时
+ * `readAccounts()` 会抛，而它把异常吞掉、回 `[]`（对产品是对的：存储坏了
+ * 不该挡住连接）—— 于是预览里**恒为「一个都没存」**，账户选择那一屏截不到。
+ *
+ * 这正是本文件顶上说的那件事：**仪器和产品走的不是同一条路时，
+ * 仪器会安静地显示一个产品不会有的状态**。搬之前预览是能截到账户选择的
+ * （那时 `readAccounts` 直接读 `localStorage`），搬完就截不到了 ——
+ * 而症状只是「截图里少了几行」，不会报任何错。
+ *
+ * 装的是和桌面端等价的一份（都是 localStorage），**不走
+ * `installDesktopHost()`** —— 那个会把 Rust 侧的 `tauriFetch` 也带进来，
+ * 而预览里没有 Rust。预览的连接屏不联网，一个直连的 fetch 就够。
+ */
+installHost({
+  fetch: (...args) => fetch(...args),
+  storage: {
+    get: async (k) => localStorage.getItem(k),
+    set: async (k, v) => localStorage.setItem(k, v),
+    remove: async (k) => localStorage.removeItem(k),
+  },
+});
+
+/*
+ * 「记住的账户」存在 localStorage 里，而无头浏览器每次都是全新 profile ——
  * 不种进去的话，连接屏永远只截得到空白表单那一态，看不到账户选择。
  * 这里种的是**假数据**，和这个文件里其他假数据一样，只为把界面撑到有代表性的状态。
  */

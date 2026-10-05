@@ -3,7 +3,7 @@ import type { VaultClient, TwoFactorChallenge } from '@coffer/vault';
 import { probeCertificate, trustCertificate, type CertInfo } from '../trust';
 import {
   IconAlert, IconArrowLeft, IconChevronDown, IconGlobe, IconLock, IconPlus, IconServer, IconSpinner,
-  TwoFactorForm, apiMessageOf,
+  TwoFactorForm, apiMessageOf, rememberAccount, useAccounts, type SavedAccount,
 } from '@coffer/ui';
 
 interface Props {
@@ -19,68 +19,20 @@ function isCertUntrusted(e: unknown): e is { kind: 'certUntrusted'; fingerprint?
   return (e as { kind?: string } | null)?.kind === 'certUntrusted';
 }
 
-/**
- * ── 记住的账户
- *
- * 这是个**自托管**客户端，一个人手上常常不止一个地址（自己的机器、公司的、
- * 朋友的）。每次都把 URL 和邮箱从头敲一遍没有道理 —— 它们不是秘密，
- * 而且敲错服务器地址只会得到一句「连不上」，很难查。
- *
- * ⚠️ 存进去的**只有服务器地址和邮箱**，永远不存主密码、不存任何密钥。
- * 那两样东西只活在内存里，锁定就没了（这是 spec 的安全不变量）。
- *
- * 存的是**列表**而不是单个槽位：上一版只有一个 `coffer.serverUrl` /
- * `coffer.email`，换一个账户就把上一个冲掉了。
- */
-const ACCOUNTS_KEY = 'coffer.accounts';
-const LEGACY_URL_KEY = 'coffer.serverUrl';
-const LEGACY_EMAIL_KEY = 'coffer.email';
-const MAX_ACCOUNTS = 5;
-
-interface Saved { serverUrl: string; email: string }
-
-function isSaved(v: unknown): v is Saved {
-  return typeof v === 'object' && v !== null
-    && typeof (v as Saved).serverUrl === 'string' && (v as Saved).serverUrl.length > 0
-    && typeof (v as Saved).email === 'string' && (v as Saved).email.length > 0;
-}
-
-function readAccounts(): Saved[] {
-  try {
-    const raw = localStorage.getItem(ACCOUNTS_KEY);
-    if (raw) {
-      const list: unknown = JSON.parse(raw);
-      if (Array.isArray(list)) return list.filter(isSaved).slice(0, MAX_ACCOUNTS);
-    }
-    // 旧版本只存了一个槽位 —— 把它迁移成列表的第一项，
-    // 用户升级后不会觉得「我明明记住过」
-    const serverUrl = localStorage.getItem(LEGACY_URL_KEY);
-    const email = localStorage.getItem(LEGACY_EMAIL_KEY);
-    if (serverUrl && email) return [{ serverUrl, email }];
-  } catch {
-    // 存储被禁用或内容坏了 —— 当作没记住过，不值得打断连接流程
-  }
-  return [];
-}
-
-function rememberAccount(a: Saved): void {
-  try {
-    const rest = readAccounts().filter((x) => !(x.serverUrl === a.serverUrl && x.email === a.email));
-    localStorage.setItem(ACCOUNTS_KEY, JSON.stringify([a, ...rest].slice(0, MAX_ACCOUNTS)));
-    // 顺带写一份旧键：万一用户回退到上一版，仍然能读到
-    localStorage.setItem(LEGACY_URL_KEY, a.serverUrl);
-    localStorage.setItem(LEGACY_EMAIL_KEY, a.email);
-  } catch {
-    // 存不下就算了 —— 记住账户是便利功能，不能因为它失败就挡住连接
-  }
-}
-
 export function Connect({ client, onConnected }: Props) {
-  // 只读一次。连接成功之前不重新读 —— 否则重渲染会跟着存储变
-  const [accounts] = useState<Saved[]>(readAccounts);
+  /*
+   * 记住的账户走 `@coffer/ui` 的共享存储 —— **和扩展端同一份**。
+   *
+   * ⚠️ 它是**异步**的（宿主接口统一成 Promise，因为 `chrome.storage.local`
+   * 没有同步读），所以加载中回 `null`。这一屏以前是同步读 `localStorage`，
+   * 一句话就拿到；换过去之后必须把「还没读到」和「一个都没存」分开，
+   * 否则有记住账户的人会先看到一张要填服务器地址的表单，然后它跳成列表 ——
+   * 读起来就是「我明明记住过」。
+   */
+  const accounts = useAccounts();
 
-  const [serverUrl, setServerUrl] = useState(accounts[0]?.serverUrl ?? '');
-  const [email, setEmail] = useState(accounts[0]?.email ?? '');
+  const [serverUrl, setServerUrl] = useState('');
+  const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -94,13 +46,25 @@ export function Connect({ client, onConnected }: Props) {
    *   pick —— 选一个记住的账户（有记住的账户时从这里开始）
    *   form —— 填完整的服务器地址 + 邮箱 + 主密码
    *   quick —— 已选定某个账户，只需要主密码
+   *   null  —— **还没定**，账户还在读
    *
    * 这样回访用户是「点一下 + 敲密码」，第一次用的人是完整表单，
    * 两条路都不别扭。
    */
-  const [view, setView] = useState<'pick' | 'form' | 'quick'>(
-    accounts.length > 0 ? 'pick' : 'form',
-  );
+  const [view, setView] = useState<'pick' | 'form' | 'quick' | null>(null);
+
+  /*
+   * 账户读到之后再决定从哪一屏开始。
+   *
+   * ⚠️ 不能在这里写提前返回 —— 下面还有 hook（`passwordRef` 那个副作用），
+   * 提前返回就是「有条件地调 hook」。占位放在 JSX 里。
+   */
+  useEffect(() => {
+    if (accounts === null || view !== null) return;
+    const first = accounts[0];
+    if (first) { setServerUrl(first.serverUrl); setEmail(first.email); }
+    setView(first ? 'pick' : 'form');
+  }, [accounts, view]);
 
   const passwordRef = useRef<HTMLInputElement>(null);
   // 进到 quick 视图时把焦点放到密码框 —— 用户点完账户就该直接打字
@@ -117,8 +81,9 @@ export function Connect({ client, onConnected }: Props) {
     setError(null);
     try {
       await client.connect({ serverUrl: serverUrl.trim(), email: email.trim(), masterPassword: password });
-      // 只记住服务器与邮箱 —— **绝不**记住主密码
-      rememberAccount({ serverUrl: serverUrl.trim(), email: email.trim() });
+      // 只记住服务器与邮箱 —— **绝不**记住主密码。不 await：它是便利功能，
+      // 而且 `rememberAccount` 自己就不抛（存不下也不该挡住连接）
+      void rememberAccount({ serverUrl: serverUrl.trim(), email: email.trim() });
       onConnected();
     } catch (err) {
       if (isTwoFactor(err)) {
@@ -182,7 +147,7 @@ export function Connect({ client, onConnected }: Props) {
     await doConnect();
   }
 
-  function pickAccount(a: Saved) {
+  function pickAccount(a: SavedAccount) {
     setServerUrl(a.serverUrl);
     setEmail(a.email);
     setPassword('');
@@ -213,7 +178,7 @@ export function Connect({ client, onConnected }: Props) {
           <span className="text-xl font-semibold tracking-[-0.01em]">Coffer</span>
         </div>
 
-        {!inFlow && (
+        {!inFlow && view !== null && (
           <h1 className="text-md font-medium text-[var(--ink-secondary)]">
             {view === 'pick' ? '选择要连接的账户'
               : challenge ? '需要两步验证'
@@ -223,7 +188,14 @@ export function Connect({ client, onConnected }: Props) {
         )}
 
         <div className="mt-5">
-          {cert ? (
+          {/*
+            ⚠️ 账户还在读时**不渲染表单**，渲染一个占位。
+            先渲染表单再跳成账户列表，读起来就是「我明明记住过」——
+            而这个闪烁只在存储慢的时候出现，本地开发永远看不到。
+          */}
+          {view === null ? (
+            <div className="h-[176px]" aria-hidden />
+          ) : cert ? (
             <CertificatePrompt
               cert={cert}
               host={hostOf(serverUrl)}
@@ -240,7 +212,12 @@ export function Connect({ client, onConnected }: Props) {
             />
           ) : view === 'pick' ? (
             <AccountPicker
-              accounts={accounts}
+              /*
+               * `?? []` 只是为了让类型收窄：`view === 'pick'` 只在
+               * `accounts[0]` 存在时才被设上（见上面那个 effect），
+               * 所以这里 `accounts` 一定非空。TS 追不到这条因果。
+               */
+              accounts={accounts ?? []}
               onPick={pickAccount}
               onOther={() => { setServerUrl(''); setEmail(''); setPassword(''); setError(null); setView('form'); }}
             />
@@ -327,8 +304,8 @@ export function Connect({ client, onConnected }: Props) {
  * 只显示邮箱是不够的（同一个人在两个服务器上常用同一个邮箱）。
  */
 function AccountPicker({ accounts, onPick, onOther }: {
-  accounts: Saved[];
-  onPick: (a: Saved) => void;
+  accounts: SavedAccount[];
+  onPick: (a: SavedAccount) => void;
   onOther: () => void;
 }) {
   return (
