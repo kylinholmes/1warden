@@ -12,7 +12,7 @@
  * 任何 token。服务端也因此无法把请求归到某个用户 —— 图标是实例级共享缓存。
  */
 import { IconStore, type IconDiskCache } from '@coffer/vault';
-import { host } from '@coffer/ui';
+import { host, indexedDbIconDisk } from '@coffer/ui';
 
 /**
  * 按服务端地址缓存一个 store。
@@ -52,49 +52,3 @@ export function iconStoreFor(serverUrl: string): IconStore {
  *
  * IndexedDB 没有这个量级的问题，而且接口本来就是异步的。
  */
-const DB_NAME = 'coffer-icons';
-const STORE = 'icons';
-
-function openDb(): Promise<IDBDatabase> {
-  return new Promise((resolve, reject) => {
-    const req = indexedDB.open(DB_NAME, 1);
-    req.onupgradeneeded = () => {
-      // 用一个对象仓库、键就是域名 —— 不用索引，查询只有「按域名取」
-      if (!req.result.objectStoreNames.contains(STORE)) req.result.createObjectStore(STORE);
-    };
-    req.onsuccess = () => resolve(req.result);
-    req.onerror = () => reject(req.error);
-  });
-}
-
-export const indexedDbIconDisk: IconDiskCache = {
-  async get(domain) {
-    try {
-      const db = await openDb();
-      return await new Promise<string | null>((resolve, reject) => {
-        const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(domain);
-        req.onsuccess = () => resolve(typeof req.result === 'string' ? req.result : null);
-        req.onerror = () => reject(req.error);
-      });
-    } catch {
-      // 打不开就当没有 —— 图标少一个是观感问题，不该让列表炸掉
-      return null;
-    }
-  },
-  async set(domain, dataUrl) {
-    try {
-      const db = await openDb();
-      await new Promise<void>((resolve, reject) => {
-        const tx = db.transaction(STORE, 'readwrite');
-        tx.objectStore(STORE).put(dataUrl, domain);
-        tx.oncomplete = () => resolve();
-        tx.onerror = () => reject(tx.error);
-      });
-    } catch { /* 写不进去只是下次重新拉 */ }
-  },
-};
-
-/** 仅供测试：丢掉缓存，让下一个调用重建 */
-export function resetIconStore(): void {
-  cached = null;
-}
