@@ -73,3 +73,9 @@ if (new URLSearchParams(location.search).get('state') === 'card') {
   setTimeout(() => [...document.querySelectorAll('button')]
     .find((b) => b.textContent?.includes('招商银行 Visa'))?.click(), 500);
 }
+
+/* \`?state=import\`：点开导入那一项，核对界面 */
+if (new URLSearchParams(location.search).get('state') === 'import') {
+  setTimeout(() => [...document.querySelectorAll('button')]
+    .find((b) => b.textContent?.trim() === '导入')?.click(), 500);
+}

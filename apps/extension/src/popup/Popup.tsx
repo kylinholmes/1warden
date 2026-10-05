@@ -5,14 +5,14 @@ import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
-  IconFolder, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
+  IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, Section,
   countByType, scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
 type Destination =
-  | 'all' | 'favorites' | 'generator' | 'security'
+  | 'all' | 'favorites' | 'generator' | 'security' | 'import'
   | `type:${string}` | `folder:${string}`;
 
 /**
@@ -291,8 +291,9 @@ export function Popup() {
       case 'all': return true;
       case 'favorites': return i.favorite;
       case 'generator': return false;
-      /* 安全报告和生成器一样**不是筛选** —— 它整屏替换列表，不在条目里挑 */
+      /* 安全报告、生成器、导入都不是筛选 —— 它们整屏替换列表 */
       case 'security': return false;
+      case 'import': return false;
       default:
         return dest.startsWith('folder:')
           ? i.folderId === dest.slice('folder:'.length)
@@ -369,6 +370,7 @@ export function Popup() {
             key: 'tools',
             entries: [
               { key: 'security', label: '安全报告', icon: <IconShield size={20} /> },
+              { key: 'import', label: '导入', icon: <IconImport size={20} /> },
               { key: 'generator', label: '生成', icon: <IconDice size={20} /> },
             ],
           },
@@ -440,7 +442,9 @@ export function Popup() {
                 />
               )}
 
-              {dest === 'security' ? (
+              {dest === 'import' ? (
+                <ImportScreen onImported={() => { void refresh(); }} />
+              ) : dest === 'security' ? (
                 <SecurityReport
                   report={report}
                   nameOf={(id) => browse.find((b) => b.id === id)?.name ?? '(已不在列表里)'}
@@ -781,6 +785,120 @@ function SecurityReport({ report, nameOf }: {
       </p>
     </div>
   );
+}
+
+/**
+ * 导入 —— 和桌面端**同一套逻辑**（`@coffer/vault` 的 `parseImport` /
+ * `importItems`），只是跑在后台。
+ *
+ * ⚠️ **两步，不是一步**：选完文件先看预览（多少条、多少文件夹、跳过多少行），
+ * 确认了才真写。选错文件会让库里多出一堆垃圾，而删除比导入麻烦得多。
+ */
+function ImportScreen({ onImported }: { onImported: () => void }) {
+  const [data, setData] = useState<{ name: string; base64: string } | null>(null);
+  const [preview, setPreview] = useState<Preview | null>(null);
+  const [done, setDone] = useState<{ created: number; failed: number } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  async function pick(file: File): Promise<void> {
+    setBusy(true); setError(null); setPreview(null); setDone(null);
+    try {
+      const buf = new Uint8Array(await file.arrayBuffer());
+      // 二进制过消息通道必须 base64 —— 见后台 `coffer:import-parse` 的说明
+      let bin = '';
+      for (const b of buf) bin += String.fromCharCode(b);
+      const base64 = btoa(bin);
+      setData({ name: file.name, base64 });
+      setPreview(await send<Preview>({ type: 'coffer:import-parse', dataBase64: base64 }));
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '读不出这个文件');
+    } finally { setBusy(false); }
+  }
+
+  async function commit(): Promise<void> {
+    if (data === null) return;
+    setBusy(true); setError(null);
+    try {
+      const r = await send<{ created: number; failed: unknown[] }>({
+        type: 'coffer:import-commit', dataBase64: data.base64,
+      });
+      setDone({ created: r.created, failed: r.failed.length });
+      setPreview(null);
+      onImported();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '导入失败');
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
+      <label className={`btn btn-quiet w-full cursor-default py-2.5 ${busy ? 'opacity-45' : ''}`}>
+        选择文件
+        <input
+          type="file" accept=".1pux,.csv,.json,.kdbx,.xml" className="hidden"
+          disabled={busy}
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) void pick(f);
+            e.target.value = '';   // 同一个文件选两次也要能触发
+          }}
+        />
+      </label>
+
+      {preview !== null && (
+        <Section title="将要导入">
+          <div className="flex items-center gap-3 py-2">
+            <span className="min-w-0 flex-1 truncate text-md">{data?.name}</span>
+            <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">{preview.formatLabel}</span>
+          </div>
+          <div className="flex items-center gap-3 border-t border-[var(--border-subtle)] py-2">
+            <span className="min-w-0 flex-1 text-md">{preview.items} 条记录</span>
+            <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">
+              {preview.folders} 个文件夹
+            </span>
+          </div>
+          {preview.skipped > 0 && (
+            <div className="flex items-center gap-3 border-t border-[var(--border-subtle)] py-2">
+              <span className="min-w-0 flex-1 text-md text-[var(--caution)]">
+                跳过 {preview.skipped} 行
+              </span>
+              <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">格式不认</span>
+            </div>
+          )}
+        </Section>
+      )}
+
+      {preview !== null && (
+        <button type="button" onClick={() => { void commit(); }} disabled={busy}
+          className="btn btn-primary w-full py-2.5">
+          {busy ? '正在导入…' : `导入 ${preview.items} 条`}
+        </button>
+      )}
+
+      {done && (
+        <Note tone="accent">
+          已导入 {done.created} 条{done.failed > 0 ? `，${done.failed} 条失败` : ''}
+        </Note>
+      )}
+
+      {error && <Note tone="risk">{error}</Note>}
+
+      <p className="px-1 text-2xs leading-relaxed text-[var(--ink-tertiary)]">
+        支持 1PUX（1Password）、Bitwarden JSON、KeePass、CSV。
+        文件在本地解析，不会上传到任何地方。
+      </p>
+    </div>
+  );
+}
+
+/** `coffer:import-parse` 回的预览 */
+interface Preview {
+  format: string;
+  formatLabel: string;
+  folders: number;
+  items: number;
+  skipped: number;
 }
 
 /** 详情栏的占位。宽屏下这一栏一直在这儿，空着要有话说 */

@@ -224,6 +224,7 @@ type Request =
   | { type: 'coffer:security' }
   | { type: 'coffer:item'; itemId: string }
   | { type: 'coffer:import-parse'; dataBase64: string; format?: string }
+  | { type: 'coffer:import-commit'; dataBase64: string; format?: string }
   | { type: 'coffer:fill'; itemId: string; tabId: number }
   | { type: 'coffer:generate'; length?: number; digits?: boolean; symbols?: boolean }
   | { type: 'coffer:pending'; tabId?: number }
@@ -529,6 +530,25 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
           return m;
         }, {}),
       };
+    }
+
+    /**
+     * **导入的第二步：真写入。**
+     *
+     * 重新解析一遍（不用把条目从界面传回来）—— 解析是确定性的，而让界面
+     * 持有几百条明文再传回来，等于把整份数据多过一道手。
+     *
+     * `importItems` 自己负责建文件夹、按名字复用、逐条报失败（见那边的说明）。
+     * 这里只把它跑起来并把结果原样带回。
+     */
+    case 'coffer:import-commit': {
+      const c = await unlockedClient();
+      const bytes = fromBase64(req.dataBase64);
+      const format = detectImportFormat(bytes) ?? (req.format as ImportFormatId | undefined) ?? null;
+      if (format === null) throw new Error('认不出这个文件的格式');
+      const parsed = await parseImport(bytes, format);
+      const result = await c.importItems(parsed.items);
+      return result;
     }
 
     case 'coffer:security': {

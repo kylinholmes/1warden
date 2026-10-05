@@ -132,6 +132,8 @@ export function stubChrome(): void {
         return { notes: it?.notes ?? null, card: it?.card ?? null, identity: it?.identity ?? null,
                  sshKey: it?.sshKey ?? null, secureNote: it?.secureNote ?? null };
       }
+      case 'coffer:import-parse':
+        return { format: '1pux', formatLabel: '1Password (.1pux)', folders: 3, items: 42, skipped: 2 };
       case 'coffer:security':
         return { report: {
           total: ITEMS.length, score: 72, grade: 'fair',
