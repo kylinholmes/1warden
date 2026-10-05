@@ -5,7 +5,7 @@ import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
-  IconFolder, IconKeyboard, IconLock, IconSearch, IconSpinner, IconStar, ItemRow, NavRail, NavRow,
+  IconFolder, IconKeyboard, IconLock, IconSearch, IconSpinner, IconStar, ItemRow, NavDrawer, NavRow,
   countByType, scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
@@ -145,7 +145,6 @@ export function Popup() {
    * 所以退回来（onBack）只是把 openId 清掉，列表原样还在，搜索词也还在。
    */
   const [dest, setDest] = useState<Destination>('all');
-  const [railExpanded, setRailExpanded] = useState(false);
   /*
    * 文件夹 —— 和桌面端**对齐**（用户明确要求这些两边都要有）。
    * 单独一条消息：它是整个库的一份，跟着每条摘要重复几十遍没道理，
@@ -283,10 +282,8 @@ export function Popup() {
         折叠 80 / 展开 214 是同一份条目的两种排布，不是两套实现。
         内容由这里给：桌面端多出文件夹、安全报告、导入，弹窗没有那些能力。
       */}
-      <NavRail
+      <NavDrawer
         label="保险库导航"
-        expanded={railExpanded}
-        onToggleExpanded={() => setRailExpanded((v) => !v)}
         current={dest}
         onSelect={(k) => { setDest(k as Destination); setOpenId(null); }}
         brand={
@@ -294,9 +291,7 @@ export function Popup() {
             <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
               <IconLock size={13} />
             </span>
-            {railExpanded && (
-              <span className="min-w-0 truncate text-lg font-semibold tracking-[-0.01em]">Coffer</span>
-            )}
+            <span className="min-w-0 truncate text-lg font-semibold tracking-[-0.01em]">Coffer</span>
           </>
         }
         groups={[
@@ -332,7 +327,7 @@ export function Popup() {
           <NavRow
             entry={{ key: '__lock', label: '锁定', icon: <IconLock size={20} /> }}
             active={false}
-            expanded={railExpanded}
+            expanded
             onClick={() => {
               void (async () => {
                 await send({ type: 'coffer:lock' });

@@ -177,6 +177,49 @@
      * 把它改窄（见下面 `.app-sidebar` 那段），而内联样式 —— 包括内联的
      * 自定义属性 —— 压过一切样式表规则，那样改窄永远不生效。
      */
+    /* ── 悬停抽屉 ──────────────────────────────────────── */
+
+    .nav-drawer {
+      position: relative;
+      z-index: 20;
+      flex: none;
+    }
+
+    /* 左边缘的悬停带。整条高度都可命中，但只占 14px */
+    .nav-drawer-trigger {
+      position: absolute;
+      inset-block: 0;
+      left: 0;
+      width: 14px;
+      display: grid;
+      place-items: center;
+      color: var(--ink-tertiary);
+      background: linear-gradient(to right, var(--surface-glass), transparent);
+      transition: color var(--dur-fast) var(--ease-enter);
+    }
+    .nav-drawer:hover .nav-drawer-trigger,
+    .nav-drawer:focus-within .nav-drawer-trigger { color: var(--ink-secondary); }
+
+    /*
+     * 面板。默认整体移出左边缘（translateX(-100%)），悬停/聚焦时滑回来。
+     * ⚠️ 它是 `.nav-drawer` 的**子元素** —— 鼠标从带子移到面板上时
+     * `:hover` 仍然成立，面板才不会在手底下闪走。
+     */
+    .nav-drawer-panel {
+      position: absolute;
+      inset-block: 0;
+      left: 0;
+      transform: translateX(-100%);
+      transition: transform var(--dur-base) var(--ease-enter);
+      box-shadow: var(--elev-pop);
+      background: var(--surface-glass);
+    }
+    .nav-drawer:hover .nav-drawer-panel,
+    .nav-drawer:focus-within .nav-drawer-panel { transform: none; }
+
+    /* 抽屉里的导航栏不受折叠态影响 —— 它只在滑出来时可见 */
+    .nav-drawer-panel .vault-rail { height: 100%; }
+
     .vault-rail { width: var(--nav-w, 80px); }
     .vault-rail[data-expanded='true'] { --nav-w: 214px; }
     .vault-rail[data-expanded='false'] { --nav-w: 80px; }

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import { IconItems } from './icons';
 
 /**
  * 导航栏 —— **桌面端侧栏和浏览器弹窗的 rail 是同一个组件**。
@@ -230,5 +231,45 @@ export function NavRow({ entry, active, expanded, onClick }: {
       </button>
       {entry.extra}
     </li>
+  );
+}
+
+/**
+ * **悬停抽屉** —— 把 `NavRail` 挂起来，不占用版面。
+ *
+ * ## 为什么不是常驻一条栏
+ *
+ * 弹窗里的横向空间是**内容**的。常驻 80px 的栏意味着每条记录的名字都少
+ * 80px —— 而导航不是每时每刻都在用：打开弹窗的人十有八九是来拿某一条密码的，
+ * 不是来切换分类的。
+ *
+ * 所以：左边缘留一条 **14px 的悬停带**，鼠标移上去（或者键盘 Tab 进去）
+ * 面板才从左侧滑出、盖住内容。用完移开就收回去。
+ *
+ * ## 为什么用 CSS 的 `:hover` 而不是 React 状态
+ *
+ * 纯 CSS 的悬停**不会有「状态和指针不同步」那一类 bug**：鼠标移开、面板
+ * 收起，这两件事由浏览器保证同时发生。用状态的话，得自己处理「鼠标从带子
+ * 移到面板上」这段路程 —— 而那段路程里如果状态被清掉，面板会在手底下消失。
+ *
+ * ⚠️ 面板是 `.nav-drawer` 的**子元素**，所以鼠标移进面板时
+ * `:hover` 仍然成立、面板不会闪走。这不是巧合，是它能工作的前提。
+ *
+ * ⚠️ `focus-within` 一起管：只用 `:hover` 的话，键盘用户永远打不开它。
+ */
+export function NavDrawer(
+  /* 抽屉永远展开、宽度固定 —— 这几项由它自己管，不该让调用方操心 */
+  props: Omit<NavRailProps, 'expanded' | 'onToggleExpanded' | 'collapsedWidth' | 'expandedWidth'>,
+) {
+  return (
+    <div className="nav-drawer">
+      {/* 悬停带。窄，但整条高度都可命中 —— 只做一个按钮的话太难悬准 */}
+      <div className="nav-drawer-trigger" aria-hidden>
+        <IconItems size={16} />
+      </div>
+      <div className="nav-drawer-panel">
+        <NavRail {...props} expanded />
+      </div>
+    </div>
   );
 }
