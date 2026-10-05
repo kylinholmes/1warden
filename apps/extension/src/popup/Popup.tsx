@@ -322,6 +322,13 @@ export function Popup() {
         折叠 80 / 展开 214 是同一份条目的两种排布，不是两套实现。
         内容由这里给：桌面端多出文件夹、安全报告、导入，弹窗没有那些能力。
       */}
+      {/*
+        ⚠️ 详情层开着时**不渲染导航**。
+        详情是一整屏（盖住列表），它自己那条 app bar 的左上角是**返回箭头** ——
+        导航按钮也在那儿的话两者会撞在一起，而返回是那一屏唯一的退路。
+        Material 同样把「详情屏」当作不暴露导航的一层。
+      */}
+      {openItem === null && (
       <NavDrawer
         label="保险库导航"
         current={dest}
@@ -381,6 +388,7 @@ export function Popup() {
           />
         }
       />
+      )}
 
       <div className="vault-content" data-detail={openItem !== null}>
         {error && (
