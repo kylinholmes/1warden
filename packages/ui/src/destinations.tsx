@@ -28,6 +28,23 @@ export const TYPE_LABEL: Record<string, string> = {
 /** 类型的展示顺序 —— **不**按字母、不按数量，按「一个人最可能先找哪个」 */
 export const TYPE_ORDER = ['login', 'card', 'identity', 'secureNote', 'sshKey'] as const;
 
+/**
+ * 身份信息的字段名 → 人话。
+ *
+ * ⚠️ 和 `TYPE_LABEL` 同一族，也必须只有一份。收进来的时候两边**已经漂了**：
+ * 桌面端 `ssn: '身份证号'`、扩展端 `ssn: '证件号'` —— 而后者的那份是
+ * 在同一次会话里现写的。**一个会话就能漂，何况几个月。**
+ *
+ * 取值以桌面端为准（它是参考实现，而且「身份证号」对中国用户更具体）。
+ */
+export const IDENTITY_LABEL: Record<string, string> = {
+  title: '称谓', firstName: '名', middleName: '中间名', lastName: '姓',
+  address1: '地址', address2: '地址 2', address3: '地址 3', city: '城市',
+  state: '省/州', postalCode: '邮编', country: '国家', company: '公司',
+  email: '邮箱', phone: '电话', ssn: '身份证号', username: '用户名',
+  passportNumber: '护照号', licenseNumber: '驾照号',
+};
+
 export interface NavDestination {
   /** 稳定的键。类型用 `type:<条目类型>` 前缀，和固定项区分开 */
   key: string;

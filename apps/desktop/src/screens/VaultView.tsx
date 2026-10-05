@@ -18,7 +18,8 @@ import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  ItemRow, NavDrawer, NavTrigger, SecretField, Section, TYPE_LABEL, TypeIcon, countByType,
+  IDENTITY_LABEL, ItemRow, NavDrawer, NavTrigger, SecretField, Section,
+  TYPE_LABEL, TypeIcon, countByType,
   scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
@@ -1109,13 +1110,8 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
 /* `TYPE_LABEL` 搬到 `@coffer/ui` 了 —— 两端各写一份的后果是
    同一个类型在两个地方叫不同的名字（真发生过：「信用卡」vs「卡片」）。 */
 
-const IDENTITY_LABEL: Record<string, string> = {
-  title: '称谓', firstName: '名', middleName: '中间名', lastName: '姓',
-  address1: '地址', address2: '地址 2', address3: '地址 3', city: '城市',
-  state: '省/州', postalCode: '邮编', country: '国家', company: '公司',
-  email: '邮箱', phone: '电话', ssn: '身份证号', username: '用户名',
-  passportNumber: '护照号', licenseNumber: '驾照号',
-};
+/* `IDENTITY_LABEL` 搬到 `@coffer/ui` 了 —— 和 `TYPE_LABEL` 同一族，
+   各写一份的后果是「身份证号」vs「证件号」那种漂。 */
 
 /**
  * 一条附件。

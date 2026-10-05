@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react';
 import { ext } from '../ext-api';
-import { IconGlyph, IconAlert, IconArrowLeft, IconStar, Section, SecretField } from '@coffer/ui';
+import {
+  IDENTITY_LABEL, IconGlyph, IconAlert, IconArrowLeft, IconStar, Section, SecretField,
+} from '@coffer/ui';
 import { IconStore } from '@coffer/vault';
 import type { ItemSummary } from './Popup';
 
@@ -44,14 +46,6 @@ interface ExtraFields {
   secureNote: { type: number } | null;
 }
 
-/** 身份信息的字段名 → 人话。和桌面端同一份词表的口径 */
-const IDENTITY_LABEL: Record<string, string> = {
-  title: '称谓', firstName: '名', middleName: '中间名', lastName: '姓',
-  address1: '地址', address2: '地址 2', address3: '地址 3',
-  city: '城市', state: '省/州', postalCode: '邮编', country: '国家',
-  company: '公司', email: '邮箱', phone: '电话', ssn: '证件号',
-  username: '用户名', passportNumber: '护照号', licenseNumber: '驾照号',
-};
 
 export function ItemDetail({ item, icons, busy, onBack, onFill }: {
   item: ItemSummary;
