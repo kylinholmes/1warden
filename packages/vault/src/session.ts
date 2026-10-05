@@ -13,6 +13,8 @@ export interface AccountInfo {
 
 export interface SessionEvents {
   onStatusChange?: (s: SessionStatus) => void;
+  /** 同步开始/结束。与状态变化**分开** —— 见 `syncing` 的说明 */
+  onSyncChange?: (syncing: boolean) => void;
   onLock?: () => void;
 }
 
@@ -51,6 +53,25 @@ export class VaultSession {
   }
 
   get status(): SessionStatus { return this._status; }
+
+  /**
+   * 正在后台同步。
+   *
+   * ⚠️ 这是**独立于 `status` 的一个维度**，不是第五种状态。
+   *
+   * 「已解锁」和「数据还在路上」可以同时成立 —— 界面该立刻可用（用户看得见
+   * 应用、看得见自己在哪），只是列表还在往里填。把它并进状态机的话，
+   * 要么退回到「同步完才解锁」（界面卡住，就是要修的那个问题），
+   * 要么让「解锁」这个概念失去意义。
+   */
+  get syncing(): boolean { return this._syncing; }
+  private _syncing = false;
+
+  setSyncing(v: boolean): void {
+    if (this._syncing === v) return;
+    this._syncing = v;
+    this.events.onSyncChange?.(v);
+  }
   get account(): AccountInfo | null { return this._account; }
   get items(): readonly VaultItem[] { return this._items; }
   get folders(): readonly VaultFolder[] { return this._folders; }

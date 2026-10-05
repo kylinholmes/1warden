@@ -17,7 +17,7 @@ import { useToast } from '../components/Toast';
 import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
-  IconSearch, IconShield, IconStar, IconTrash, TypeIcon,
+  IconSearch, IconShield, IconSpinner, IconStar, IconTrash, TypeIcon,
 } from '@coffer/ui';
 
 interface Props {
@@ -137,6 +137,7 @@ export function VaultView({ client, onLock }: Props) {
         if (category.kind === 'folder' && category.id === id) setCategory({ kind: 'all' });
       })}
       onOpenSettings={() => setSettingsOpen(true)}
+      syncing={session.syncing}
       generatorOpen={generatorOpen}
       onOpenGenerator={() => setGeneratorOpen(true)}
     />
@@ -392,6 +393,8 @@ function Sidebar(props: {
   /** 生成器是浮层，不是一屏 —— 侧栏只负责把它叫出来，选中态跟着它的开合走 */
   generatorOpen: boolean;
   onOpenGenerator: () => void;
+  /** 后台正在同步 —— 列表已可用，只是在更新 */
+  syncing: boolean;
   onCreateFolder: (name: string) => Promise<void>;
   onRenameFolder: (id: string, name: string) => Promise<void>;
   onDeleteFolder: (id: string) => Promise<void>;
@@ -578,6 +581,19 @@ function Sidebar(props: {
           <span className="truncate text-[var(--text-xs)] text-[var(--ink-secondary)]" title={props.account}>
             {props.account}
           </span>
+          {/*
+            后台同步中的转圈。
+            ⚠️ 放在账户**后面**而不是盖住整个列表：列表此时是**可用的**
+            （缓存里那一版已经在显示），只是还在更新。盖一层遮罩会
+            把「可以用，正在更新」说成「不能用，等着」—— 那是两回事。
+          */}
+          {props.syncing && (
+            <IconSpinner
+              size={12}
+              className="shrink-0 text-[var(--ink-tertiary)]"
+              aria-label="正在同步"
+            />
+          )}
         </div>
         <button
           onClick={props.onLock}

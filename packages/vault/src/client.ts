@@ -18,7 +18,7 @@ import {
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
 import { VaultSession, restoreSession } from './session';
-import { SyncEngine } from './sync-engine';
+import { SyncEngine, type SyncCache } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
 import { unwrapAttachmentKey, decryptAttachmentContent } from './attachments';
 import { encryptBytes } from '@coffer/crypto';
@@ -82,6 +82,7 @@ export class VaultClient {
 
   /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
   private readonly fetchImpl: typeof fetch;
+  private readonly syncCache: SyncCache | undefined;
   private readonly deviceStore: DeviceIdStore;
   /** 设备标识要读存储，所以第一次用的时候才异步取 */
   private deviceId: Promise<string> | null = null;
@@ -100,8 +101,18 @@ export class VaultClient {
     fetchImpl: typeof fetch;
     /** 设备标识的持久化。桌面端用 localStorage，扩展用 chrome.storage。 */
     deviceStore?: DeviceIdStore;
+    /**
+     * 上次同步拿到的原始**密文**。
+     *
+     * 给不给只影响**快慢**，不影响功能 —— 不给就是每次全量拉。
+     * ⚠️ 存的是密文不是明文，见 `SyncCache` 的说明（那条关系到 spec S1）。
+     */
+    syncCache?: SyncCache;
+    /** 同步开始/结束。与 `onStatus` 分开 —— 见 `VaultSession.syncing` */
+    onSync?: (syncing: boolean) => void;
   }) {
     this.fetchImpl = opts.fetchImpl;
+    this.syncCache = opts.syncCache;
     this.deviceStore = opts.deviceStore ?? localStorageDeviceStore;
     this.device = {
       // 用桌面端的值而不是 CLI —— 服务端日志里能看出这是我们的应用
@@ -114,6 +125,7 @@ export class VaultClient {
     if (opts.autoLockMs !== undefined) sessionOpts.autoLockMs = opts.autoLockMs;
     if (opts.onLock) sessionOpts.onLock = opts.onLock;
     if (opts.onStatus) sessionOpts.onStatusChange = opts.onStatus;
+    if (opts.onSync) sessionOpts.onSyncChange = opts.onSync;
     this.session = new VaultSession(sessionOpts);
   }
 
@@ -214,8 +226,54 @@ export class VaultClient {
     this.session.setAccount(account);
     this.session.beginUnlock();
 
-    await this.doSync(userKey);
+    /*
+     * ⚠️ **先解锁，再同步**（顺序反过一次，两边的理由都记着）。
+     *
+     * 原来的顺序是「先同步、后 completeUnlock」，理由是：同步没跑完就解锁的话，
+     * 界面会先渲染出一个**空保险库**。那个理由仍然成立 —— 所以现在不是
+     * 让用户看空的，而是：
+     *
+     *   ① 解锁 → 界面立刻可用，并显示「正在同步」
+     *   ② 有本地缓存的话，**毫秒级**把上次的数据解出来填上（下面 hydrateThenSync）
+     *   ③ 再去服务端拉最新的，拉到了替换
+     *
+     * 慢的那一段是网络（`/api/sync` 一次返回整个库的密文），不是解密。
+     * 所以②通常就足以让用户感觉「秒开」，而③在后台跑完时列表悄悄更新。
+     */
     this.session.completeUnlock(userKey);
+    /*
+     * ⚠️ `await` 而不是 `void` —— **`connect()` 的契约不变**：
+     * 它 resolve 的时候数据已经就位。
+     *
+     * 界面之所以能提前切过去，是因为**会话状态**先变了
+     * （`completeUnlock` 在上面），而不是因为这里提前返回。
+     *
+     * 早先试过 `void`（提前返回），代价立刻显出来：扩展的自动填充在
+     * `connect()` 之后马上读会话，那时数据还在路上 —— 表现是「解锁后
+     * 头几秒匹配不到任何条目」，而且是随机的（取决于网速）。
+     *
+     * `hydrateThenSync` 内部吞掉同步失败，所以这里不会因为网络问题
+     * 把一个已经可用的客户端判成登录失败。
+     */
+    await this.hydrateThenSync(userKey);
+  }
+
+  /**
+   * 后台同步：先吃缓存，再问服务端。**不阻塞 `connect()` 的返回。**
+   *
+   * ⚠️ 这里吞掉异常是**故意**的：调用方已经拿到一个可用的、已解锁的客户端了，
+   * 同步失败不该把它变成失败 —— 表现应当是「列表还停在缓存那一版」，
+   * 而不是「登录失败」。错误由 `onError` 上报。
+   */
+  private async hydrateThenSync(key: SymmetricKey): Promise<void> {
+    this.session.setSyncing(true);
+    try {
+      await this.doSync(key);
+    } catch (e) {
+      console.warn('[sync] 后台同步失败，界面停在已有数据上', e);
+    } finally {
+      this.session.setSyncing(false);
+    }
   }
 
   /**
@@ -421,6 +479,7 @@ export class VaultClient {
       },
       onError: (e) => console.warn('[sync] 一条记录解密失败，已跳过', e),
     });
+    this.syncEngine.setCache(this.syncCache);
     // 同步会把解密结果直接写进会话。`unlocking` 态也允许写入 ——
     // 首次解锁正是「先同步、后 completeUnlock」，数据必须在解锁完成前就位，
     // 否则解锁的那一瞬间会先渲染出一个空保险库。

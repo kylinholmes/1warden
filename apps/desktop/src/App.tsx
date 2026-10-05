@@ -1,5 +1,6 @@
 import { useMemo, useReducer, useCallback, useEffect, Component, type ErrorInfo } from 'react';
 import { VaultClient, type SessionStatus } from '@coffer/vault';
+import { syncCache } from './sync-cache';
 import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
@@ -22,7 +23,16 @@ export function App() {
     fetchImpl: tauriFetch,
     autoLockMs: 15 * 60 * 1000,
     onLock: () => forceRender(),
+    // 同步开始/结束时也要重渲染 —— 界面上那个转圈靠它
     onStatus: () => forceRender(),
+    onSync: () => forceRender(),
+    /*
+     * 上次同步的密文缓存 —— 让「解锁后立刻看到条目」成为可能。
+     *
+     * ⚠️ 账户信息要等到**登录成功之后**才有，而这里是在构造时。
+     * 所以给一个惰性的：真正 load/save 的时候账户已经就位了。
+     */
+    syncCache,
   }), []);
 
   // 快速面板是另一个窗口，它向这里要数据、也由这里执行动作 ——
