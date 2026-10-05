@@ -139,8 +139,18 @@ export class SyncEngine {
      * `getRevisionDate()` 本身是一次网络往返；排在它后面的话，
      * 「秒开」就还得先等一个请求回来 —— 那正是要省掉的东西。
      */
+    /*
+     * ⚠️ **不按 `force` 区分** —— 每次都先读缓存。
+     *
+     * 早先写成「只有 force（首次登录）才读」，理由是「首次才需要秒开」。
+     * 那条在**锁定再解锁**这条路上是错的：用户锁一次再解一次，
+     * 走的也是这条同步，而那时缓存明明在，却没有被用上 ——
+     * 表现是「我明明刚同步过，解锁还是空的」。
+     *
+     * 缓存本来就是「上次看到的样子」，任何一次同步都该先拿它垫上。
+     */
     const account = this.session.account;
-    if (opts.force === true && this.deps.cache && account) {
+    if (this.deps.cache && account) {
       try {
         const cached = await this.deps.cache.load(account);
         if (cached) await this.apply(cached, opts.unlockedKey);

@@ -34,20 +34,30 @@ const keyFor = (serverUrl: string, email: string): string =>
 export const syncCache: SyncCache = (() => {
   return {
     async load(a: AccountInfo) {
+      const key = keyFor(a.serverUrl, a.email);
       try {
-        const raw = localStorage.getItem(keyFor(a.serverUrl, a.email));
-        if (raw === null) return null;
+        const raw = localStorage.getItem(key);
+        if (raw === null) {
+          console.warn(`[缓存] 未命中 ${key}`);
+          return null;
+        }
+        console.warn(`[缓存] 命中 ${key}，${(raw.length / 1024).toFixed(0)} KB`);
         return JSON.parse(raw) as SyncResult;
-      } catch {
+      } catch (e) {
+        console.warn('[缓存] 读取失败', e);
         // 坏了就当作没有 —— 下一次同步会重写。让解析错误冒出去
         // 只会把一个「慢一点」降级成「打不开」
         return null;
       }
     },
     async save(a: AccountInfo, payload) {
+      const key = keyFor(a.serverUrl, a.email);
       try {
-        localStorage.setItem(keyFor(a.serverUrl, a.email), JSON.stringify(payload));
-      } catch {
+        const json = JSON.stringify(payload);
+        localStorage.setItem(key, json);
+        console.warn(`[缓存] 已写入 ${(json.length / 1024).toFixed(0)} KB`);
+      } catch (e) {
+        console.warn('[缓存] 写入失败 —— 多半是超配额', e);
         // 多半是超配额。不缓存是**可用**的，只是下次全量拉 ——
         // 所以这里不能抛，抛了会让一次成功的同步看起来失败
       }
