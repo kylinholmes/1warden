@@ -185,16 +185,25 @@
       flex: none;
     }
 
-    /* 左边缘的悬停带。整条高度都可命中，但只占 14px */
+    /*
+     * 导航按钮 —— **左上角**，和站点信息同一条顶栏的高度。
+     *
+     * ⚠️ 曾经是左边缘中间一条 14px 的悬停带，两个问题：
+     * · 不好找（没人会猜到屏幕边缘中间能悬停）
+     * · 不常规（iOS / Android / Material / 网页都把导航入口放左上角）
+     *
+     * `.nav-drawer` 在 flex 行里宽度为 0（面板是绝对定位的），所以这里
+     * `left: 0` 就是**整个外壳**的左上角。
+     */
     .nav-drawer-trigger {
       position: absolute;
-      inset-block: 0;
+      top: 0;
       left: 0;
-      width: 14px;
+      width: 44px;
+      height: 56px;
       display: grid;
       place-items: center;
-      color: var(--ink-tertiary);
-      background: linear-gradient(to right, var(--surface-glass), transparent);
+      color: var(--ink-secondary);
       transition: color var(--dur-fast) var(--ease-enter);
     }
     .nav-drawer:hover .nav-drawer-trigger,
@@ -212,7 +221,14 @@
       transform: translateX(-100%);
       transition: transform var(--dur-base) var(--ease-enter);
       box-shadow: var(--elev-pop);
-      background: var(--surface-glass);
+      /*
+       * ⚠️ **不透明**，不是玻璃。
+       *
+       * `--surface-glass` 是给「衬着壁纸的常驻侧栏」用的 —— 它后面是桌面。
+       * 浮层后面是**内容**，用玻璃会让两层的文字叠在一起，根本读不了。
+       * 材质要跟着「它背后是什么」选，不是跟着「哪个组件」选。
+       */
+      background: var(--surface-paper);
     }
     .nav-drawer:hover .nav-drawer-panel,
     .nav-drawer:focus-within .nav-drawer-panel { transform: none; }

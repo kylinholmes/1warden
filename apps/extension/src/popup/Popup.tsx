@@ -405,7 +405,7 @@ export function Popup() {
           </div>
         ) : (
           <>
-            <header className="flex h-14 shrink-0 items-center border-b border-[var(--border-subtle)] px-3.5">
+            <header className="flex h-14 shrink-0 items-center border-b border-[var(--border-subtle)] pl-12 pr-3.5">
               <SiteLine url={tabUrl} account={status.account?.email ?? null} />
             </header>
 
