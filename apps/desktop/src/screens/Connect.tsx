@@ -211,7 +211,7 @@ export function Connect({ client, onConnected }: Props) {
       不带值的写法只在**正好按在那张元素本身**时才拖 —— 而这一屏的
       背景几乎都被卡片盖着，那样等于哪儿都拖不动。
     */
-    <div className="flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
+    <div className="below-titlebar flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
       <div className="screen-in w-full max-w-[380px]">
         <div className="mb-7 flex items-center gap-2.5">
           <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-[var(--accent-ink)]">

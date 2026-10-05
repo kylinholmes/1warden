@@ -154,7 +154,7 @@ export function VaultView({ client, onLock }: Props) {
       {sidebar}
 
       {fullWidth ? (
-        <div className="flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
+        <div className="below-titlebar flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
           {category.kind === 'security' ? (
             <SecurityReportView items={items} />
           ) : (
@@ -163,7 +163,7 @@ export function VaultView({ client, onLock }: Props) {
         </div>
       ) : (
         <>
-          <div className="flex w-[var(--list-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-content)]">
+          <div className="below-titlebar flex w-[var(--list-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-content)]">
             {/* 这一条也是标题栏的一部分 —— 整条顶部带子都可以拖窗口 */}
             <div className="band" data-tauri-drag-region="deep">
               <div className="relative flex min-w-0 flex-1 items-center">
@@ -227,7 +227,7 @@ export function VaultView({ client, onLock }: Props) {
             全局默认是禁止选中的（去浏览器感），这里显式放开。
             少标这一处，用户就复制不了密码，而那种缺失会被当成「功能没做」。
           */}
-          <div data-selectable className="min-w-0 flex-1 overflow-y-auto bg-[var(--surface-paper)]">
+          <div data-selectable className="below-titlebar min-w-0 flex-1 overflow-y-auto bg-[var(--surface-paper)]">
             {selected ? (
               <ItemDetail
                 key={selected.id}
@@ -408,7 +408,7 @@ function Sidebar(props: {
       材质，右边两块用不透明的表面盖住，只剩这一条把材质透出来。
       见 styles.css 的 --surface-glass —— α 是算出来的，不是调出来的。
     */
-    <nav className="flex w-[var(--rail-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-glass)]">
+    <nav className="below-titlebar flex w-[var(--rail-w)] shrink-0 flex-col border-r border-[var(--border-subtle)] bg-[var(--surface-glass)]">
       {/*
         和列表栏、详情栏共用 `.band` 的高度 —— 三个面板的顶部对齐在同一条线上。
 
