@@ -13,12 +13,12 @@ import { VaultView, ItemDetail, EmptyDetail } from '../src/screens/VaultView';
 import { QuickAccess } from '../src/screens/QuickAccess';
 import { Settings, type SectionId } from '../src/screens/Settings';
 import { ImportScreen } from '../src/screens/Import';
-import { ItemEditor } from '../src/screens/ItemEditor';
+
 import { Generator } from '../src/screens/Generator';
 import { Connect } from '../src/screens/Connect';
 import { Unlock } from '../src/screens/Unlock';
 import { ToastProvider, useToast, type ToastInput } from '../src/components/Toast';
-import { installHost } from '@coffer/ui';
+import { ItemEditor, installHost } from '@coffer/ui';
 import { initPlatform } from '../src/platform';
 import { initTheme, setThemeMode, type ThemeMode } from '../src/theme';
 import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
@@ -370,7 +370,8 @@ function EditorPreview({ item }: { item: VaultItem | null }) {
     <>
       <VaultView client={fakeClient} onLock={() => {}} />
       <ItemEditor
-        client={fakeClient}
+        folders={FOLDERS}
+        onSave={async (d) => d}
         item={item}
         open={open}
         onCancel={() => setOpen(false)}

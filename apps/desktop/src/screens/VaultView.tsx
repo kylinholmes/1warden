@@ -8,17 +8,17 @@ import { ItemIcon } from '@coffer/ui';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';
 import { ImportScreen } from './Import';
-import { ItemEditor } from './ItemEditor';
+
 import { Settings } from './Settings';
 import { Generator } from './Generator';
-import { FloatingPanel } from '../components/FloatingPanel';
+import { FloatingPanel } from '@coffer/ui';
 
 import { useToast } from '../components/Toast';
 import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  IDENTITY_LABEL, ItemRow, NavDrawer, NavTrigger, SecretField, Section, iconPropsOf,
+  IDENTITY_LABEL, ItemEditor, ItemRow, NavDrawer, NavTrigger, SecretField, Section, iconPropsOf,
   TYPE_LABEL, TypeIcon, countByType,
   scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
@@ -442,7 +442,10 @@ export function VaultView({ client, onLock }: Props) {
         所以它关得比这两个「啪」一下；那是既有行为，这次没动它。
       */}
       <ItemEditor
-        client={client}
+        /* 桌面端在进程内：文件夹从会话拿、保存直接调 client。
+           扩展端走消息（`coffer:folders` / `coffer:save-item`）—— 见共享组件 */
+        folders={client.getSession().folders}
+        onSave={(d) => client.saveItem(d)}
         open={mode.kind !== 'browse'}
         item={mode.kind === 'edit' ? mode.item : null}
         onCancel={() => setMode({ kind: 'browse' })}

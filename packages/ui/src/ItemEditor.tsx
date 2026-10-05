@@ -1,17 +1,20 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { generatePassword, passwordStrength } from '@coffer/crypto';
 import { writeTotpSecret } from '@coffer/vault';
-import type { VaultItem, ItemType, CustomField } from '@coffer/vault';
-import type { VaultClient } from '@coffer/vault';
-import { FloatingPanel } from '../components/FloatingPanel';
-import { STRENGTH_COLORS, STRENGTH_LABELS } from '@coffer/ui';
+import type { VaultItem, VaultFolder, ItemType, CustomField } from '@coffer/vault';
+import { FloatingPanel } from './FloatingPanel';
+import { STRENGTH_COLORS, STRENGTH_LABELS } from './strength';
 import {
   IconCard, IconChevronDown, IconClose, IconIdentity, IconKey, IconNote,
   IconPlus, IconSpinner, IconStar, IconTerminal, IconTrash,
-} from '@coffer/ui';
+} from './icons';
 
 interface Props {
-  client: VaultClient;
+  /** 文件夹列表。桌面端从会话里拿，扩展端从 `coffer:folders` 拿 */
+  /* 只读 —— 编辑器只拿它填下拉，不改文件夹本身 */
+  folders: readonly VaultFolder[];
+  /** 保存。桌面端直接调 client，扩展端发消息给后台 —— 加密在他们那边 */
+  onSave: (draft: VaultItem) => Promise<VaultItem>;
   item: VaultItem | null;      // null = 新建
   /** 浮层的开合。**组件本身一直挂着** —— 见下面「退场」那一段 */
   open: boolean;
@@ -50,7 +53,7 @@ interface Props {
  * 第三次确认：**没有任何键盘路径能丢掉改动**。Esc 第一次是「你要关吗」，
  * 第二次是把这一问撤掉、回到编辑。要丢只能点「放弃改动」。
  */
-export function ItemEditor({ client, item, open, onDone, onCancel }: Props) {
+export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Props) {
   const [draft, setDraft] = useState<VaultItem>(() => item ?? blankItem());
   /** 打开那一刻的样子 —— 判断「改没改过」就靠它 */
   const [initial, setInitial] = useState<VaultItem>(draft);
@@ -89,7 +92,6 @@ export function ItemEditor({ client, item, open, onDone, onCancel }: Props) {
 
   // 文件夹列表从会话里取 —— 编辑期间新建的文件夹看不到，这是可接受的：
   // 用户不会一边编辑一边去侧栏建文件夹
-  const folders = client.getSession().folders;
   function patch(p: Partial<VaultItem>) { setDraft((d) => ({ ...d, ...p })); }
   function patchLogin(p: Partial<NonNullable<VaultItem['login']>>) {
     setDraft((d) => ({ ...d, login: { ...(d.login ?? blankLogin()), ...p } }));
@@ -112,7 +114,7 @@ export function ItemEditor({ client, item, open, onDone, onCancel }: Props) {
     try {
       // 名是必填的 —— 一条没有名字的记录在列表里是一片空白，用户找不回来
       if (draft.name.trim().length === 0) throw new Error('名称不能为空');
-      onDone(await client.saveItem(draft));
+      onDone(await onSave(draft));
     } catch (e) {
       setError(messageOf(e));
       setBusy(false);

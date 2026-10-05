@@ -1,4 +1,4 @@
-import { FloatingPanel } from '../components/FloatingPanel';
+import { FloatingPanel } from '@coffer/ui';
 import { GeneratorBody, IconClose, IconDice } from '@coffer/ui';
 
 /**
