@@ -243,7 +243,11 @@ export function Popup() {
       而且弹窗应该是个稳定的「窗口」：切分类、进详情都不该让整个弹窗
       忽高忽低。560 是留了余量的选择（Chrome 的弹窗上限是 600）。
     */
-    <div className="screen-in flex h-[560px]">
+    /*
+      布局类来自 `@coffer/ui/components.css` —— 和桌面端共用同一套容器查询。
+      窄的时候详情盖住列表，宽的时候并排（见那边 `.vault-shell` 顶部的说明）。
+    */
+    <div className="screen-in vault-shell h-[560px]">
       <Rail
         types={railTypes}
         current={dest}
@@ -259,7 +263,7 @@ export function Popup() {
         }}
       />
 
-      <div className="flex min-w-0 flex-1 flex-col">
+      <div className="vault-content" data-detail={openItem !== null}>
         {error && (
           <div className="shrink-0 px-3.5 pt-3"><Note tone="risk">{error}</Note></div>
         )}
@@ -267,6 +271,7 @@ export function Popup() {
           <div className="shrink-0 px-3.5 pt-3"><Note tone="accent">{notice}</Note></div>
         )}
 
+        <div className="vault-list">
         {!status.unlocked ? (
           <div className="min-h-0 flex-1 overflow-y-auto p-3.5">
             <ConnectForm busy={busy} onSubmit={async (p) => {
@@ -279,15 +284,6 @@ export function Popup() {
               } finally { setBusy(false); }
             }} />
           </div>
-        ) : openItem !== null ? (
-          /* 第三层：盖住列表。顶上那条 app bar 是唯一的退路，所以它必须在 */
-          <ItemDetail
-            item={openItem}
-            icons={icons}
-            busy={busy}
-            onBack={() => setOpenId(null)}
-            onFill={() => { void fill(openItem.id); }}
-          />
         ) : (
           <>
             <header className="flex h-14 shrink-0 items-center border-b border-[var(--border-subtle)] px-3.5">
@@ -372,6 +368,26 @@ export function Popup() {
               )}
             </div>
           </>
+        )}
+        </div>
+
+        {/*
+          第三层。**始终渲染在列表之后**，而不是替换掉列表 ——
+          退回来时滚动位置和搜索词都还在。窄的时候它绝对定位盖住列表，
+          宽的时候并排（见 components.css 的 `.vault-detail`）。
+
+          ⚠️ 顶上那条 app bar 是这个浮层唯一的退路，所以它必须在。
+        */}
+        {status.unlocked && openItem !== null && (
+          <div className="vault-detail">
+            <ItemDetail
+              item={openItem}
+              icons={icons}
+              busy={busy}
+              onBack={() => setOpenId(null)}
+              onFill={() => { void fill(openItem.id); }}
+            />
+          </div>
         )}
       </div>
     </div>
