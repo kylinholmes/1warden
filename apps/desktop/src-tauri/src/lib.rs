@@ -25,6 +25,8 @@ mod autotype;
 mod save;
 mod hotkey;
 mod tray;
+#[cfg(target_os = "macos")]
+mod biometric;
 
 use tauri::Manager;
 
@@ -87,6 +89,14 @@ pub fn run() {
             quick_hide,
             quick_open_main,
             save::save_file,
+            #[cfg(target_os = "macos")]
+            biometric::biometric_status,
+            #[cfg(target_os = "macos")]
+            biometric::biometric_enroll,
+            #[cfg(target_os = "macos")]
+            biometric::biometric_unlock,
+            #[cfg(target_os = "macos")]
+            biometric::biometric_forget,
         ])
         .setup(|app| {
             // 证书指纹固定存在应用数据目录里 —— 它属于「这台机器信任了什么」，

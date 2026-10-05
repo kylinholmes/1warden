@@ -61,6 +61,21 @@ core-graphics = "0.25"
 # AXIsProcessTrusted —— 判断辅助功能授权状态
 accessibility-sys = "0.2"
 
+# ── Touch ID 解锁（spec 不变量 S1 的**显式例外**，见 src/biometric.rs）──
+#
+# ⚠️ 这里用的是 **-sys**（裸 FFI），不是 `security-framework` 的高层 API。
+# 高层那个 `ItemAddOptions` **没有** `kSecAttrAccessControl` 字段，
+# 而「只有指纹能取出这条」全靠那个属性 —— 用高层 API 写出来的是
+# 一个**任何进程都能读**的普通钥匙串条目，功能看着能用，安全性是零。
+security-framework-sys = "2"
+# 拼钥匙串查询用的 CFDictionary。
+#
+# ⚠️ 用 **-sys** 而不是 `core-foundation` 的高层包装：0.10 那版的包装
+# **不实现 `Drop`**，用它等于每次调用都漏一个 CF 对象 ——
+# 而钥匙串调用不频繁，漏了也看不出来，只会在长期运行里慢慢涨。
+# 裸 FFI 啰嗦，但每个引用的归属是写明白的。
+core-foundation-sys = "0.8"
+
 [features]
 # 生产构建时关掉 devtools —— 密码管理器不该在发布版里留调试入口
 default = ["custom-protocol"]

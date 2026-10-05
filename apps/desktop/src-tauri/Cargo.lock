@@ -576,11 +576,13 @@ version = "0.0.0"
 dependencies = [
  "accessibility-sys",
  "base64 0.22.1",
+ "core-foundation-sys",
  "core-graphics",
  "reqwest 0.12.28",
  "rfd",
  "rustls",
  "rustls-native-certs",
+ "security-framework-sys",
  "serde",
  "serde_json",
  "sha2",
