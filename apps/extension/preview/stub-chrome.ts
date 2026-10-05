@@ -131,6 +131,13 @@ export function stubChrome(): void {
         const hit = searchItems(ITEMS, [], q).map((h) => summarise(h.item));
         return { items: hit };
       }
+      /*
+       * ⚠️ 必须真的回一个值。默认分支回 `{}` 的话，`CopyButton` 拿到的
+       * `value` 是 undefined、写进剪贴板的是空串 —— 界面照样会显示「已复制」，
+       * 于是这条预览**看起来**通过了，实际什么都没验到。
+       */
+      case 'coffer:copy':
+        return { value: 'preview-fake-secret' };
       case 'coffer:pending':
         return which === 'pending'
           ? { pending: { url: 'https://github.com/session', username: 'me@example.com', action: 'save', itemId: null } }

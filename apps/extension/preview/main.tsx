@@ -44,3 +44,20 @@ if (new URLSearchParams(location.search).get('state') === 'detail') {
     row?.click();
   }, 400);
 }
+
+/*
+ * `?state=copy`：真的走一遍复制。
+ *
+ * 先点 rail 上的「生成」，再点那个「复制」按钮 —— 用生成器那个而不是详情里
+ * 的，因为它的反馈是**文字**（复制 → 已复制），截图里一目了然；
+ * 详情里是图标版，勾和复制两个小图标在图上不好分辨。
+ *
+ * ⚠️ 这条验的是 `CopyButton` 的**异步取值**那条路：点击 → await getValue()
+ * → 写剪贴板 → 反馈。类型检查验不到它，而它是「点了没反应」的高发区。
+ */
+if (new URLSearchParams(location.search).get('state') === 'copy') {
+  const clickText = (t: string) => [...document.querySelectorAll('button')]
+    .find((b) => b.textContent?.trim() === t)?.click();
+  setTimeout(() => clickText('生成'), 400);
+  setTimeout(() => clickText('复制'), 800);
+}

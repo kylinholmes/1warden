@@ -113,7 +113,16 @@ try {
      * 截图工具最坑的一种失败是「截出一张全白」—— 页面在渲染时抛了异常，
      * 而截图本身完全成功。没有这条，只能靠猜。
      */
-    if (msg.method === 'Runtime.exceptionThrown' || msg.method === 'Log.entryAdded') {
+    /*
+     * ⚠️ 也要收 `Runtime.consoleAPICalled`。
+     *
+     * 只监听 `exceptionThrown` 和 `Log.entryAdded` 的话，页面里
+     * `console.error(...)` 打的东西**看不到** —— 而那恰恰是排查时最常用的
+     * 手段（异常只在真抛出来时才有）。我加探针时就撞上过这个：
+     * 探针明明跑了，输出一个字都没有，看起来像探针没执行。
+     */
+    if (msg.method === 'Runtime.exceptionThrown' || msg.method === 'Log.entryAdded'
+      || msg.method === 'Runtime.consoleAPICalled') {
       console.error('[页面]', JSON.stringify(msg.params).slice(0, 800));
     }
     if (msg.id === undefined) return;
@@ -129,6 +138,37 @@ try {
   };
 
   await send('Page.enable');
+
+  /*
+   * 剪贴板授权。
+   *
+   * ⚠️ 没有它，「复制」这条路径**根本验不了**，而且失败的样子和产品坏了一样：
+   * 无头页面通常不是聚焦状态，Chromium 会拒绝 `navigator.clipboard.writeText`；
+   * 组件里那个 catch 把失败吞了（按钮不变、也不报错），截图看起来只是
+   * 「点了没反应」。我第一次跑就是被这个骗了一轮 —— 以为是点击没命中。
+   *
+   * 授权失败不该让整张截图失败（老版本 CDP 未必有这个域），所以吞掉异常：
+   * 退化成的结果是「复制验不了」，而不是「截图工具挂了」。
+   */
+  try {
+    await send('Browser.grantPermissions', {
+      origin: `http://127.0.0.1:${server.port}`,
+      permissions: ['clipboardReadWrite', 'clipboardSanitizedWrite'],
+    });
+  } catch { /* 见上 */ }
+
+  /*
+   * ⚠️ 光有授权**不够** —— Chromium 还要求文档处于**聚焦**状态。
+   *
+   * 无头页面默认 `document.hasFocus() === false`，于是 `writeText` 抛
+   * `NotAllowedError`，而组件里那个 catch 把失败吞了：按钮不变、也不报错。
+   * 我第一次只加授权，复制照样不生效，看起来和「点击没命中」一模一样。
+   * （探针打出 `clipboard=object focused=false` 才分清楚这两件事。）
+   */
+  try {
+    await send('Emulation.setFocusEmulationEnabled', { enabled: true });
+  } catch { /* 见上 */ }
+
   if (process.env.COFFER_SHOT_VERBOSE) {
     await send('Runtime.enable');
     await send('Log.enable');
