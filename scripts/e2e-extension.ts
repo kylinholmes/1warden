@@ -18,7 +18,7 @@
  *   bun run scripts/e2e-extension.ts
  */
 import { createHash } from 'node:crypto';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -286,7 +286,41 @@ async function probeContentScript(page: Cdp, ext: Cdp): Promise<string> {
   `).catch((e: unknown) => `ERR ${String(e)}`);
 }
 
+/**
+ * ── 前置检查 ──
+ *
+ * ⚠️ 没有这一段的话，缺什么都会**在跑到一半时以别的样子**炸出来：
+ *
+ * - 扩展没构建 → 浏览器起来了但扩展加载不上，症状是「content script 没注入」
+ * - 服务器没起 → 卡在解锁那一步超时，症状是「凭据不对 / 登录失败」
+ *
+ * 两种都**指向错误的方向**，而真正的原因（少跑一条命令）一句话就能说清。
+ * 这和这个仓库里反复出现的那条是同一件事：**别让错误伪装成别的东西**。
+ */
+async function preflight(): Promise<void> {
+  const missing: string[] = [];
+
+  if (!existsSync(join(DIST, 'manifest.json'))) {
+    missing.push(`扩展还没构建 —— 找不到 ${DIST}/manifest.json\n    → bun run build:extension`);
+  }
+
+  try {
+    const r = await fetch(`${SERVER}/api/config`, { signal: AbortSignal.timeout(3000) });
+    if (!r.ok) throw new Error(`HTTP ${r.status}`);
+  } catch (e) {
+    missing.push(`连不上 ${SERVER}（${String(e)}）\n    → ./scripts/dev-server.sh start`);
+  }
+
+  if (missing.length > 0) {
+    console.error('\n❌ 前置没满足：\n');
+    for (const m of missing) console.error(`  · ${m}\n`);
+    process.exit(1);
+  }
+  console.log(`  前置就绪：扩展 ${DIST}、服务器 ${SERVER}`);
+}
+
 async function main(): Promise<void> {
+  await preflight();
   const extId = extensionIdFor(DIST);
   console.log(`\n扩展端到端验证 → ${SITE}\n`);
   console.log(`  扩展 ID: ${extId}`);
