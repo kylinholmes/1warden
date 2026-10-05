@@ -1,6 +1,6 @@
 import { useMemo, useReducer, useCallback, useEffect, Component, type ErrorInfo } from 'react';
 import { VaultClient, type SessionStatus } from '@coffer/vault';
-import { syncCache, unlockCache } from './sync-cache';
+import { syncCache, kdfCache } from './sync-cache';
 import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
@@ -45,7 +45,7 @@ export function App() {
      * 所以给一个惰性的：真正 load/save 的时候账户已经就位了。
      */
     syncCache,
-    unlockCache,
+    kdfCache,
   }), []);
 
   // 快速面板是另一个窗口，它向这里要数据、也由这里执行动作 ——

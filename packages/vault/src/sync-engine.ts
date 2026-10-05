@@ -25,24 +25,35 @@ import type { VaultItem, VaultFolder } from './model';
  * 再去后台问服务端有没有变。绕开了 S1，也拿到了速度。
  */
 /**
- * 离线解锁要用的两样东西：**KDF 参数**和**被加密的用户密钥**。
+ * 缓存 KDF 参数 —— **只是「迭代次数是多少」这个公开参数**。
  *
- * ⚠️ 两个字段都是「不存也能用，只是每次解锁都要多两次网络往返」。
- * 而实测用户的链路是 7~70 秒一轮 —— 所以这个缓存不是优化，是可用性。
+ * ## ⚠️ 这里曾经还存过 `wrappedUserKey`（被加密的用户密钥）
  *
- * ⚠️ `wrappedUserKey` 是 `token.key`，**密文**。由主密码派生的密钥保护，
- * 和服务端存的那一份同级。绝不要在这里存解出来的用户密钥。
+ * 那是为「离线解锁」准备的：本地解出用户密钥，从而完全不碰网络。
+ * 那条路已经删掉 —— 因为**旧密码能打开本地缓存**（服务端改了主密码，
+ * 本地那份不会跟着变，而密码轮换恰恰是怀疑泄露时唯一的补救动作）。
+ *
+ * 删掉那条路之后，这个字段就**只剩写入、没有读者**了：一份躺在磁盘上的
+ * 加密密钥副本，没有任何用途。留着它不会立刻出错，但它会：
+ *   · 让读代码的人以为「本地能解出用户密钥」，而那件事已经不成立
+ *   · 在有严格审计的场合，多一份没人解释得清的密钥副本
+ *
+ * 所以它被删掉了。**这里只留公开参数。**
+ *
+ * ## 为什么 KDF 参数可以缓存
+ *
+ * 它不参与任何鉴权 —— 服务端的 `prelogin` 本来就不需要认证。
+ * 省掉它只是少一次往返，而**验证仍然走 `login`**，那一次必须发。
  */
-export interface UnlockCacheEntry {
+export interface KdfCacheEntry {
   serverUrl: string;
   email: string;
   kdf: KdfConfig;
-  wrappedUserKey: string;
 }
 
-export interface UnlockCache {
-  load(serverUrl: string, email: string): Promise<UnlockCacheEntry | null>;
-  save(entry: UnlockCacheEntry): Promise<void>;
+export interface KdfCache {
+  load(serverUrl: string, email: string): Promise<KdfCacheEntry | null>;
+  save(entry: KdfCacheEntry): Promise<void>;
 }
 
 export interface SyncCache {

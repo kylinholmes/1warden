@@ -18,7 +18,7 @@ import {
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
 import { VaultSession, restoreSession } from './session';
-import { SyncEngine, type SyncCache, type UnlockCache } from './sync-engine';
+import { SyncEngine, type SyncCache, type KdfCache } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
 import { unwrapAttachmentKey, decryptAttachmentContent } from './attachments';
 import { encryptBytes } from '@coffer/crypto';
@@ -83,7 +83,7 @@ export class VaultClient {
   /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
   private readonly fetchImpl: typeof fetch;
   private readonly syncCache: SyncCache | undefined;
-  private readonly unlockCache: UnlockCache | undefined;
+  private readonly kdfCache: KdfCache | undefined;
   private readonly onPhase: ((label: string, ms: number) => void) | undefined;
   /** 连接起点。只给 `mark` 用 —— 诊断用，不参与任何逻辑 */
   private connectT0 = 0;
@@ -125,8 +125,8 @@ export class VaultClient {
      * ⚠️ 存的是密文不是明文，见 `SyncCache` 的说明（那条关系到 spec S1）。
      */
     syncCache?: SyncCache;
-    /** 离线解锁用。不给就是每次都走网络（慢，但功能不变） */
-    unlockCache?: UnlockCache;
+    /** 缓存 KDF 参数，省一次 prelogin 往返。不给就每次都问（慢，但功能不变） */
+    kdfCache?: KdfCache;
     /** 同步开始/结束。与 `onStatus` 分开 —— 见 `VaultSession.syncing` */
     onSync?: (syncing: boolean) => void;
     /** 连接各阶段的耗时。只用于诊断「登录慢」这类问题，不参与任何逻辑 */
@@ -134,7 +134,7 @@ export class VaultClient {
   }) {
     this.fetchImpl = opts.fetchImpl;
     this.syncCache = opts.syncCache;
-    this.unlockCache = opts.unlockCache;
+    this.kdfCache = opts.kdfCache;
     this.onPhase = opts.onPhase;
     this.deviceStore = opts.deviceStore ?? localStorageDeviceStore;
     this.device = {
@@ -329,7 +329,7 @@ export class VaultClient {
     this.session.completeUnlock(userKey);
 
     // 存下「下次不用问服务端也能解锁」所需要的东西 —— 见 UnlockCache
-    await this.saveUnlockCache(params, masterKey, token, kdf);
+    await this.saveKdfCache(params, kdf);
 
     this.mark('开始同步');
     await this.hydrateThenSync(userKey);
@@ -337,33 +337,26 @@ export class VaultClient {
   }
 
   /**
-   * 存下离线解锁要用的两样东西：**KDF 参数**和**被加密的用户密钥**。
+   * 存下 KDF 参数 —— 下次解锁可以省掉 `prelogin` 那一次往返。
    *
-   * ⚠️ 存的是 `token.key`（**密文**），不是解出来的用户密钥。
-   * 它由主密码派生出的密钥保护 —— 和服务端存的那一份是同一级别的保护，
-   * 所以本地多一份副本不增加任何暴露。
-   *
-   * ⚠️ 绝不要把**解出来的**用户密钥写进来。那才是 S1 要拦的东西，
-   * 而它看起来只是「省一次解密」。
+   * ⚠️ **只存公开参数。** 这里曾经还存 `token.key`（被加密的用户密钥），
+   * 是为「离线解锁」准备的；那条路已经删掉（旧密码能打开本地缓存，
+   * 见 `unlock` 的说明），字段随之删掉 —— 见 `KdfCache` 的注释。
    */
-  private async saveUnlockCache(
-    params: ConnectParams, masterKey: Uint8Array, token: TokenResponse, kdf: KdfConfig,
+  private async saveKdfCache(
+    params: ConnectParams, kdf: KdfConfig,
   ): Promise<void> {
-    if (!this.unlockCache || !token.key) return;
+    if (!this.kdfCache) return;
     try {
       /*
-       * ⚠️ 存**派生参数**而不是主密钥。
+       * ⚠️ 只存**公开参数**。
        *
-       * 这里要的是「下次解锁时不用再发 prelogin」——`kdf` 就是那个参数。
+       * 这里要的是「下次解锁不用再发 prelogin」——`kdf` 就是那个参数。
        * 存主密钥能省掉 KDF 那一秒，但那是**明文密钥落盘**，直接踩 S1。
-       * 一秒 CPU 换一条不变量的完整，这个买卖没有犹豫的余地。
+       * 一秒 CPU 换一条不变量的完整，没有犹豫的余地。
        */
-      await this.unlockCache.save({
-        serverUrl: params.serverUrl,
-        email: params.email,
-        kdf,
-        wrappedUserKey: token.key,
-      });
+      await this.kdfCache.save({ serverUrl: params.serverUrl, email: params.email, kdf });
+
     } catch (e) {
       console.warn('[解锁缓存] 写入失败', e);
     }
@@ -890,7 +883,7 @@ export class VaultClient {
     if (!account) throw new Error('没有已保存的账户');
 
     const bare = this.makeHttp(account.serverUrl);
-    const cached = await this.unlockCache?.load(account.serverUrl, account.email).catch(() => null);
+    const cached = await this.kdfCache?.load(account.serverUrl, account.email).catch(() => null);
     const kdf = cached?.kdf ?? await this.preloginKdf(bare, account.email);
     const masterKey = await deriveMasterKey(masterPassword, account.email, kdf);
     const hash = await hashMasterPassword(masterKey, masterPassword);
