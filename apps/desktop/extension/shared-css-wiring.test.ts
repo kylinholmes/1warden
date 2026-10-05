@@ -34,6 +34,7 @@ const FILES = import.meta.glob(
     // 同住 `apps/desktop/`，最短形式塌缩成了 `../src/`。glob 里写长的那个
     // 也能解析到同一个文件，但**拿回来的键是最短形式** —— 见下面按后缀查的说明。
     '../src/styles.css',
+    '../src/screens/VaultView.tsx',
     '../../../packages/ui/src/components.css',
     '../../../packages/ui/package.json',
   ],
@@ -181,4 +182,58 @@ describe('弹窗外壳的尺寸约束', () => {
         '根元素：' + root,
     ).toBe(true);
   });
+});
+
+/**
+ * 第四个守卫：**渲染了抽屉就必须渲染开关**。
+ *
+ * ## 为什么需要它
+ *
+ * 这个 bug 真的发生过，而且把弹窗的导航**整个挡死**：`Popup.tsx` 渲染
+ * `NavDrawer` 却没有 `NavTrigger`，理由是样式表里的一句
+ * 「弹窗恒为抽屉，所以不需要开关」。
+ *
+ * 那句话把**状态**当成了**入口**：
+ *
+ * - 抽屉在流里宽度是 **0**（面板是 `position: absolute`），所以
+ *   `.nav-drawer:hover` 永远不成立
+ * - `focus-within` 也一样 —— 够不着就聚不上焦
+ * - 剩下唯一能打开面板的，是 `.vault-shell:has(.nav-trigger:hover)` 那条
+ *
+ * 于是没有触发器 = 导航在界面上**完全够不着**：没有侧栏、没有按钮。
+ *
+ * ## 为什么没人发现
+ *
+ * 类型检查过（两个组件都在，只是没被渲染）、833 个测试过、构建过、
+ * Firefox 打包过。它甚至**看起来是对的** —— 弹窗截图里少一个按钮，
+ * 而少一个按钮不会让任何人觉得「坏了」，只会觉得「大概本来就没有」。
+ *
+ * 和另外三条是同一族：**产物看起来是好的**。
+ */
+describe('抽屉必须有一个够得着的开关', () => {
+  it('这两份文件确实读到了（否则下面是空转的）', () => {
+    expect(sourceEndingWith('popup/Popup.tsx')).toBeTypeOf('string');
+    expect(sourceEndingWith('screens/VaultView.tsx')).toBeTypeOf('string');
+  });
+
+  for (const [label, suffix] of [
+    ['扩展端', 'popup/Popup.tsx'],
+    ['桌面端', 'screens/VaultView.tsx'],
+  ] as const) {
+    it(`${label}渲染抽屉的同时渲染了开关`, () => {
+      const tsx = sourceEndingWith(suffix)!;
+      expect(
+        tsx.includes('<NavDrawer'),
+        `${label}不再渲染 NavDrawer 了 —— 这条守卫要跟着改，不是删掉`,
+      ).toBe(true);
+      expect(
+        tsx.includes('<NavTrigger'),
+        `${label}渲染了 NavDrawer 却没有 NavTrigger。\n` +
+          '抽屉的面板是绝对定位的，抽屉本身在流里宽度为 0 —— 能打开它的\n' +
+          '只有触发器（悬停联动靠 `.vault-shell:has(.nav-trigger:hover)`）。\n' +
+          '没有触发器时导航在界面上**完全够不着**，而类型检查、单测、构建\n' +
+          '全都不会报，截图里也只是「少了一个按钮」。',
+      ).toBe(true);
+    });
+  }
 });

@@ -6,7 +6,7 @@ import { IconStore } from '@coffer/vault';
 import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
-  ItemRow, NavDrawer, NavRow, Section,
+  ItemRow, NavDrawer, NavRow, NavTrigger, Section,
   GRADE_LABEL, STRENGTH_LABELS, WEAK_REASON, apiMessageOf, countByType, crackSentence,
   host, iconStoreFor,
   scheduleClipboardClear, typeDestinations,
@@ -444,7 +444,25 @@ export function Popup() {
                 <Generator />
               ) : (
                 <>
-                  <SearchBox value={query} onChange={setQuery} />
+                  {/*
+                    ⚠️ 导航开关 —— 和桌面端**同一条位置**：搜索框前面。
+
+                    它一度不在这里，而理由是样式表里的一句话：「弹窗恒为抽屉，
+                    所以不需要开关」。那句话把**状态**当成了**入口** ——
+                    抽屉确实是恒开的那一档，但抽屉在流里宽度是 0（面板绝对定位），
+                    而能打开它的三条规则（触发器 hover / 抽屉 hover / focus-within）
+                    没有一条够得着。**结果是弹窗的导航根本打不开**：
+                    没有侧栏、没有按钮，除了鼠标乱划没有任何路径。
+
+                    这就是「两端各写一遍」那一族的又一次现身 —— 桌面端有这个按钮，
+                    弹窗没有，而没有任何东西会报错。
+                  */}
+                  <div className="flex items-center gap-1.5">
+                    <NavTrigger />
+                    <div className="min-w-0 flex-1">
+                      <SearchBox value={query} onChange={setQuery} />
+                    </div>
+                  </div>
 
                   <div className="flex min-h-0 flex-1 flex-col gap-3 overflow-y-auto">
                     {query.trim() !== '' ? (
