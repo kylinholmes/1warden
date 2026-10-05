@@ -49,6 +49,24 @@ m['background'] = { scripts: [bg.service_worker ?? 'background.js'], type: bg.ty
 // ② Chrome 专有的版本下限，Firefox 会当成未知键
 delete m['minimum_chrome_version'];
 
+/*
+ * ③ `offscreen` 权限 —— Firefox **不认识这个名字**。
+ *
+ * 实测（Zen 载入时的 manifest 警告）：
+ *
+ *     Warning processing permissions: Error processing permissions.3:
+ *     Value "offscreen" must either: ... [一长串合法值]
+ *
+ * 它报的是 Warning 不是 Error，所以扩展还是能装进去、只是这个权限被丢掉 ——
+ * 于是运行时的降级判断（`!ext.offscreen`）正好接住。
+ *
+ * ⚠️ **必须删掉**：留着它，每次载入都会弹一条警告，而警告刷多了
+ * 真问题就被淹了。而删掉之后行为和「装了但被丢掉」完全一样，没有损失。
+ */
+const perms = (m['permissions'] as string[] | undefined) ?? [];
+const kept = perms.filter((p) => p !== 'offscreen');
+if (kept.length !== perms.length) m['permissions'] = kept;
+
 // ③ Firefox 需要的身份与版本下限。
 //    `strict_min_version` 取 **128**：`world: "MAIN"` 内容脚本从那一版才有，
 //    而 WebAuthn 注入正是靠它（本机 Zen 实测 Gecko 156，够）
@@ -61,5 +79,6 @@ m['browser_specific_settings'] = {
 
 writeFileSync(manifestPath, JSON.stringify(m, null, 2) + '\n');
 console.log('✅ 已产出 Firefox 版：apps/extension/dist-firefox');
-console.log('   ⚠️ 复制可用，但**不会自动清空剪贴板**（Firefox 没有 offscreen）。');
+console.log('   ⚠️ 复制可用，但**不会自动清空剪贴板**（Firefox 没有 offscreen API，');
+console.log('      所以「30 秒后清理」那个定时器没有地方活）。');
 console.log('   装入方式：Zen/Firefox 的 about:debugging → 临时载入 → 选 dist-firefox/manifest.json');
