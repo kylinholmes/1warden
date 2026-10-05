@@ -1,5 +1,10 @@
 <!doctype html>
-<html lang="zh-CN">
+<!--
+    spellcheck 关掉，而且要在**根元素**上关：这个属性会被子元素继承，
+    在根上设一次就够了。放在这里而不是 JS 里，是因为它更早生效 ——
+    否则输入框会先闪一下红波浪线再消失。
+  -->
+  <html lang="zh-CN" spellcheck="false">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

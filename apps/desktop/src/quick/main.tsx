@@ -11,6 +11,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { QuickAccess } from '../screens/QuickAccess';
 import { iconStoreFor } from '../icon-store';
 import { initPlatform } from '../platform';
+import { initNativeFeel } from '../native';
 import { initTheme } from '../theme';
 import {
   askMain, askInitial, askAction, onResults, onActionResult,
@@ -105,6 +106,7 @@ initTheme();
 // 这个窗口是 decorations: false，没有红绿灯要躲；但两个入口初始化的是
 // **同一套**状态，少调一个就会在别处漏出来（上次主题就是这么漏的）
 initPlatform();
+initNativeFeel();
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

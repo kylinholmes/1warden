@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import { App, ErrorBoundary } from './App';
 import { webAssemblyAvailable } from './capabilities';
 import { initPlatform } from './platform';
+import { initNativeFeel } from './native';
 import { initTheme } from './theme';
 import './styles.css';
 
@@ -12,6 +13,7 @@ if (!root) throw new Error('找不到 #root 挂载点');
 // 主题和平台标记都得在**首次渲染之前**落上去，否则窗口会先按系统主题
 // 画一帧再翻过来，左栏也会先按「没有红绿灯」排一次位置
 initPlatform();
+initNativeFeel();
 initTheme();
 
 createRoot(root).render(

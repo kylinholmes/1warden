@@ -222,7 +222,12 @@ export function VaultView({ client, onLock }: Props) {
             </ul>
           </div>
 
-          <div className="min-w-0 flex-1 overflow-y-auto bg-[var(--surface-paper)]">
+          {/*
+            详情栏是**内容**，不是界面 —— 用户名、密码、网址、备注都要能选中复制。
+            全局默认是禁止选中的（去浏览器感），这里显式放开。
+            少标这一处，用户就复制不了密码，而那种缺失会被当成「功能没做」。
+          */}
+          <div data-selectable className="min-w-0 flex-1 overflow-y-auto bg-[var(--surface-paper)]">
             {selected ? (
               <ItemDetail
                 key={selected.id}
