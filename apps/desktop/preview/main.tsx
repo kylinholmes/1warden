@@ -17,7 +17,6 @@ import { ItemEditor } from '../src/screens/ItemEditor';
 import { Generator } from '../src/screens/Generator';
 import { Connect } from '../src/screens/Connect';
 import { Unlock } from '../src/screens/Unlock';
-import { Loading } from '../src/screens/Loading';
 import { ToastProvider, useToast, type ToastInput } from '../src/components/Toast';
 import { initPlatform } from '../src/platform';
 import { initTheme, setThemeMode, type ThemeMode } from '../src/theme';
@@ -404,8 +403,6 @@ createRoot(document.getElementById('root')!).render(
       <GeneratorPreview />
     ) : which === 'connect' ? (
       <Connect client={fakeClient} onConnected={() => {}} />
-    ) : which === 'loading' ? (
-      <Loading account="874067181@qq.com" />
     ) : which === 'unlock' ? (
       <Unlock client={fakeClient} onUnlocked={() => {}} onDisconnect={() => {}} />
     ) : which === 'quick' ? (

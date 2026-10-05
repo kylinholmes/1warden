@@ -179,25 +179,17 @@ export class VaultClient {
     const bare = this.makeHttp(params.serverUrl);
 
     /*
-     * ⚠️ **先亮出「正在解锁」，再去干那些慢活。**
+     * ⚠️ 登录这一段**停在连接屏**，不另开加载屏。
      *
-     * 早先 `beginUnlock()` 排在登录**之后**，于是 prelogin、主密钥派生
-     * （PBKDF2 600k 在本机实测 1.1 秒）、登录往返全都发生在
-     * `loggedOut`/`locked` 状态下 —— 界面按 `screenFor` 渲染的是**连接屏**，
-     * 也就是用户刚点过的那个表单，一动不动。
+     * 试过把 `beginUnlock()` 提到这里、让整个验证过程都显示加载屏 ——
+     * 方向是反的：连接屏的按钮本来就有忙碌态（转圈 +「验证中…」），
+     * 足以说明「在做事」；再叠一整屏只会让**登录成功之后**也多停一屏，
+     * 而那时候用户要的是立刻看到保险库。
      *
-     * 用户报的是「completeUnlock 这步也要几秒」。`completeUnlock` 本身
-     * 只做「落下密钥 + 翻状态」，微秒级 —— 他量到的其实是这段时间的总和。
-     *
-     * 全程计时（`console.info`）留着：这条链路牵涉三次网络往返加一次 KDF，
-     * 而「慢」在每一段上的处置完全不同，不量就只能猜。
+     * 计时留着：这条链路是三次网络往返加一次 KDF，每一段慢的处置都不同，
+     * 不量就只能猜。
      */
     this.connectT0 = performance.now();
-
-    this.session.setAccount({
-      serverUrl: params.serverUrl, email: params.email, userId: '', kdf: { kdf: 0, iterations: 0 },
-    });
-    this.session.beginUnlock();
 
     const pl = await prelogin(bare, params.email);
     this.mark('prelogin（取 KDF 参数）');
@@ -213,19 +205,7 @@ export class VaultClient {
     this.mark('派生主密钥');
     const masterPasswordHash = await hashMasterPassword(masterKey, params.masterPassword);
 
-    try {
-      await this.finishConnect(bare, params, masterKey, masterPasswordHash, undefined);
-    } catch (e) {
-      /*
-       * ⚠️ 失败必须把状态退回去。
-       *
-       * 上面提前翻了 `unlocking` —— 失败时不退的话界面会永远停在加载屏，
-       * 而真实原因（密码错了、服务器连不上）没有任何地方显示得出来。
-       * 这是「提前亮加载态」的代价，得在这里付掉。
-       */
-      this.session.lock();
-      throw e;
-    }
+    await this.finishConnect(bare, params, masterKey, masterPasswordHash, undefined);
   }
 
   async connectWithTwoFactor(code: string, provider: number, remember: boolean): Promise<void> {

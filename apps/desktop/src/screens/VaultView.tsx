@@ -210,6 +210,27 @@ export function VaultView({ client, onLock }: Props) {
                     <p className="text-[var(--text-sm)] text-[var(--ink-tertiary)]">
                       没有匹配「{query}」的条目
                     </p>
+                  ) : session.syncing && items.length === 0 ? (
+                    /*
+                     * ⚠️ **「还在载入」和「真的是空的」必须分开说。**
+                     *
+                     * 两者在数据上都是 `items.length === 0`，但对用户是
+                     * 完全不同的事。同步期间显示「这里还是空的 / 点新建加第一条」
+                     * 是在**报假信**：用户会以为保险库出问题了（他的东西呢？），
+                     * 甚至可能真的去新建一条。
+                     *
+                     * 首次登录（没有本地缓存）时这一段有几秒 —— 正好是
+                     * 最容易让人误判的时候。
+                     */
+                    <>
+                      <p className="flex items-center justify-center gap-1.5 text-[var(--text-sm)] text-[var(--ink-secondary)]">
+                        <IconSpinner size={13} className="text-[var(--ink-tertiary)]" />
+                        正在载入…
+                      </p>
+                      <p className="mt-1 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+                        第一次打开要拉整个保险库，之后就快了
+                      </p>
+                    </>
                   ) : (
                     <>
                       <p className="text-[var(--text-sm)] text-[var(--ink-secondary)]">这里还是空的</p>

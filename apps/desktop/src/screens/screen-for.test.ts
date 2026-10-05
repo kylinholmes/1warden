@@ -15,27 +15,38 @@ describe('screenFor', () => {
   });
 
   /**
-   * 这条改过一次，两次的理由都值得留着。
+   * 这条**改过两回**，三次的理由都值得留着 —— 每一次都是在修
+   * 「让用户等一件他不需要等的事」的不同变体。
    *
-   * **第一版**用 `session.account` 是否存在来判断，于是 `unlocking` 期间
-   * （账户已知道、同步没跑完）会闪出一个解锁屏；同步若在此期间出错，
-   * 错误还会被那个屏吞掉，用户只看到「连不上」。
-   * 所以改成按状态机判断，`unlocking` → `connect`。
+   * **第一版**用 `session.account` 是否存在判断，于是 `unlocking` 期间
+   * （账户已知、同步没完）会闪出一个解锁屏；同步若出错，错误还被那个屏
+   * 吞掉，用户只看到「连不上」。→ 改成按状态机，`unlocking` → `connect`。
    *
-   * **现在**改成 `loading`。因为「归到 connect」虽然修好了上面那件事，
-   * 却留下了另一个：这几秒里用户盯着的是**自己刚提交过的那个登录表单**，
-   * 一动不动。那是「登录很慢」的直接来源 —— 慢的不只是加载，
-   * 还有完全看不到它在做事。
+   * **第二版**归到 `connect`：那几秒里用户盯着的是**自己刚提交过的登录表单**。
+   * → 改成独立的 `loading` 屏。
    *
-   * 也不该归到 `vault`：那时会话里一条数据都还没有，会先闪一个空保险库。
+   * **第三版（现在）**归到 `vault`：走到 `unlocking` 时登录已经成功、
+   * 密钥已经拿到，缺的只是数据 —— 而数据是**后台**在补。再挡一整屏
+   * 就是让用户等一件他不需要等的事，而那时候他要的是立刻看到保险库。
+   *
+   * 列表那栏自己会区分「真的空」和「还在载入」，不会因为这条改动而报假信。
    */
-  it('shows a loading screen while unlocking', () => {
-    expect(screenFor('unlocking')).toBe('loading');
+  it('goes straight to the vault while unlocking', () => {
+    expect(screenFor('unlocking')).toBe('vault');
   });
 
-  /** 三态必须互不相同 —— 塌掉任何一个都会退回到上面那些问题 */
-  it('maps every status to a distinct screen', () => {
-    const screens = (['loggedOut', 'locked', 'unlocking', 'unlocked'] as const).map(screenFor);
-    expect(new Set(screens).size).toBe(4);
+  /**
+   * ⚠️ `unlocking` 与 `unlocked` **允许**映射到同一屏。
+   *
+   * 这条第一版写的是「四态必须映射到四个不同的屏」，并在注释里断言
+   * 「塌掉任何一个都会退回到上面那些问题」。现在它被推翻了：
+   * 两者共用 vault 是**要的** —— 区别在列表栏里（有没有转圈、
+   * 空状态说不说「正在载入」），不在换不换屏。
+   *
+   * 保留这条是为了记住：那个断言当时听起来很有道理，但它是从
+   * 「四态五屏」这个实现细节倒推出来的，不是从用户看到什么推出来的。
+   */
+  it('may share a screen between unlocking and unlocked', () => {
+    expect(screenFor('unlocking')).toBe(screenFor('unlocked'));
   });
 });

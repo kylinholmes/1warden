@@ -1,6 +1,6 @@
 import type { SessionStatus } from '@coffer/vault';
 
-export type Screen = 'connect' | 'unlock' | 'loading' | 'vault';
+export type Screen = 'connect' | 'unlock' | 'vault';
 
 /**
  * 会话状态 → 该显示哪一屏。
@@ -28,6 +28,16 @@ export function screenFor(status: SessionStatus): Screen {
    * 它也不该归到 vault：那时会话里一条数据都还没有，
    * 渲染主界面会先闪一个空保险库（`doSync` 的注释里写着这件事）。
    */
-  if (status === 'unlocking') return 'loading';
+  /*
+   * ⚠️ `unlocking` 归到 **vault**，不是单独的加载屏。
+   *
+   * 走到这里时登录已经成功、用户密钥已经拿到，缺的只是数据 ——
+   * 而数据是**后台**在补（缓存毫秒级、网络看网速），界面不该为它再挡一屏。
+   *
+   * 早先归到 connect（盯着刚提交的表单）和归到 loading（多停一整屏）
+   * 都试过，两次都是「让用户等一件他不需要等的事」。
+   * 列表那栏自己会区分「真的空」和「还在载入」，见 VaultView。
+   */
+  if (status === 'unlocking') return 'vault';
   return 'connect';
 }
