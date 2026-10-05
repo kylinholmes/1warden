@@ -5,7 +5,8 @@ import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
   CopyButton, IconAlert, IconClose, IconGlobe, IconGlyph, IconKey, IconLock,
-  IconSearch, IconSpinner, IconStar, ItemRow, countByType, scheduleClipboardClear, typeDestinations,
+  IconKeyboard, IconSearch, IconSpinner, IconStar, ItemRow, countByType,
+  scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 import { Rail, type Destination } from './Rail';
 import { ItemDetail } from './ItemDetail';
@@ -372,21 +373,27 @@ export function Popup() {
         </div>
 
         {/*
-          第三层。**始终渲染在列表之后**，而不是替换掉列表 ——
-          退回来时滚动位置和搜索词都还在。窄的时候它绝对定位盖住列表，
-          宽的时候并排（见 components.css 的 `.vault-detail`）。
+          第三层。**常驻**，不随选中与否挂卸 —— 两个理由：
+          · 退回来时滚动位置和搜索词都还在（早先条件渲染等于重建一次列表）
+          · 宽屏下它是一栏，没选中时就该在那里显示占位（和桌面端一致）
 
-          ⚠️ 顶上那条 app bar 是这个浮层唯一的退路，所以它必须在。
+          窄屏时它绝对定位盖住列表，`data-detail='false'` 会让它整块不显示 ——
+          否则用户打开弹窗看到的是一句「选一条」，而列表不见了。
         */}
-        {status.unlocked && openItem !== null && (
+        {status.unlocked && (
           <div className="vault-detail">
-            <ItemDetail
-              item={openItem}
-              icons={icons}
-              busy={busy}
-              onBack={() => setOpenId(null)}
-              onFill={() => { void fill(openItem.id); }}
-            />
+            {openItem !== null ? (
+              /* 「返回」是这个浮层唯一的退路，所以 app bar 必须在 */
+              <ItemDetail
+                item={openItem}
+                icons={icons}
+                busy={busy}
+                onBack={() => setOpenId(null)}
+                onFill={() => { void fill(openItem.id); }}
+              />
+            ) : (
+              <EmptyDetail />
+            )}
           </div>
         )}
       </div>
@@ -559,6 +566,18 @@ function ListSection({ label, items, icons, onOpen }: {
         />
       ))}
     </section>
+  );
+}
+
+/** 详情栏的占位。宽屏下这一栏一直在这儿，空着要有话说 */
+function EmptyDetail() {
+  return (
+    <div className="flex min-h-0 flex-1 flex-col items-center justify-center gap-2 px-6 text-center">
+      <span className="grid h-10 w-10 place-items-center rounded-[var(--radius-md)] bg-[var(--surface-well)] text-[var(--ink-tertiary)]">
+        <IconKeyboard size={18} />
+      </span>
+      <p className="text-sm text-[var(--ink-secondary)]">选一条查看详情</p>
+    </div>
   );
 }
 

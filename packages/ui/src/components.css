@@ -148,14 +148,19 @@
       background: var(--surface-paper);
     }
 
+    /*
+     * ⚠️ 窄屏 + **没有真的打开某一条** → 详情那一块不显示。
+     *
+     * 两端都**常驻**这一栏（没选中时里面是「选一条查看详情」那种占位），
+     * 因为宽屏下它是一栏、该显示占位。但窄屏下它绝对定位盖住列表 ——
+     * 不清掉的话，用户打开弹窗看到的是一句「请选一条」，而列表不见了。
+     */
+    .vault-content[data-detail='false'] .vault-detail {
+      display: none;
+    }
+
     @container vault (min-width: 620px) {
-      /*
-       * ⚠️ 只有**详情真的开着**的时候列表才收成固定宽。
-       *
-       * 无条件收窄的话，没开详情时右边会空一大片 —— 那是把「为并排留的位置」
-       * 显示成了一个破洞。所以靠 `data-detail` 区分这两种状态。
-       */
-      .vault-content[data-detail='true'] .vault-list {
+      .vault-list {
         flex: none;
         width: var(--list-w);
         border-right: 1px solid var(--border-subtle);
@@ -166,6 +171,10 @@
         min-width: 0;
         flex: 1;
         background: transparent;
+      }
+      /* 宽屏下它是独立的一栏，占位也该显示 */
+      .vault-content[data-detail='false'] .vault-detail {
+        display: flex;
       }
     }
 
