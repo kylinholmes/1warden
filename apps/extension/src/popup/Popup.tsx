@@ -7,7 +7,7 @@ import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, Section,
-  STRENGTH_LABELS, countByType, crackSentence, host, iconStoreFor,
+  GRADE_LABEL, STRENGTH_LABELS, WEAK_REASON, countByType, crackSentence, host, iconStoreFor,
   scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
@@ -30,15 +30,7 @@ interface ReportBrief {
   unsecured: { id: string; name: string }[];
 }
 
-const GRADE_LABEL: Record<ReportBrief['grade'], string> = {
-  excellent: '优秀', good: '良好', fair: '一般', poor: '差', critical: '危险',
-};
 
-/** 弱密码的机器可读原因 → 人话。和 `@coffer/vault` 的 `WeakFinding.reason` 对齐 */
-const WEAK_REASON: Record<string, string> = {
-  tooShort: '太短', common: '常见密码', commonWithSuffix: '常见密码加后缀',
-  leetSubstitution: '字符替换后的常见密码', digitsOnly: '全是数字', repeatedChar: '重复字符',
-};
 
 import { ItemDetail } from './ItemDetail';
 

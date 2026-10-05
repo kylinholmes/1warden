@@ -43,4 +43,5 @@ export * from './icon-disk';
 export * from './icon-store';
 export * from './sync-cache';
 export * from './strength';
+export * from './report-labels';
 export * from './NavRail';

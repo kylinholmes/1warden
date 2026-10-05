@@ -3,7 +3,9 @@ import {
   buildReport, checkBreaches,
   type VaultItem, type SecurityReport as Report, type ScoreGrade,
 } from '@coffer/vault';
-import { IconAlert, IconCheck, IconSpinner } from '@coffer/ui';
+import {
+  GRADE_LABEL, IconAlert, IconCheck, IconSpinner, WEAK_REASON,
+} from '@coffer/ui';
 
 /**
  * 安全报告（1Password 的 Watchtower 等价物）。
@@ -23,22 +25,8 @@ import { IconAlert, IconCheck, IconSpinner } from '@coffer/ui';
  * 如果它没有那条带子，从条目列表切过来时整个界面的骨架会塌掉一块。
  */
 
-const GRADE_LABEL: Record<ScoreGrade, string> = {
-  excellent: '很好',
-  good: '不错',
-  fair: '一般',
-  poor: '偏弱',
-  critical: '危险',
-};
-
-const WEAK_REASON: Record<string, string> = {
-  tooShort: '太短',
-  common: '常见密码',
-  commonWithSuffix: '常见密码加后缀',
-  leetSubstitution: '字符替换后的常见密码',
-  digitsOnly: '全是数字',
-  repeatedChar: '重复字符',
-};
+/* `GRADE_LABEL` / `WEAK_REASON` 搬到 `@coffer/ui` 了 ——
+   两端各写一份时它们已经漂过（偏弱 vs 差）。 */
 
 export function SecurityReportView({ items }: { items: readonly VaultItem[] }) {
   const [breached, setBreached] = useState<Report['breached']>([]);
