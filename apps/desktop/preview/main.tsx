@@ -46,18 +46,34 @@ function item(over: Partial<VaultItem> & { id: string; name: string }): VaultIte
   };
 }
 
-/** 有各种问题的库 —— 报告页最该经得起看的就是这种 */
+/**
+ * 有各种问题的库 —— 报告页最该经得起看的就是这种。
+ *
+ * ⚠️ **每条要用不同的域名。**
+ *
+ * 列表里那个彩色徽标的颜色是按**可注册域名**算的 —— 同一个站点的多条登录
+ * 就该是同一个颜色（「工作账号」和「私人账号」两个 GitHub 条目不该一个绿
+ * 一个紫）。这条规则是对的，但如果夹具把五条都放在 `*.example.com` 下，
+ * 它们会**正确地**变成同一个颜色，而截图看起来像「颜色没生效」。
+ *
+ * 这个坑踩过一次：整列蓝紫，看着像「说好的彩色呢」，其实是夹具不真实。
+ * 而预览是**用来看的仪器** —— 仪器骗人比没有仪器更糟。
+ */
 const MESSY: VaultItem[] = [
   item({ id: '1', name: 'GitHub', login: { ...emptyLogin(), username: 'me', password: 'password123', uris: [{ uri: 'https://github.com', match: null }] } }),
-  item({ id: '2', name: '公司 VPN', login: { ...emptyLogin(), username: 'me', password: 'password123', uris: [{ uri: 'https://vpn.example.com', match: null }] } }),
-  item({ id: '3', name: '邮箱（主）', login: { ...emptyLogin(), username: 'me@example.com', password: 'P@ssw0rd1!', uris: [{ uri: 'https://mail.example.com', match: null }] } }),
-  item({ id: '4', name: '老论坛', login: { ...emptyLogin(), username: 'old', password: '9382716450', uris: [{ uri: 'http://bbs.example.com', match: null }] } }),
-  item({ id: '5', name: '一个名字特别特别长的服务用来测试截断行为是否正常', login: { ...emptyLogin(), username: 'x', password: 'aaaaaaaaaa', uris: [{ uri: 'https://a-very-long-hostname-for-truncation.example.com', match: null }] } }),
-  item({ id: '6', name: '云服务商', login: { ...emptyLogin(), username: 'me', password: 'kJ8#mPq2$vXn9!wZt4&bR', uris: [{ uri: 'https://cloud.example.com', match: null }] } }),
+  item({ id: '2', name: '公司 VPN', login: { ...emptyLogin(), username: 'me', password: 'password123', uris: [{ uri: 'https://vpn.acme-corp.net', match: null }] } }),
+  item({ id: '3', name: '邮箱（主）', login: { ...emptyLogin(), username: 'me@example.com', password: 'P@ssw0rd1!', uris: [{ uri: 'https://mail.proton.me', match: null }] } }),
+  item({ id: '4', name: '老论坛', login: { ...emptyLogin(), username: 'old', password: '9382716450', uris: [{ uri: 'http://bbs.something-old.org', match: null }] } }),
+  item({ id: '5', name: '一个名字特别特别长的服务用来测试截断行为是否正常', login: { ...emptyLogin(), username: 'x', password: 'aaaaaaaaaa', uris: [{ uri: 'https://a-very-long-hostname-for-truncation.cloudflare.com', match: null }] } }),
+  item({ id: '6', name: '云服务商', login: { ...emptyLogin(), username: 'me', password: 'kJ8#mPq2$vXn9!wZt4&bR', uris: [{ uri: 'https://cloud.digitalocean.com', match: null }] } }),
+  // 同一站点的第二条 —— **故意**和上面那条同域名，用来钉住「同站点同色」
+  item({ id: '6b', name: '云服务商（备用）', login: { ...emptyLogin(), username: 'me2', password: 'x', uris: [{ uri: 'https://api.digitalocean.com', match: null }] } }),
   item({
     id: '7', name: '信用卡', type: 'card', rawType: 3, login: null,
     card: { cardholderName: 'ME', brand: 'Visa', number: '4111', expMonth: '7', expYear: '2026', code: null },
   }),
+  // 没有网址、名字也不是域名的笔记 —— 走「着色的类型图标」那一层
+  item({ id: '8', name: '家里 Wi-Fi 密码', type: 'secureNote', rawType: 2, login: null }),
 ];
 
 /** 干净的库 —— 空状态也要看 */
