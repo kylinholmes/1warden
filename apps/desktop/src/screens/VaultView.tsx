@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { searchItems, totpCode, hasTotp, summaryOf, type VaultItem, type VaultFolder, type Attachment } from '@coffer/vault';
+import { searchItems, totpCode, hasTotp, summaryOf, sortItems, SORT_BY, SORT_LABEL, type SortBy, type VaultItem, type VaultFolder, type Attachment } from '@coffer/vault';
 import type { VaultClient, IconStore } from '@coffer/vault';
 import { saveFile } from '../save';
 import { iconStoreFor } from '../icon-store';
@@ -18,7 +18,7 @@ import { useToast } from '../components/Toast';
 import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
-  IconSearch, IconShield, IconSpinner, IconStar, IconTrash, TypeIcon,
+  IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash, TypeIcon,
 } from '@coffer/ui';
 
 interface Props {
@@ -65,6 +65,25 @@ export function VaultView({ client, onLock }: Props) {
   // 侧栏「类别」那一节的开关，偏好存在 localStorage，改了立刻生效
   const [showTypes] = useShowTypes();
 
+  /*
+   * 排序方式。
+   *
+   * ⚠️ 用 `useState` 的惰性初始值读一次 localStorage，**不是**每次渲染都读 ——
+   * 后者在 250 条的列表上每次重渲都要碰一次同步存储。
+   *
+   * 存在这里而不是 `prefs.ts`：它只被这一屏用，没有第二个读者，
+   * 加进那个模块只会让「什么时候该用 prefs」这条线变模糊。
+   */
+  const [sortOpen, setSortOpen] = useState(false);
+  const [sortBy, setSortBy] = useState<SortBy>(() => {
+    const saved = localStorage.getItem('coffer.pref.sortBy');
+    return saved === SORT_BY.name || saved === SORT_BY.created ? saved : SORT_BY.updated;
+  });
+  function changeSort(v: SortBy): void {
+    setSortBy(v);
+    localStorage.setItem('coffer.pref.sortBy', v);
+  }
+
   const serverUrl = session.account?.serverUrl ?? '';
   const icons = useMemo(() => (serverUrl === '' ? null : iconStoreFor(serverUrl)), [serverUrl]);
 
@@ -108,8 +127,10 @@ export function VaultView({ client, onLock }: Props) {
     if (category.kind === 'favorites') pool = pool.filter((i) => i.favorite);
     else if (category.kind === 'folder') pool = pool.filter((i) => i.folderId === category.id);
     else if (category.kind === 'type') pool = pool.filter((i) => i.type === category.type);
-    return searchItems(pool, folders, query).map((h) => h.item);
-  }, [items, folders, query, category]);
+    // 排序放在**搜索之后** —— 搜索结果也该是有序的，
+    // 而且这样只需要排命中的那几条，不是全部
+    return sortItems(searchItems(pool, folders, query).map((h) => h.item), sortBy);
+  }, [items, folders, query, category, sortBy]);
 
   const selected = filtered.find((i) => i.id === selectedId) ?? null;
 
@@ -210,6 +231,50 @@ export function VaultView({ client, onLock }: Props) {
               {/* 主操作带文字。上一版是一个只有「＋」的方块 ——
                   对普通用户来说，一个加号到底是「新建条目」还是「新建文件夹」
                   完全看不出来，而这两件事后果差很远 */}
+              {/*
+                排序。
+
+                ⚠️ **不能做成三档分段控件。** 试过 —— 三个标签占掉约 250px，
+                而这一栏总共 336px，搜索框被挤成只剩一个字的宽度。
+                窄栏里的多选一用「一个按钮 + 菜单」，标签只在菜单里展开。
+
+                按钮上显示**当前档**（而不是一个抽象的排序图标）：
+                用户不用点开就知道现在按什么排。
+              */}
+              <div className="relative shrink-0">
+                <button
+                  onClick={() => setSortOpen((v) => !v)}
+                  title="排序方式"
+                  aria-label="排序方式"
+                  aria-expanded={sortOpen}
+                  className="btn btn-ghost gap-1 px-2 py-1 text-[var(--text-xs)]"
+                >
+                  {SORT_LABEL[sortBy]}
+                  <IconChevronDown size={11} />
+                </button>
+                {sortOpen && (
+                  <>
+                    {/* 点别处关掉。透明铺满全屏，比 document 监听简单且不会漏 */}
+                    <div className="fixed inset-0 z-20" onClick={() => setSortOpen(false)} />
+                    <div
+                      className="absolute right-0 top-full z-30 mt-1 min-w-[104px] rounded-[var(--radius-md)] border border-[var(--border-overlay)] bg-[var(--surface-overlay)] p-1"
+                      style={{ boxShadow: 'var(--elev-pop)' }}
+                    >
+                      {([SORT_BY.updated, SORT_BY.created, SORT_BY.name] as const).map((v) => (
+                        <button
+                          key={v}
+                          onClick={() => { changeSort(v); setSortOpen(false); }}
+                          className={`flex w-full items-center rounded-[var(--radius-sm)] px-2 py-1 text-left text-[var(--text-xs)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
+                            v === sortBy ? 'text-[var(--accent)]' : 'text-[var(--ink-secondary)]'
+                          }`}
+                        >
+                          {SORT_LABEL[v]}
+                        </button>
+                      ))}
+                    </div>
+                  </>
+                )}
+              </div>
               <button onClick={() => setMode({ kind: 'new' })} title="新建条目  ⌘N" className="btn btn-primary">
                 <IconPlus size={14} />
                 新建
