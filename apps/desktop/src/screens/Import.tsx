@@ -102,12 +102,12 @@ export function ImportScreen({ client, onImported }: {
     <div className="flex h-full flex-col">
       {/* 顶部的带子就是窗口的标题栏 —— 空白处可拖 */}
       <header className="band shrink-0 px-8" data-tauri-drag-region="deep">
-        <h2 className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold">导入</h2>
+        <h2 className="min-w-0 flex-1 truncate text-lg font-semibold">导入</h2>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7">
         <div className="mx-auto w-full" style={{ maxWidth: 'var(--detail-w)' }}>
-          <p className="text-[var(--text-sm)] leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
+          <p className="text-sm leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
             支持 1Password（.1pux / .1pif / CSV）、Bitwarden（JSON / CSV）、
             KeePass 2（XML 导出），以及 Chrome、Edge、Firefox、Safari、
             LastPass、Dashlane 等常见导出与 Excel 存出来的 CSV。
@@ -116,7 +116,7 @@ export function ImportScreen({ client, onImported }: {
           </p>
 
           {error && (
-            <p role="alert" className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-[var(--text-sm)] text-[var(--risk)]">
+            <p role="alert" className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-sm text-[var(--risk)]">
               <IconAlert size={15} className="mt-0.5 shrink-0" />
               <span className="min-w-0 flex-1">{error}</span>
             </p>
@@ -143,7 +143,7 @@ export function ImportScreen({ client, onImported }: {
           {raw !== null && (
             <div className="mt-4">
               <label htmlFor="import-format"
-                className="mb-1.5 block text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+                className="mb-1.5 block text-xs text-[var(--ink-tertiary)]">
                 格式{detected === null ? '（自动识别不了，请手动选）' : '（已自动识别，可手动改）'}
               </label>
               <select
@@ -156,7 +156,7 @@ export function ImportScreen({ client, onImported }: {
                   <option key={f.id} value={f.id}>{f.label}</option>
                 ))}
               </select>
-              <p className="mt-1.5 truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]" title={raw.name}>
+              <p className="mt-1.5 truncate text-xs text-[var(--ink-tertiary)]" title={raw.name}>
                 {raw.name}
               </p>
             </div>
@@ -209,8 +209,8 @@ function PickStep({ hasFile, onChoose }: { hasFile: boolean; onChoose: () => voi
       <span className="grid h-11 w-11 place-items-center rounded-full bg-[var(--surface-paper)] text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] group-hover:text-[var(--accent)]">
         <IconImport size={20} />
       </span>
-      <span className="text-[var(--text-md)] font-medium">{hasFile ? '换一个文件' : '选择要导入的文件'}</span>
-      <span className="text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+      <span className="text-md font-medium">{hasFile ? '换一个文件' : '选择要导入的文件'}</span>
+      <span className="text-xs text-[var(--ink-tertiary)]">
         点这里浏览 —— 选好之后会先给你看一遍再导入
       </span>
     </button>
@@ -221,7 +221,7 @@ function Progress({ done, total }: { done: number; total: number }) {
   const pct = total === 0 ? 0 : (done / total) * 100;
   return (
     <div className="card-well p-5">
-      <p className="text-[var(--text-sm)]">
+      <p className="text-sm">
         正在导入 <span className="font-medium tabular-nums">{done}</span>
         <span className="text-[var(--ink-tertiary)]"> / {total}</span>
       </p>
@@ -241,7 +241,7 @@ function Result({ created, failed, onAgain }: {
 }) {
   return (
     <div className="card p-5">
-      <p className="flex items-center gap-2.5 text-[var(--text-md)]">
+      <p className="flex items-center gap-2.5 text-md">
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--safe)] text-[var(--surface-paper)]">
           <IconCheck size={14} />
         </span>
@@ -250,13 +250,13 @@ function Result({ created, failed, onAgain }: {
 
       {failed.length > 0 && (
         <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-3.5">
-          <p className="mb-2 flex items-center gap-2 text-[var(--text-sm)] font-medium text-[var(--risk)]">
+          <p className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--risk)]">
             <IconAlert size={14} className="shrink-0" />
             有 {failed.length} 条没写进去
           </p>
           <ul className="space-y-1">
             {failed.map((f) => (
-              <li key={f.name} className="text-[var(--text-xs)]">
+              <li key={f.name} className="text-xs">
                 <span className="font-medium">{f.name}</span>
                 <span className="text-[var(--ink-tertiary)]"> —— {f.reason}</span>
               </li>
@@ -294,10 +294,10 @@ function Preview({ fileName, parsed, onRun, onCancel }: {
   return (
     <div className="card">
       <div className="border-b border-[var(--border-subtle)] px-4 py-3.5">
-        <p className="truncate text-[var(--text-sm)] text-[var(--ink-tertiary)]" title={fileName}>
+        <p className="truncate text-sm text-[var(--ink-tertiary)]" title={fileName}>
           {fileName}
         </p>
-        <p className="mt-1 text-[var(--text-md)]">
+        <p className="mt-1 text-md">
           <span className="font-semibold tabular-nums">{parsed.items.length}</span> 条可导入
           <span className="text-[var(--ink-secondary)]"> —— {breakdown.join(' · ')}</span>
           {folders > 0 && <span className="text-[var(--ink-tertiary)]"> · {folders} 个文件夹</span>}
@@ -311,18 +311,18 @@ function Preview({ fileName, parsed, onRun, onCancel }: {
       */}
       {parsed.skipped.length > 0 && (
         <div className="border-b border-[var(--border-subtle)] bg-[var(--surface-well)] px-4 py-3.5">
-          <p className="mb-2 flex items-center gap-2 text-[var(--text-sm)] font-medium text-[var(--caution)]">
+          <p className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--caution)]">
             <IconAlert size={14} className="shrink-0" />
             有 {parsed.skipped.length} 行不会被导入
           </p>
           <ul className="space-y-1">
             {parsed.skipped.slice(0, 8).map((s) => (
-              <li key={s.rowNumber} className="text-[var(--text-xs)] text-[var(--ink-secondary)]">
+              <li key={s.rowNumber} className="text-xs text-[var(--ink-secondary)]">
                 第 <span className="tabular-nums">{s.rowNumber}</span> 行 —— {s.reason}
               </li>
             ))}
             {parsed.skipped.length > 8 && (
-              <li className="text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+              <li className="text-xs text-[var(--ink-tertiary)]">
                 …还有 {parsed.skipped.length - 8} 行
               </li>
             )}

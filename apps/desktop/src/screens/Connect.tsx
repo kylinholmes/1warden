@@ -217,11 +217,11 @@ export function Connect({ client, onConnected }: Props) {
           <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-[var(--accent-ink)]">
             <IconLock size={17} />
           </span>
-          <span className="text-[var(--text-xl)] font-semibold tracking-[-0.01em]">Coffer</span>
+          <span className="text-xl font-semibold tracking-[-0.01em]">Coffer</span>
         </div>
 
         {!inFlow && (
-          <h1 className="text-[var(--text-md)] font-medium text-[var(--ink-secondary)]">
+          <h1 className="text-md font-medium text-[var(--ink-secondary)]">
             {view === 'pick' ? '选择要连接的账户'
               : challenge ? '需要两步验证'
               : cert ? '需要确认服务器证书'
@@ -240,17 +240,17 @@ export function Connect({ client, onConnected }: Props) {
             />
           ) : challenge ? (
             <form onSubmit={submitCode} className="space-y-4">
-              <p className="text-[var(--text-sm)] text-[var(--ink-secondary)]">
+              <p className="text-sm text-[var(--ink-secondary)]">
                 可用方式：{challenge.providers.map((p) => PROVIDER_NAME[p] ?? `方式 ${p}`).join('、')}
               </p>
               <Field label="验证码">
                 <input
                   type="text" required inputMode="numeric" autoFocus value={code}
                   onChange={(e) => setCode(e.target.value)}
-                  className="field secret text-center text-[var(--text-xl)] tracking-[0.3em]"
+                  className="field secret text-center text-xl tracking-[0.3em]"
                 />
               </Field>
-              <label className="flex items-center gap-2.5 text-[var(--text-sm)] text-[var(--ink-secondary)]">
+              <label className="flex items-center gap-2.5 text-sm text-[var(--ink-secondary)]">
                 <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
                 记住这台设备
               </label>
@@ -313,7 +313,7 @@ export function Connect({ client, onConnected }: Props) {
                 <button
                   type="button"
                   onClick={() => { setPassword(''); setError(null); setView('form'); }}
-                  className="btn w-full py-2 text-[var(--text-xs)] text-[var(--ink-tertiary)] hover:text-[var(--ink-secondary)]"
+                  className="btn w-full py-2 text-xs text-[var(--ink-tertiary)] hover:text-[var(--ink-secondary)]"
                 >
                   这台服务器上的其他账户
                 </button>
@@ -323,14 +323,14 @@ export function Connect({ client, onConnected }: Props) {
         </div>
 
         {error && (
-          <p role="alert" className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-[var(--text-sm)] text-[var(--risk)]">
+          <p role="alert" className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-sm text-[var(--risk)]">
             <IconAlert size={15} className="mt-0.5 shrink-0" />
             <span className="min-w-0 flex-1">{error}</span>
           </p>
         )}
 
         {!cert && !inFlow && (
-          <p className="mt-8 text-[var(--text-xs)] leading-relaxed text-[var(--ink-tertiary)]">
+          <p className="mt-8 text-xs leading-relaxed text-[var(--ink-tertiary)]">
             主密码只在本地用于派生密钥，<strong className="font-medium">永不发送到服务器</strong>。
             {view === 'pick' && '服务器地址和邮箱会留在本机，方便下次连接。'}
           </p>
@@ -362,12 +362,12 @@ function AccountPicker({ accounts, onPick, onOther }: {
               onClick={() => onPick(a)}
               className="group flex w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-paper)] px-3 py-2.5 text-left transition-colors duration-[var(--dur-fast)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
             >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-[var(--text-md)] font-semibold text-[var(--accent)]">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-md font-semibold text-[var(--accent)]">
                 {a.email.slice(0, 1).toUpperCase()}
               </span>
               <span className="min-w-0 flex-1">
-                <span className="block truncate text-[var(--text-md)]">{a.email}</span>
-                <span className="mt-0.5 flex items-center gap-1.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+                <span className="block truncate text-md">{a.email}</span>
+                <span className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
                   <IconGlobe size={12} className="shrink-0" />
                   <span className="truncate">{hostOf(a.serverUrl)}</span>
                 </span>
@@ -392,12 +392,12 @@ function AccountChip({ email, serverUrl, onBack }: {
 }) {
   return (
     <div className="flex items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-well)] px-3 py-2.5">
-      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-[var(--text-md)] font-semibold text-[var(--accent)]">
+      <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-md font-semibold text-[var(--accent)]">
         {email.slice(0, 1).toUpperCase()}
       </span>
       <span className="min-w-0 flex-1">
-        <span className="block truncate text-[var(--text-md)]">{email}</span>
-        <span className="mt-0.5 flex items-center gap-1.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+        <span className="block truncate text-md">{email}</span>
+        <span className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
           <IconServer size={12} className="shrink-0" />
           <span className="truncate">{hostOf(serverUrl)}</span>
         </span>
@@ -429,15 +429,15 @@ function CertificatePrompt(props: {
   const { cert } = props;
   return (
     <div className="space-y-4">
-      <p className="text-[var(--text-sm)] leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
+      <p className="text-sm leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
         <strong className="font-medium text-[var(--ink-primary)]">{props.host}</strong>{' '}
         出示的证书无法验证。自建服务器用自签证书是正常的；但也可能是有人
         在中间截获了这次连接 —— 这两种情况从这边看不出来。
       </p>
 
-      <dl className="card-well space-y-2.5 p-4 text-[var(--text-xs)]">
+      <dl className="card-well space-y-2.5 p-4 text-xs">
         <Row label="指纹">
-          <span className="secret break-all text-[var(--text-xs)]">{cert.fingerprint}</span>
+          <span className="secret break-all text-xs">{cert.fingerprint}</span>
         </Row>
         <Row label="签发给"><span className="truncate">{cert.subject}</span></Row>
         <Row label="签发者"><span className="truncate">{cert.issuer}</span></Row>
@@ -446,7 +446,7 @@ function CertificatePrompt(props: {
         </Row>
       </dl>
 
-      <p className="text-[var(--text-xs)] leading-relaxed text-[var(--ink-tertiary)]">
+      <p className="text-xs leading-relaxed text-[var(--ink-tertiary)]">
         请与服务器管理员核对上面的指纹（服务器上执行{' '}
         <code className="secret">openssl x509 -noout -fingerprint -sha256 -in 证书文件</code>
         ）。核对一致才能继续。
@@ -479,9 +479,9 @@ function Row({ label, children }: { label: string; children: React.ReactNode }) 
 function Field({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <label className="block">
-      <span className="mb-1.5 block text-[var(--text-xs)] font-medium text-[var(--ink-secondary)]">{label}</span>
+      <span className="mb-1.5 block text-xs font-medium text-[var(--ink-secondary)]">{label}</span>
       {children}
-      {hint && <span className="mt-1.5 block text-[var(--text-xs)] text-[var(--ink-tertiary)]">{hint}</span>}
+      {hint && <span className="mt-1.5 block text-xs text-[var(--ink-tertiary)]">{hint}</span>}
     </label>
   );
 }

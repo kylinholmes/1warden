@@ -125,14 +125,14 @@ export class ErrorBoundary extends Component<{ children: React.ReactNode }, Boun
           <span className="mb-4 grid h-10 w-10 place-items-center rounded-full bg-[var(--surface-well)] text-[var(--risk)]">
             <IconAlert size={20} />
           </span>
-          <h1 className="text-[var(--text-lg)] font-semibold">界面出错了</h1>
-          <p className="mt-1.5 text-[var(--text-sm)] leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
+          <h1 className="text-lg font-semibold">界面出错了</h1>
+          <p className="mt-1.5 text-sm leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
             这是 Coffer 的缺陷，不是你的操作问题。你的保险库数据没有受影响 ——
             它还在服务器上，重新打开即可。
           </p>
 
           {/* 技术细节给出来是为了能定位问题；不展示任何密钥或条目内容 */}
-          <pre className="secret my-5 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-well)] p-3 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+          <pre className="secret my-5 max-h-56 overflow-auto whitespace-pre-wrap break-all rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-well)] p-3 text-xs text-[var(--ink-secondary)]">
             {error.message || String(error)}
           </pre>
 

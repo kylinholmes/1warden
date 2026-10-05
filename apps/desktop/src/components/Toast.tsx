@@ -237,7 +237,7 @@ function ToastItem({ rec, onDismiss, onExited }: {
       data-tone={rec.tone}
     >
       <span className="toast-icon"><Icon size={15} /></span>
-      <p className="min-w-0 flex-1 break-words pt-px text-[var(--text-sm)] leading-snug">{rec.message}</p>
+      <p className="min-w-0 flex-1 break-words pt-px text-sm leading-snug">{rec.message}</p>
       <button onClick={() => onDismiss(rec.id)} aria-label="关闭通知" title="关闭" className="toast-close mt-px">
         <IconClose size={13} />
       </button>

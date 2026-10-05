@@ -84,9 +84,9 @@ export function QuickAccess({ items, icons, locked, busy, notice, onQueryChange,
           placeholder={locked ? '保险库已锁定' : '搜索保险库…'}
           aria-label="搜索保险库"
           disabled={locked}
-          className="min-w-0 flex-1 bg-transparent text-[var(--text-lg)] outline-none placeholder:text-[var(--ink-tertiary)] disabled:cursor-not-allowed"
+          className="min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-[var(--ink-tertiary)] disabled:cursor-not-allowed"
         />
-        {busy && <span className="shrink-0 text-[var(--text-xs)] text-[var(--ink-tertiary)]">…</span>}
+        {busy && <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">…</span>}
       </div>
 
       {locked ? (
@@ -94,8 +94,8 @@ export function QuickAccess({ items, icons, locked, busy, notice, onQueryChange,
           <span className="mb-1 grid h-10 w-10 place-items-center rounded-full bg-[var(--surface-well)] text-[var(--ink-tertiary)]">
             <IconLock size={18} />
           </span>
-          <p className="text-[var(--text-sm)] text-[var(--ink-secondary)]">保险库已锁定，无法搜索</p>
-          <p className="text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+          <p className="text-sm text-[var(--ink-secondary)]">保险库已锁定，无法搜索</p>
+          <p className="text-xs text-[var(--ink-tertiary)]">
             打开 Coffer 解锁后按 ⌘⇧\
           </p>
         </div>
@@ -103,11 +103,11 @@ export function QuickAccess({ items, icons, locked, busy, notice, onQueryChange,
         <ul className="flex-1 overflow-y-auto p-2">
           {items.length === 0 ? (
             <li className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
-              <p className="text-[var(--text-sm)] text-[var(--ink-secondary)]">
+              <p className="text-sm text-[var(--ink-secondary)]">
                 {query ? `没有匹配「${query}」的条目` : '输入以搜索'}
               </p>
               {!query && (
-                <p className="text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+                <p className="text-xs text-[var(--ink-tertiary)]">
                   名称、用户名、网址都能搜
                 </p>
               )}
@@ -129,10 +129,10 @@ export function QuickAccess({ items, icons, locked, busy, notice, onQueryChange,
                   store={icons}
                 />
                 <span className="min-w-0 flex-1">
-                  <span className="block truncate text-[var(--text-md)] leading-snug">{it.name}</span>
+                  <span className="block truncate text-md leading-snug">{it.name}</span>
                   {/* 摘要规则与主窗口同一份（`summaryOf`），不在这里再推一遍 */}
                   {it.summary !== null && (
-                    <span className="mt-0.5 block truncate text-[var(--text-xs)] leading-snug text-[var(--ink-tertiary)]">
+                    <span className="mt-0.5 block truncate text-xs leading-snug text-[var(--ink-tertiary)]">
                       {it.summary}
                     </span>
                   )}
@@ -140,7 +140,7 @@ export function QuickAccess({ items, icons, locked, busy, notice, onQueryChange,
                 {/* 快捷键写在条目上而不是藏进帮助里 —— 用户按一次就该记住。
                     只在当前选中行显示，否则一屏都是「⏎ 复制」，反而看不见重点 */}
                 {it.hasPassword && (
-                  <span className={`shrink-0 text-[var(--text-xs)] transition-opacity duration-[var(--dur-fast)] ${
+                  <span className={`shrink-0 text-xs transition-opacity duration-[var(--dur-fast)] ${
                     i === index ? 'text-[var(--ink-secondary)] opacity-100' : 'opacity-0'
                   }`}>
                     ⏎ 复制

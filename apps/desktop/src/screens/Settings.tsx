@@ -81,14 +81,14 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
               : '这一组仍是外壳：控件尚未接入，改动不会保存'}
           </span>
           <span className="shrink-0">
-            <kbd className="text-[var(--text-2xs)]">esc</kbd> 关闭
+            <kbd className="text-2xs">esc</kbd> 关闭
           </span>
         </>
       }
     >
       <div className="panel-head">
         <IconGear size={15} className="shrink-0 text-[var(--ink-tertiary)]" />
-        <h2 id="settings-title" className="min-w-0 flex-1 truncate text-[var(--text-md)] font-medium">
+        <h2 id="settings-title" className="min-w-0 flex-1 truncate text-md font-medium">
           设置
         </h2>
         <button onClick={onClose} aria-label="关闭设置" title="关闭  esc" className="btn btn-ghost -mr-1 p-1.5">
@@ -129,7 +129,7 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
                   // 下一次 Tab 会从错误的位置继续
                   document.getElementById(`settings-tab-${next.id}`)?.focus();
                 }}
-                className={`flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 py-[7px] text-left text-[var(--text-sm)] transition-colors duration-[var(--dur-fast)] ${
+                className={`flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 py-[7px] text-left text-sm transition-colors duration-[var(--dur-fast)] ${
                   active
                     ? 'bg-[var(--surface-selected)] font-medium text-[var(--ink-primary)]'
                     : 'text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]'
@@ -224,7 +224,7 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
                 <Check disabled />
               </Row>
               <Row label="浏览器扩展" hint="当前没有检测到已连接的浏览器">
-                <span className="text-[var(--text-sm)] text-[var(--ink-tertiary)]">未连接</span>
+                <span className="text-sm text-[var(--ink-tertiary)]">未连接</span>
               </Row>
               <Row label="快速面板快捷键">
                 <Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>\</Kbd>
@@ -248,8 +248,8 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
 function Group({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
   return (
     <section>
-      <h3 className="text-[var(--text-md)] font-medium">{title}</h3>
-      {hint && <p className="mt-0.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">{hint}</p>}
+      <h3 className="text-md font-medium">{title}</h3>
+      {hint && <p className="mt-0.5 text-xs text-[var(--ink-tertiary)]">{hint}</p>}
       <div className="card mt-3 px-4">{children}</div>
     </section>
   );
@@ -271,11 +271,11 @@ function Row({ label, hint, value, children }: {
   return (
     <div className="flex items-center gap-4 border-b border-[var(--border-subtle)] py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <div className="text-[var(--text-md)]">{label}</div>
-        {hint && <div className="mt-0.5 text-[var(--text-xs)] leading-snug text-[var(--ink-tertiary)]">{hint}</div>}
+        <div className="text-md">{label}</div>
+        {hint && <div className="mt-0.5 text-xs leading-snug text-[var(--ink-tertiary)]">{hint}</div>}
       </div>
       {value !== undefined && (
-        <div className="secret max-w-[240px] shrink-0 truncate text-[var(--text-md)] text-[var(--ink-secondary)]" title={value}>
+        <div className="secret max-w-[240px] shrink-0 truncate text-md text-[var(--ink-secondary)]" title={value}>
           {value}
         </div>
       )}
@@ -302,7 +302,7 @@ function Check({ checked, disabled }: { checked?: boolean; disabled?: boolean })
 
 function Kbd({ children }: { children: ReactNode }) {
   return (
-    <kbd className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-well)] px-1.5 py-0.5 text-[var(--text-2xs)] text-[var(--ink-secondary)]">
+    <kbd className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-well)] px-1.5 py-0.5 text-2xs text-[var(--ink-secondary)]">
       {children}
     </kbd>
   );
@@ -318,12 +318,12 @@ function Shortcuts() {
   ];
   return (
     <div className="border-t border-[var(--border-subtle)] py-3">
-      <div className="mb-2 text-[var(--text-xs)] text-[var(--ink-tertiary)]">快捷键</div>
+      <div className="mb-2 text-xs text-[var(--ink-tertiary)]">快捷键</div>
       <div className="grid grid-cols-2 gap-x-6 gap-y-1.5">
         {keys.map(([k, label]) => (
-          <div key={k} className="flex items-center gap-2 text-[var(--text-sm)]">
+          <div key={k} className="flex items-center gap-2 text-sm">
             <span className="min-w-0 flex-1 truncate text-[var(--ink-secondary)]">{label}</span>
-            <kbd className="secret shrink-0 text-[var(--text-2xs)] text-[var(--ink-tertiary)]">{k}</kbd>
+            <kbd className="secret shrink-0 text-2xs text-[var(--ink-tertiary)]">{k}</kbd>
           </div>
         ))}
       </div>

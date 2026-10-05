@@ -247,7 +247,7 @@ export function VaultView({ client, onLock }: Props) {
                   title="排序方式"
                   aria-label="排序方式"
                   aria-expanded={sortOpen}
-                  className="btn btn-ghost gap-1 px-2 py-1 text-[var(--text-xs)]"
+                  className="btn btn-ghost gap-1 px-2 py-1 text-xs"
                 >
                   {SORT_LABEL[sortBy]}
                   <IconChevronDown size={11} />
@@ -264,7 +264,7 @@ export function VaultView({ client, onLock }: Props) {
                         <button
                           key={v}
                           onClick={() => { changeSort(v); setSortOpen(false); }}
-                          className={`flex w-full items-center rounded-[var(--radius-sm)] px-2 py-1 text-left text-[var(--text-xs)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
+                          className={`flex w-full items-center rounded-[var(--radius-sm)] px-2 py-1 text-left text-xs transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
                             v === sortBy ? 'text-[var(--accent)]' : 'text-[var(--ink-secondary)]'
                           }`}
                         >
@@ -284,7 +284,7 @@ export function VaultView({ client, onLock }: Props) {
             {folderError && (
               <div className="flex items-start gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-well)] px-3.5 py-2">
                 <IconAlert size={14} className="mt-0.5 shrink-0 text-[var(--risk)]" />
-                <p className="min-w-0 flex-1 text-[var(--text-xs)] text-[var(--risk)]">{folderError}</p>
+                <p className="min-w-0 flex-1 text-xs text-[var(--risk)]">{folderError}</p>
                 <button onClick={() => setFolderError(null)} className="btn btn-ghost shrink-0">知道了</button>
               </div>
             )}
@@ -302,7 +302,7 @@ export function VaultView({ client, onLock }: Props) {
               {filtered.length === 0 && (
                 <li className="px-4 py-10 text-center">
                   {query ? (
-                    <p className="text-[var(--text-sm)] text-[var(--ink-tertiary)]">
+                    <p className="text-sm text-[var(--ink-tertiary)]">
                       没有匹配「{query}」的条目
                     </p>
                   ) : session.syncing && items.length === 0 ? (
@@ -318,18 +318,18 @@ export function VaultView({ client, onLock }: Props) {
                      * 最容易让人误判的时候。
                      */
                     <>
-                      <p className="flex items-center justify-center gap-1.5 text-[var(--text-sm)] text-[var(--ink-secondary)]">
+                      <p className="flex items-center justify-center gap-1.5 text-sm text-[var(--ink-secondary)]">
                         <IconSpinner size={13} className="text-[var(--ink-tertiary)]" />
                         正在载入…
                       </p>
-                      <p className="mt-1 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+                      <p className="mt-1 text-xs text-[var(--ink-tertiary)]">
                         第一次打开要拉整个保险库，之后就快了
                       </p>
                     </>
                   ) : (
                     <>
-                      <p className="text-[var(--text-sm)] text-[var(--ink-secondary)]">这里还是空的</p>
-                      <p className="mt-1 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+                      <p className="text-sm text-[var(--ink-secondary)]">这里还是空的</p>
+                      <p className="mt-1 text-xs text-[var(--ink-tertiary)]">
                         点上面的「新建」加第一条
                       </p>
                     </>
@@ -465,12 +465,12 @@ function DeleteDialog(props: {
   */
   return (
     <FloatingPanel open onClose={props.onCancel} labelledBy="delete-title" className="max-w-sm p-5">
-      <h3 id="delete-title" className="text-[var(--text-lg)] font-semibold">删除「{props.item.name}」？</h3>
-      <p className="mt-1.5 text-[var(--text-sm)] text-[var(--ink-secondary)]">
+      <h3 id="delete-title" className="text-lg font-semibold">删除「{props.item.name}」？</h3>
+      <p className="mt-1.5 text-sm text-[var(--ink-secondary)]">
         移到回收站后仍可恢复。永久删除则<strong className="font-medium text-[var(--risk)]">无法撤销</strong>。
       </p>
 
-      <label className="mt-4 flex items-start gap-2.5 rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-2.5 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+      <label className="mt-4 flex items-start gap-2.5 rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-2.5 text-xs text-[var(--ink-secondary)]">
         <input type="checkbox" checked={ack} onChange={(e) => setAck(e.target.checked)} className="mt-0.5" />
         我知道永久删除无法恢复
       </label>
@@ -545,7 +545,7 @@ function Sidebar(props: {
         <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
           <IconLock size={13} />
         </span>
-        <span className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold tracking-[-0.01em]">Coffer</span>
+        <span className="min-w-0 flex-1 truncate text-lg font-semibold tracking-[-0.01em]">Coffer</span>
         {/* 设置入口在顶栏右端。**不放进底部账户区**：那里是「你是谁 / 离开」，
             设置是「这个应用怎么运作」，和账户不是一类东西 */}
         <button
@@ -602,7 +602,7 @@ function Sidebar(props: {
           能建出第一个文件夹 —— 于是它对用户永远不会出现，整套文件夹功能等于不存在。
         */}
         <div className="mt-4 mb-1 flex items-center justify-between pl-2.5 pr-1">
-          <span className="text-[var(--text-xs)] font-medium text-[var(--ink-secondary)]">文件夹</span>
+          <span className="text-xs font-medium text-[var(--ink-secondary)]">文件夹</span>
           <button
             onClick={() => { setCreating(true); setMenuFor(null); }}
             title="新建文件夹"
@@ -634,7 +634,7 @@ function Sidebar(props: {
                   <div className="rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-2.5">
                     {/* ⚠️ 删除文件夹**不会删掉里面的密码** —— 服务端只删关联行，
                         条目变成「无文件夹」。措辞必须与这个事实一致 */}
-                    <p className="mb-2 text-[var(--text-xs)] leading-relaxed text-[var(--ink-secondary)]">
+                    <p className="mb-2 text-xs leading-relaxed text-[var(--ink-secondary)]">
                       里面的条目会变成「无文件夹」，<strong className="font-medium text-[var(--ink-primary)]">不会被删除</strong>。
                     </p>
                     <div className="flex gap-1.5">
@@ -706,7 +706,7 @@ function Sidebar(props: {
       {props.showTypes && props.typeCounts.length > 0 && (
         <div>
           <div className="mb-1 mt-3 flex items-center px-2">
-            <span className="text-[var(--text-xs)] font-medium text-[var(--ink-secondary)]">类别</span>
+            <span className="text-xs font-medium text-[var(--ink-secondary)]">类别</span>
           </div>
           <ul className="space-y-0.5">
             {props.typeCounts.map((t) => (
@@ -725,10 +725,10 @@ function Sidebar(props: {
 
       <div className="border-t border-[var(--border-subtle)] p-2.5">
         <div className="mb-1 flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5">
-          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-[var(--text-2xs)] font-semibold text-[var(--accent)]">
+          <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-2xs font-semibold text-[var(--accent)]">
             {props.account.slice(0, 1).toUpperCase() || '?'}
           </span>
-          <span className="truncate text-[var(--text-xs)] text-[var(--ink-secondary)]" title={props.account}>
+          <span className="truncate text-xs text-[var(--ink-secondary)]" title={props.account}>
             {props.account}
           </span>
           {/*
@@ -747,11 +747,11 @@ function Sidebar(props: {
         </div>
         <button
           onClick={props.onLock}
-          className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-[var(--text-sm)] text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+          className="flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-sm text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
         >
           <IconLock size={15} />
           <span className="flex-1">锁定</span>
-          <kbd className="text-[var(--text-2xs)] text-[var(--ink-secondary)]">⌘L</kbd>
+          <kbd className="text-2xs text-[var(--ink-secondary)]">⌘L</kbd>
         </button>
       </div>
     </nav>
@@ -774,7 +774,7 @@ function NavItem(props: {
           强调色留给「可以点的动作」，用它给导航项上色会让界面到处是青色 */}
       <button
         onClick={props.onClick}
-        className={`flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 py-[7px] text-left text-[var(--text-sm)] transition-colors duration-[var(--dur-fast)] ${
+        className={`flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2.5 py-[7px] text-left text-sm transition-colors duration-[var(--dur-fast)] ${
           props.active
             ? 'bg-[var(--surface-selected)] font-medium text-[var(--ink-primary)]'
             : 'text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]'
@@ -786,7 +786,7 @@ function NavItem(props: {
         <span className="min-w-0 flex-1 truncate">{props.label}</span>
         {/* 计数是字，不是图形 —— 在玻璃上必须用次级墨（理由见 Sidebar 的注释） */}
         {props.count !== undefined && (
-          <span className="shrink-0 text-[var(--text-2xs)] tabular-nums text-[var(--ink-secondary)]">{props.count}</span>
+          <span className="shrink-0 text-2xs tabular-nums text-[var(--ink-secondary)]">{props.count}</span>
         )}
       </button>
       {props.children}
@@ -822,13 +822,13 @@ function ItemRow({ item, selected, onClick, icons }: {
       >
         <ItemIcon item={item} store={icons} />
         <span className="min-w-0 flex-1 py-0.5">
-          <span className={`block truncate text-[var(--text-md)] leading-snug ${
+          <span className={`block truncate text-md leading-snug ${
             item.nameFailed ? 'italic text-[var(--ink-tertiary)]' : ''
           }`}>
             {item.nameFailed ? '无法解密' : item.name}
           </span>
           {subtitle !== null && (
-            <span className="mt-0.5 block truncate text-[var(--text-xs)] leading-snug text-[var(--ink-tertiary)]">
+            <span className="mt-0.5 block truncate text-xs leading-snug text-[var(--ink-tertiary)]">
               {subtitle}
             </span>
           )}
@@ -864,7 +864,7 @@ function InlineInput({ initial = '', placeholder, onCommit, onCancel }: {
         if (e.key === 'Escape') onCancel();
       }}
       onBlur={onCancel}
-      className="field px-2 py-1 text-[var(--text-sm)]"
+      className="field px-2 py-1 text-sm"
     />
   );
 }
@@ -883,10 +883,10 @@ function EmptyDetail({ hasItems }: { hasItems: boolean }) {
         <span className="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-[var(--radius-md)] bg-[var(--surface-well)] text-[var(--ink-tertiary)]">
           <IconKeyboard size={20} />
         </span>
-        <p className="text-[var(--text-md)] text-[var(--ink-secondary)]">
+        <p className="text-md text-[var(--ink-secondary)]">
           {hasItems ? '选一条记录查看详情' : '还没有可以看的记录'}
         </p>
-        <p className="mt-1.5 text-[var(--text-xs)] leading-relaxed text-[var(--ink-tertiary)]">
+        <p className="mt-1.5 text-xs leading-relaxed text-[var(--ink-tertiary)]">
           {hasItems
             ? '用 ↑ ↓ 在列表里移动，⌘F 直接搜名字或网址。'
             : '左上的「新建」可以从空白开始，或从 1Password、Bitwarden 导入。'}
@@ -933,12 +933,12 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
           <ItemIcon item={item} store={icons} size={36} />
         </span>
         <div className="min-w-0 flex-1">
-          <h2 className={`truncate text-[var(--text-xl)] font-semibold tracking-[-0.015em] ${
+          <h2 className={`truncate text-xl font-semibold tracking-[-0.015em] ${
             item.nameFailed ? 'italic text-[var(--ink-tertiary)]' : ''
           }`}>
             {item.nameFailed ? '无法解密' : item.name}
           </h2>
-          <p className="mt-0.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+          <p className="mt-0.5 text-xs text-[var(--ink-tertiary)]">
             {TYPE_LABEL[item.type] ?? '未知类型'}
             {item.rawType > 5 && '（此类型较新，暂只支持查看）'}
           </p>
@@ -1044,7 +1044,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
 
         {item.notes && (
           <Section title="备注">
-            <p className="whitespace-pre-wrap break-words py-2.5 text-[var(--text-md)] leading-[var(--lh-prose)]">
+            <p className="whitespace-pre-wrap break-words py-2.5 text-md leading-[var(--lh-prose)]">
               {item.notes}
             </p>
           </Section>
@@ -1087,11 +1087,11 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
 
   return (
     <div className="flex items-center gap-3 border-t border-[var(--border-subtle)] py-2.5">
-      <span className="w-[84px] shrink-0 text-[var(--text-sm)] text-[var(--ink-secondary)]">验证码</span>
+      <span className="w-[84px] shrink-0 text-sm text-[var(--ink-secondary)]">验证码</span>
 
       {/* key 让每次换码都重放一遍淡入 —— 这就是「它变了」的信号 */}
       <span key={code} className="code-turn min-w-0 flex-1">
-        <span className="secret text-[var(--text-xl)] font-medium tracking-[0.12em]" style={{ color: tone }}>
+        <span className="secret text-xl font-medium tracking-[0.12em]" style={{ color: tone }}>
           {code.length > 3 ? `${code.slice(0, 3)} ${code.slice(3)}` : code}
         </span>
       </span>
@@ -1182,20 +1182,20 @@ function AttachmentRow({ client, item, attachment }: {
 
   return (
     <div className="flex flex-wrap items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-0">
-      <span className="min-w-0 flex-1 truncate text-[var(--text-sm)]" title={attachment.fileName}>
+      <span className="min-w-0 flex-1 truncate text-sm" title={attachment.fileName}>
         {attachment.fileName || '（没有文件名）'}
       </span>
       {attachment.sizeName && (
-        <span className="shrink-0 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+        <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">
           {attachment.sizeName}
         </span>
       )}
 
       {state === 'failed' && (
-        <span className="shrink-0 text-[var(--text-xs)] text-[var(--risk)]" title={note}>取不回来</span>
+        <span className="shrink-0 text-xs text-[var(--risk)]" title={note}>取不回来</span>
       )}
       {state === 'saved' && (
-        <span className="min-w-0 shrink truncate text-[var(--text-xs)] text-[var(--safe)]" title={note}>
+        <span className="min-w-0 shrink truncate text-xs text-[var(--safe)]" title={note}>
           已保存 · {note.split('/').pop()}
         </span>
       )}
@@ -1215,7 +1215,7 @@ function Section({ title, children }: { title?: string; children: React.ReactNod
   return (
     <section className="mb-7">
       {title && (
-        <h3 className="mb-2 text-[var(--text-xs)] font-medium text-[var(--ink-tertiary)]">{title}</h3>
+        <h3 className="mb-2 text-xs font-medium text-[var(--ink-tertiary)]">{title}</h3>
       )}
       <div className="card px-4">{children}</div>
     </section>

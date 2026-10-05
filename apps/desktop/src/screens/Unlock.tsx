@@ -63,7 +63,7 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
         <div className="flex flex-col items-center text-center">
           {/* 头像位 —— 用邮箱首字母，不引入外部图片 */}
           <div
-            className={`mb-4 grid h-16 w-16 place-items-center rounded-full bg-[var(--accent-tint)] text-[var(--text-xl)] font-semibold text-[var(--accent)] ${
+            className={`mb-4 grid h-16 w-16 place-items-center rounded-full bg-[var(--accent-tint)] text-xl font-semibold text-[var(--accent)] ${
               busy ? 'breathe' : ''
             }`}
             aria-hidden
@@ -71,8 +71,8 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
             {(account?.email ?? '?').slice(0, 1).toUpperCase()}
           </div>
 
-          <p className="text-[var(--text-md)] font-medium">{account?.email}</p>
-          <p className="mt-1 flex items-center gap-1.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+          <p className="text-md font-medium">{account?.email}</p>
+          <p className="mt-1 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
             <IconGlobe size={12} className="shrink-0" />
             <span className="truncate">{hostOf(account?.serverUrl ?? '')}</span>
           </p>
@@ -98,7 +98,7 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
         </form>
 
         {error && (
-          <p role="alert" className="mt-4 flex items-start justify-center gap-2 text-[var(--text-sm)] text-[var(--risk)]">
+          <p role="alert" className="mt-4 flex items-start justify-center gap-2 text-sm text-[var(--risk)]">
             <IconAlert size={15} className="mt-0.5 shrink-0" />
             <span>{error}</span>
           </p>
@@ -107,7 +107,7 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
         <div className="mt-9 text-center">
           <button
             onClick={onDisconnect}
-            className="text-[var(--text-xs)] text-[var(--ink-tertiary)] underline-offset-2 transition-colors duration-[var(--dur-fast)] hover:text-[var(--ink-secondary)] hover:underline"
+            className="text-xs text-[var(--ink-tertiary)] underline-offset-2 transition-colors duration-[var(--dur-fast)] hover:text-[var(--ink-secondary)] hover:underline"
           >
             使用其他账户
           </button>

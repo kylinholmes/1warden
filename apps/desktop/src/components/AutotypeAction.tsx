@@ -91,7 +91,7 @@ export function AutotypeAction({ username, password }: {
         拆成三层：一行说清要做什么、一个按钮、一行才是不放心的那段保证。
       */
       <div className="card-well px-3.5 py-3">
-        <p className="flex items-center gap-2 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+        <p className="flex items-center gap-2 text-xs text-[var(--ink-secondary)]">
           <IconAlert size={14} className="shrink-0 text-[var(--caution)]" />
           需要辅助功能权限才能向其他应用输入
         </p>
@@ -101,7 +101,7 @@ export function AutotypeAction({ username, password }: {
         >
           打开系统设置
         </button>
-        <p className="mt-2.5 ml-[22px] text-[var(--text-xs)] leading-relaxed text-[var(--ink-tertiary)]">
+        <p className="mt-2.5 ml-[22px] text-xs leading-relaxed text-[var(--ink-tertiary)]">
           Coffer 只会往当前焦点发送按键，不会读取任何应用的界面内容。
         </p>
       </div>
@@ -120,7 +120,7 @@ export function AutotypeAction({ username, password }: {
           倒计时用大一号的字 + 强调色：这几秒里用户要完成的动作是
           「切到目标窗口」，提示必须显眼到他不会错过。
         */
-        <p className="flex items-center gap-2 text-[var(--text-sm)] text-[var(--accent)]" role="status">
+        <p className="flex items-center gap-2 text-sm text-[var(--accent)]" role="status">
           <IconKeyboard size={15} className="shrink-0" />
           <span className="tabular-nums font-medium">{count}</span>
           秒后发送，请切换到目标窗口…
@@ -129,7 +129,7 @@ export function AutotypeAction({ username, password }: {
 
       {result && (
         <p
-          className="mt-2 flex items-start gap-2 text-[var(--text-xs)]"
+          className="mt-2 flex items-start gap-2 text-xs"
           style={{ color: result.ok ? 'var(--ink-tertiary)' : 'var(--risk)' }}
         >
           {!result.ok && <IconAlert size={13} className="mt-0.5 shrink-0" />}

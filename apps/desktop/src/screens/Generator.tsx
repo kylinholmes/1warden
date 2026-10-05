@@ -86,13 +86,13 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
         <>
           {/* 自动清空这件事必须说出来 —— 不说的话，用户会以为密码一直躺在剪贴板里 */}
           <span className="min-w-0 truncate">复制后 30 秒自动清空剪贴板</span>
-          <span className="shrink-0"><kbd className="text-[var(--text-2xs)]">esc</kbd> 关闭</span>
+          <span className="shrink-0"><kbd className="text-2xs">esc</kbd> 关闭</span>
         </>
       }
     >
       <div className="panel-head">
         <IconDice size={15} className="shrink-0 text-[var(--ink-tertiary)]" />
-        <h2 id="generator-title" className="min-w-0 flex-1 truncate text-[var(--text-md)] font-medium">生成器</h2>
+        <h2 id="generator-title" className="min-w-0 flex-1 truncate text-md font-medium">生成器</h2>
         <button onClick={onClose} aria-label="关闭生成器" title="关闭  esc" className="btn btn-ghost -mr-1 p-1.5">
           <IconClose size={15} />
         </button>
@@ -111,7 +111,7 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
 
         {/* 结果在最上面 —— 它是用户来这儿要的东西，不该等他调完参数才看见 */}
         <div className="card-well mt-4 p-3">
-          <p className="secret min-h-[46px] break-all text-[var(--text-lg)] leading-[var(--lh-snug)]">
+          <p className="secret min-h-[46px] break-all text-lg leading-[var(--lh-snug)]">
             {value}
           </p>
         </div>
@@ -135,7 +135,7 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
                 />
               ))}
             </span>
-            <p className="text-[var(--text-xs)] leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
+            <p className="text-xs leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
               <strong className="font-medium text-[var(--ink-primary)]">{STRENGTH_LABELS[strength.score]}</strong>
               {' —— '}
               {crackSentence(strength.entropyBits, strength.score)}
@@ -151,7 +151,7 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
           所以这里说清楚机制：强度只来自词的个数，加词才有用。
         */}
         {kind === 'passphrase' && (
-          <p className="mt-3.5 text-[var(--text-xs)] leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
+          <p className="mt-3.5 text-xs leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
             <strong className="font-medium text-[var(--ink-primary)]">{words} 个词</strong>
             {' —— '}
             每个词都是随机取的，词与词之间没有语义联系，所以「像一个短语」帮不了猜的人。
@@ -172,7 +172,7 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
                     onChange={(e) => setLength(Number(e.target.value))}
                     className="min-w-0 flex-1"
                   />
-                  <span className="tnum w-7 shrink-0 text-right text-[var(--text-sm)]">{length}</span>
+                  <span className="tnum w-7 shrink-0 text-right text-sm">{length}</span>
                 </div>
               </Row>
 
@@ -200,7 +200,7 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
                     onChange={(e) => setWords(Number(e.target.value))}
                     className="min-w-0 flex-1"
                   />
-                  <span className="tnum w-7 shrink-0 text-right text-[var(--text-sm)]">{words}</span>
+                  <span className="tnum w-7 shrink-0 text-right text-sm">{words}</span>
                 </div>
               </Row>
 
@@ -239,8 +239,8 @@ function Row({ label, hint, children }: { label: string; hint?: string; children
   return (
     <div className="flex items-center gap-4 border-b border-[var(--border-subtle)] py-3 last:border-b-0">
       <div className="min-w-0 flex-1">
-        <div className="text-[var(--text-md)]">{label}</div>
-        {hint && <div className="mt-0.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">{hint}</div>}
+        <div className="text-md">{label}</div>
+        {hint && <div className="mt-0.5 text-xs text-[var(--ink-tertiary)]">{hint}</div>}
       </div>
       <div className="flex shrink-0 items-center gap-1.5">{children}</div>
     </div>
@@ -255,7 +255,7 @@ function Check({ checked, onToggle, label, disabled }: {
   disabled?: boolean;
 }) {
   return (
-    <label className={`flex items-center gap-1.5 text-[var(--text-sm)] ${disabled ? 'opacity-60' : ''}`}>
+    <label className={`flex items-center gap-1.5 text-sm ${disabled ? 'opacity-60' : ''}`}>
       <input
         type="checkbox"
         checked={checked}

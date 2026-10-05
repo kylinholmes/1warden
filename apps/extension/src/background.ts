@@ -21,7 +21,7 @@
 import { ext } from './ext-api';
 import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
-  summaryOf, iconDomainOf, avatarOf,
+  summaryOf, iconDomainOf, avatarOf, searchItems,
   type AccountInfo, type FieldDescriptor, type VaultItem,
   type CaptureDecision,
   totpCode,
@@ -217,6 +217,7 @@ type Request =
   | { type: 'coffer:lock' }
   | { type: 'coffer:list' }
   | { type: 'coffer:matches'; url: string }
+  | { type: 'coffer:search'; query: string }
   | { type: 'coffer:fill'; itemId: string; tabId: number }
   | { type: 'coffer:generate'; length?: number; digits?: boolean; symbols?: boolean }
   | { type: 'coffer:pending'; tabId?: number }
@@ -422,6 +423,27 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       if (!session) return { unlocked: false, items: [] };
       // 匹配跑在这里 —— 只有这里同时握有完整的 uris 与站点地址
       return { unlocked: true, items: matchItemsByUrl(session.items, req.url).map(summarise) };
+    }
+
+    /**
+     * 搜索 —— **空 query 是「浏览整个保险库」**（收藏优先、然后按最近更新）。
+     *
+     * ⚠️ 和 `coffer:matches` 同一个理由放在后台：完整条目（含每个网址、
+     * 备注、自定义字段）只在后台这一份。把全量条目送去弹窗让它本地搜，
+     * 等于为了省一次消息把攻击面扩大一圈 —— 而弹窗是唯一跑在页面旁边、
+     * 和其它扩展共处一个进程的上下文。
+     *
+     * ⚠️ 用 `searchItems` 而不是在这里写个 `filter`：它带打分（精确 > 前缀 >
+     * 词首 > 包含 > 次要字段），而且**过滤掉已删除/已归档**的条目。
+     * 各写一份的话，「搜到了已删除的密码」这种事迟早会发生。
+     */
+    case 'coffer:search': {
+      const session = await sessions.load();
+      if (!session) return { unlocked: false, items: [] };
+      return {
+        unlocked: true,
+        items: searchItems(session.items, session.folders, req.query).map((h) => summarise(h.item)),
+      };
     }
 
     case 'coffer:fill': {

@@ -70,8 +70,8 @@ export function SecurityReportView({ items }: { items: readonly VaultItem[] }) {
     <div className="flex h-full flex-col">
       {/* 顶部的带子就是窗口的标题栏 —— 空白处可拖（见 VaultView 里那段注释） */}
       <header className="band shrink-0 px-8" data-tauri-drag-region="deep">
-        <h2 className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold">安全报告</h2>
-        <span className="shrink-0 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+        <h2 className="min-w-0 flex-1 truncate text-lg font-semibold">安全报告</h2>
+        <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">
           {report.total} 条记录
         </span>
       </header>
@@ -81,7 +81,7 @@ export function SecurityReportView({ items }: { items: readonly VaultItem[] }) {
           <ScoreCard score={report.score} grade={report.grade} report={report} />
 
           {report.total === 0 ? (
-            <p className="mt-8 text-center text-[var(--text-sm)] text-[var(--ink-tertiary)]">
+            <p className="mt-8 text-center text-sm text-[var(--ink-tertiary)]">
               保险库里还没有条目。加了记录之后这里会给出检查结果。
             </p>
           ) : (
@@ -95,7 +95,7 @@ export function SecurityReportView({ items }: { items: readonly VaultItem[] }) {
               >
                 {breachState !== 'on' ? (
                   <div className="px-4 py-3.5">
-                    <p className="text-[var(--text-xs)] leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
+                    <p className="text-xs leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
                       把密码的 <strong className="font-medium text-[var(--ink-primary)]">SHA-1 哈希前 5 个字符</strong>发给
                       Have I Been Pwned 查询，返回的候选在本地比对 ——
                       离开设备的只有这 5 个字符。这是本应用
@@ -110,7 +110,7 @@ export function SecurityReportView({ items }: { items: readonly VaultItem[] }) {
                       {breachState === 'checking' ? '查询中…' : '开启检查'}
                     </button>
                     {breachState === 'failed' && (
-                      <p className="mt-2.5 flex items-start gap-2 text-[var(--text-xs)] text-[var(--risk)]">
+                      <p className="mt-2.5 flex items-start gap-2 text-xs text-[var(--risk)]">
                         <IconAlert size={13} className="mt-0.5 shrink-0" />
                         <span>查询失败 —— 可能是网络不通。其余检查不受影响。</span>
                       </p>
@@ -163,7 +163,7 @@ export function SecurityReportView({ items }: { items: readonly VaultItem[] }) {
             </div>
           )}
 
-          <p className="mt-9 border-t border-[var(--border-subtle)] pt-5 text-[var(--text-xs)] leading-[var(--lh-prose)] text-[var(--ink-tertiary)]">
+          <p className="mt-9 border-t border-[var(--border-subtle)] pt-5 text-xs leading-[var(--lh-prose)] text-[var(--ink-tertiary)]">
             所有检查都在本地完成。「已泄露的密码」需要联网查询，默认关闭。
             评分的权重由 Coffer 自己定义，与 1Password 的算法无关。
           </p>
@@ -204,13 +204,13 @@ function ScoreCard({ score, grade, report }: {
   return (
     <section className="card-well p-5">
       <div className="flex items-end gap-4">
-        <span className="text-[var(--text-2xl)] font-semibold leading-none tabular-nums tracking-[-0.02em]" style={{ color }}>
+        <span className="text-2xl font-semibold leading-none tabular-nums tracking-[-0.02em]" style={{ color }}>
           {score}
         </span>
-        <span className="pb-0.5 text-[var(--text-md)] font-medium" style={{ color }}>
+        <span className="pb-0.5 text-md font-medium" style={{ color }}>
           {GRADE_LABEL[grade]}
         </span>
-        <span className="ml-auto pb-1 text-[var(--text-xs)] text-[var(--ink-tertiary)]">满分 100</span>
+        <span className="ml-auto pb-1 text-xs text-[var(--ink-tertiary)]">满分 100</span>
       </div>
 
       {/* 轨道要看得见 —— 0 分时一条全空的槽也比一片什么都没有清楚 */}
@@ -220,7 +220,7 @@ function ScoreCard({ score, grade, report }: {
           style={{ width: `${Math.max(score, 1.5)}%`, background: color }} />
       </div>
 
-      <p className="mt-3.5 text-[var(--text-sm)] leading-snug text-[var(--ink-secondary)]">
+      <p className="mt-3.5 text-sm leading-snug text-[var(--ink-secondary)]">
         {issues.length === 0
           ? '没有发现明显的问题。'
           : <>发现 <span className="font-medium text-[var(--ink-primary)]">{issues.join(' · ')}</span>。</>}
@@ -250,18 +250,18 @@ function Finding({ title, count, empty, children, tone, checked = true }: {
   return (
     <section className="card">
       <header className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
-        <h3 className="min-w-0 flex-1 truncate text-[var(--text-md)] font-medium">{title}</h3>
+        <h3 className="min-w-0 flex-1 truncate text-md font-medium">{title}</h3>
         {!checked ? (
-          <span className="shrink-0 rounded-full bg-[var(--surface-hover)] px-2 py-0.5 text-[var(--text-2xs)] font-medium text-[var(--ink-tertiary)]">
+          <span className="shrink-0 rounded-full bg-[var(--surface-hover)] px-2 py-0.5 text-2xs font-medium text-[var(--ink-tertiary)]">
             未检查
           </span>
         ) : clean ? (
-          <span className="flex shrink-0 items-center gap-1 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
+          <span className="flex shrink-0 items-center gap-1 text-xs text-[var(--ink-tertiary)]">
             <IconCheck size={13} />
             没问题
           </span>
         ) : (
-          <span className="shrink-0 rounded-full px-2 py-0.5 text-[var(--text-2xs)] font-semibold tabular-nums"
+          <span className="shrink-0 rounded-full px-2 py-0.5 text-2xs font-semibold tabular-nums"
             style={{ background: `color-mix(in oklab, ${color} 15%, transparent)`, color }}>
             {count}
           </span>
@@ -273,14 +273,14 @@ function Finding({ title, count, empty, children, tone, checked = true }: {
 }
 
 function Clean({ text }: { text: string }) {
-  return <p className="px-4 py-3.5 text-[var(--text-xs)] text-[var(--ink-tertiary)]">{text}</p>;
+  return <p className="px-4 py-3.5 text-xs text-[var(--ink-tertiary)]">{text}</p>;
 }
 
 function Row({ label, detail }: { label: string; detail: string }) {
   return (
     <div className="flex items-baseline justify-between gap-4 border-b border-[var(--border-subtle)] px-4 py-2.5 last:border-b-0">
-      <span className="min-w-0 shrink-0 truncate text-[var(--text-md)]">{label}</span>
-      <span className="min-w-0 truncate text-right text-[var(--text-xs)] text-[var(--ink-tertiary)]" title={detail}>
+      <span className="min-w-0 shrink-0 truncate text-md">{label}</span>
+      <span className="min-w-0 truncate text-right text-xs text-[var(--ink-tertiary)]" title={detail}>
         {detail}
       </span>
     </div>

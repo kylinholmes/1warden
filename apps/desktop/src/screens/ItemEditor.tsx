@@ -167,7 +167,7 @@ export function ItemEditor({ client, item, open, onDone, onCancel }: Props) {
       )}
     >
       <div className="panel-head">
-        <h2 id="editor-title" className="min-w-0 flex-1 truncate text-[var(--text-md)] font-medium">
+        <h2 id="editor-title" className="min-w-0 flex-1 truncate text-md font-medium">
           {isNew ? '新建条目' : '编辑条目'}
         </h2>
         <button
@@ -204,7 +204,7 @@ export function ItemEditor({ client, item, open, onDone, onCancel }: Props) {
                   type="button"
                   onClick={() => setType(patch, t)}
                   aria-pressed={draft.type === t}
-                  className={`flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] border px-1 py-3 text-[var(--text-xs)] transition-colors duration-[var(--dur-fast)] ${
+                  className={`flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] border px-1 py-3 text-xs transition-colors duration-[var(--dur-fast)] ${
                     draft.type === t
                       ? 'border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--ink-primary)]'
                       : 'border-[var(--border-subtle)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]'
@@ -264,7 +264,7 @@ export function ItemEditor({ client, item, open, onDone, onCancel }: Props) {
                   />
                   <button type="button" onClick={() => patchLogin({ password: generatePassword({ length: 20 }) })}
                     title="生成随机密码"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)] px-2 py-1 text-[var(--text-xs)] text-[var(--accent)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--accent-tint)]">
+                    className="absolute right-1 top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)] px-2 py-1 text-xs text-[var(--accent)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--accent-tint)]">
                     生成
                   </button>
                 </div>
@@ -404,7 +404,7 @@ function Group({ title, children }: { title?: string; children: React.ReactNode 
   return (
     <section className="mb-6 last:mb-0">
       {title && (
-        <h3 className="mb-2 text-[var(--text-xs)] font-medium text-[var(--ink-tertiary)]">{title}</h3>
+        <h3 className="mb-2 text-xs font-medium text-[var(--ink-tertiary)]">{title}</h3>
       )}
       <div className="card px-4">{children}</div>
     </section>
@@ -420,10 +420,10 @@ function Group({ title, children }: { title?: string; children: React.ReactNode 
 function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="flex items-start gap-3 border-b border-[var(--border-subtle)] py-3 last:border-b-0">
-      <span className="w-[76px] shrink-0 pt-[9px] text-[var(--text-sm)] text-[var(--ink-tertiary)]">{label}</span>
+      <span className="w-[76px] shrink-0 pt-[9px] text-sm text-[var(--ink-tertiary)]">{label}</span>
       <div className="min-w-0 flex-1">
         {children}
-        {hint && <span className="mt-1 block text-[var(--text-xs)] text-[var(--ink-tertiary)]">{hint}</span>}
+        {hint && <span className="mt-1 block text-xs text-[var(--ink-tertiary)]">{hint}</span>}
       </div>
     </div>
   );
@@ -471,7 +471,7 @@ function StrengthMeter({ value }: { value: string }) {
             style={{ background: i <= score ? STRENGTH_COLORS[score] : 'var(--border-subtle)' }} />
         ))}
       </span>
-      <span className="text-[var(--text-xs)] tabular-nums text-[var(--ink-tertiary)]">
+      <span className="text-xs tabular-nums text-[var(--ink-tertiary)]">
         {STRENGTH_LABELS[score]} · 约 {Math.round(entropyBits)} 位熵
       </span>
     </span>

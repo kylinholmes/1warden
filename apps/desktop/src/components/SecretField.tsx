@@ -57,12 +57,12 @@ export function SecretField({ label, value, masked = false }: Props) {
 
   return (
     <div className="group flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-b-0">
-      <span className="w-[76px] shrink-0 truncate text-[var(--text-sm)] text-[var(--ink-tertiary)]" title={label}>
+      <span className="w-[76px] shrink-0 truncate text-sm text-[var(--ink-tertiary)]" title={label}>
         {label}
       </span>
 
       <span
-        className={`secret min-w-0 flex-1 truncate text-[var(--text-md)] ${hidden ? 'tracking-[0.2em] text-[var(--ink-secondary)]' : ''}`}
+        className={`secret min-w-0 flex-1 truncate text-md ${hidden ? 'tracking-[0.2em] text-[var(--ink-secondary)]' : ''}`}
         title={hidden ? undefined : value}
       >
         {shown}

@@ -4,7 +4,8 @@ import { generatePassword, passwordStrength } from '@coffer/crypto';
 import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
-  IconAlert, IconCheck, IconCopy, IconGlobe, IconGlyph, IconKey, IconLock, IconSearch, IconStar,
+  IconAlert, IconCheck, IconClose, IconCopy, IconGlobe, IconGlyph, IconKey, IconLock,
+  IconSearch, IconSpinner, IconStar,
 } from '@coffer/ui';
 
 /**
@@ -22,7 +23,8 @@ import {
  * 浏览性的（生成器）排在最后。
  */
 
-interface ItemSummary {
+/** ⚠️ 导出是为了让 preview 的假数据用**同一个类型** —— 抄一份就会漂 */
+export interface ItemSummary {
   id: string;
   name: string;
   username: string | null;
@@ -100,6 +102,64 @@ export function Popup() {
   const [notice, setNotice] = useState<string | null>(null);
   const [pending, setPending] = useState<Pending | null>(null);
 
+  /*
+   * ── 主列表与搜索
+   *
+   * ⚠️ 之前这里没有这两样，于是「本站没有匹配条目」是一条**死胡同**：
+   * 只有一句话和一个生成器，用户够不到保险库里别的东西 —— 而那正是
+   * 打开弹窗的常见理由之一（「我记得存过，叫什么来着」）。
+   *
+   * 现在：空 query = 浏览整个保险库（`searchItems` 在空查询下就是浏览模式，
+   * 收藏优先、然后最近更新），有 query = 搜索。
+   */
+  const [query, setQuery] = useState('');
+  const [browse, setBrowse] = useState<ItemSummary[]>([]);
+  /** 搜索结果。`null` = 还没搜完 —— 和「搜到了 0 条」是两件事，不能混 */
+  const [hits, setHits] = useState<ItemSummary[] | null>(null);
+
+  // 解锁后拉一次主列表。锁定或登出时清掉 —— 留着的话下次解锁会先闪出旧数据
+  useEffect(() => {
+    if (!status?.unlocked) { setBrowse([]); return; }
+    let alive = true;
+    void send<{ items: ItemSummary[] }>({ type: 'coffer:search', query: '' })
+      .then((r) => { if (alive) setBrowse(r.items); })
+      // 拉不到主列表不该盖住整屏 —— 站点匹配还在，那才是最常见的用法
+      .catch(() => { if (alive) setBrowse([]); });
+    return () => { alive = false; };
+  }, [status?.unlocked]);
+
+  useEffect(() => {
+    const q = query.trim();
+    if (q === '') { setHits(null); return; }
+    let alive = true;
+    setHits(null);
+    /*
+     * 防抖：每敲一个字都发一条消息会把 service worker 反复唤醒
+     * （它空闲约 30 秒就被杀，每次都重新求值一遍整个模块）。
+     */
+    const t = setTimeout(() => {
+      void send<{ items: ItemSummary[] }>({ type: 'coffer:search', query: q })
+        .then((r) => { if (alive) setHits(r.items); })
+        .catch(() => { if (alive) setHits([]); });
+    }, 120);
+    return () => { alive = false; clearTimeout(t); };
+  }, [query]);
+
+  /** 填充一条。抽出来是因为现在有**三个**列表可能触发它（本站 / 其他 / 搜索结果） */
+  const fill = useCallback(async (itemId: string) => {
+    if (tabId === undefined) return;
+    setBusy(true); setError(null); setNotice(null);
+    try {
+      const r = await send<{ ok: boolean; failed: unknown[] }>({
+        type: 'coffer:fill', itemId, tabId,
+      });
+      if (r.ok) { setNotice('已填充'); window.close(); }
+      else setError(`有 ${r.failed.length} 个字段没填成功 —— 页面可能改版了`);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '填充失败');
+    } finally { setBusy(false); }
+  }, [tabId]);
+
   const refresh = useCallback(async () => {
     const tabs = await ext.tabs.query({ active: true, currentWindow: true });
     const tab = tabs[0];
@@ -130,7 +190,7 @@ export function Popup() {
     return (
       <div className="flex flex-col">
         <PopupBand />
-        <p className="p-4 text-[var(--text-sm)] text-[var(--ink-tertiary)]">正在载入…</p>
+        <p className="p-4 text-sm text-[var(--ink-tertiary)]">正在载入…</p>
       </div>
     );
   }
@@ -181,23 +241,52 @@ export function Popup() {
         ) : (
           <>
             <SiteLine url={tabUrl} account={status.account?.email ?? null} />
-            {items.length === 0
-              ? <Empty reason={tabUrl ? '这个站点没有匹配的条目' : '当前标签页不是网页'} />
-              : items.map((it) => (
-                <ItemRow key={it.id} item={it} icons={icons} onFill={async () => {
-                  if (tabId === undefined) return;
-                  setBusy(true); setError(null); setNotice(null);
-                  try {
-                    const r = await send<{ ok: boolean; failed: unknown[] }>({
-                      type: 'coffer:fill', itemId: it.id, tabId,
-                    });
-                    if (r.ok) { setNotice('已填充'); window.close(); }
-                    else setError(`有 ${r.failed.length} 个字段没填成功 —— 页面可能改版了`);
-                  } catch (e) {
-                    setError(e instanceof Error ? e.message : '填充失败');
-                  } finally { setBusy(false); }
-                }} />
-              ))}
+            <SearchBox value={query} onChange={setQuery} />
+
+            {/*
+              列表区**自己滚**，不让整个弹窗长起来 ——
+              否则几十条条目会把搜索框和生成器顶出可视范围，
+              而那两个恰恰是列表变长时更需要够得着的东西。
+            */}
+            <div className="flex max-h-[340px] flex-col gap-3 overflow-y-auto">
+              {query.trim() !== '' ? (
+                hits === null ? (
+                  <p className="px-1 py-4 text-center text-xs text-[var(--ink-tertiary)]">
+                    正在搜索…
+                  </p>
+                ) : hits.length === 0 ? (
+                  <Empty
+                    reason={`没有找到和「${query.trim()}」有关的条目`}
+                    hint="搜索会匹配名称、用户名、网址和备注"
+                  />
+                ) : (
+                  <ItemList label="搜索结果" items={hits} icons={icons} onFill={fill} />
+                )
+              ) : (
+                <>
+                  {items.length > 0 && (
+                    <ItemList label="此站点" items={items} icons={icons} onFill={fill} />
+                  )}
+                  {/*
+                    ⚠️ 没有匹配时**不能只给一句空状态** —— 那是一条死胡同。
+                    改成一句提示 + 下面的完整列表：用户仍然够得到保险库里
+                    别的东西，而这本来就是打开弹窗的常见理由之一。
+                  */}
+                  {items.length === 0 && tabUrl !== '' && (
+                    <p className="px-1 text-2xs leading-relaxed text-[var(--ink-tertiary)]">
+                      这个站点还没有匹配的条目 —— 在 Coffer 里给条目加上网址，这里就能匹配到
+                    </p>
+                  )}
+                  <ItemList
+                    label={items.length > 0 ? '其他条目' : '全部条目'}
+                    items={browse.filter((b) => !items.some((m) => m.id === b.id))}
+                    icons={icons}
+                    onFill={fill}
+                  />
+                </>
+              )}
+            </div>
+
             <Generator />
           </>
         )}
@@ -213,7 +302,7 @@ function PopupBand({ unlocked, onLock }: { unlocked?: boolean; onLock?: () => vo
       <span className="grid h-[22px] w-[22px] place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
         <IconLock size={13} />
       </span>
-      <span className="min-w-0 flex-1 truncate text-[var(--text-lg)] font-semibold tracking-[-0.01em]">
+      <span className="min-w-0 flex-1 truncate text-lg font-semibold tracking-[-0.01em]">
         Coffer
       </span>
       {unlocked && onLock && (
@@ -244,10 +333,10 @@ function SavePrompt({ pending, busy, onSave, onDismiss }: {
 
   return (
     <div className="rounded-[var(--radius-md)] border border-[var(--accent)] bg-[var(--accent-tint)] p-3">
-      <p className="text-[var(--text-sm)] font-medium">
+      <p className="text-sm font-medium">
         {pending.action === 'update' ? '更新这条登录？' : '保存这条登录？'}
       </p>
-      <p className="mt-0.5 truncate text-[var(--text-xs)] text-[var(--ink-secondary)]" title={pending.url}>
+      <p className="mt-0.5 truncate text-xs text-[var(--ink-secondary)]" title={pending.url}>
         {host}
         {pending.username ? ` · ${pending.username}` : ''}
       </p>
@@ -268,11 +357,11 @@ function SiteLine({ url, account }: { url: string; account: string | null }) {
   return (
     <div className="flex items-center gap-2 px-0.5">
       <IconGlobe size={13} className="shrink-0 text-[var(--ink-tertiary)]" />
-      <span className="min-w-0 flex-1 truncate text-[var(--text-xs)] text-[var(--ink-secondary)]" title={url}>
+      <span className="min-w-0 flex-1 truncate text-xs text-[var(--ink-secondary)]" title={url}>
         {host || '（无站点）'}
       </span>
       {account && (
-        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-[var(--text-xs)] text-[var(--ink-tertiary)]" title={account}>
+        <span className="min-w-0 max-w-[45%] shrink-0 truncate text-xs text-[var(--ink-tertiary)]" title={account}>
           {account}
         </span>
       )}
@@ -323,11 +412,11 @@ function ItemRow({ item, icons, onFill }: { item: ItemSummary; icons: IconStore 
         />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
-            <span className="min-w-0 truncate text-[var(--text-md)] leading-snug">{item.name}</span>
+            <span className="min-w-0 truncate text-md leading-snug">{item.name}</span>
             {item.favorite && <IconStar size={12} filled className="shrink-0 text-[var(--caution)]" />}
           </span>
           {item.username && (
-            <span className="mt-0.5 block truncate text-[var(--text-xs)] leading-snug text-[var(--ink-tertiary)]">
+            <span className="mt-0.5 block truncate text-xs leading-snug text-[var(--ink-tertiary)]">
               {item.username}
             </span>
           )}
@@ -349,14 +438,14 @@ function ItemRow({ item, icons, onFill }: { item: ItemSummary; icons: IconStore 
           ))}
           {/* 复制后会清空剪贴板，把这件事说出来 —— 否则用户过一会儿粘贴不出来
               会以为是坏了 */}
-          <span className="ml-auto shrink-0 pr-1 text-[var(--text-2xs)] text-[var(--ink-tertiary)]">
+          <span className="ml-auto shrink-0 pr-1 text-2xs text-[var(--ink-tertiary)]">
             30 秒后清空
           </span>
         </div>
       )}
 
       {error && (
-        <p className="mt-1.5 flex items-start gap-1.5 text-[var(--text-xs)] text-[var(--risk)]">
+        <p className="mt-1.5 flex items-start gap-1.5 text-xs text-[var(--risk)]">
           <IconAlert size={12} className="mt-0.5 shrink-0" />
           <span>{error}</span>
         </p>
@@ -365,17 +454,73 @@ function ItemRow({ item, icons, onFill }: { item: ItemSummary; icons: IconStore 
   );
 }
 
+/**
+ * 搜索框。
+ *
+ * 没有它的话，「找不到匹配」的站点就是条死胡同 —— 用户没法去够保险库里
+ * 别的东西。有了它，弹窗从「这个站点的查看器」变成「保险库的入口」。
+ *
+ * 用 `<label>` 包住输入框而不是配一个 `aria-label`：整块可点，
+ * 点图标和留白处都能聚焦，弹窗里这一下省得不小。
+ */
+function SearchBox({ value, onChange }: { value: string; onChange: (v: string) => void }) {
+  return (
+    <label className="flex items-center gap-2 rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-paper)] px-2.5 py-1.5 transition-colors duration-[var(--dur-fast)] focus-within:border-[var(--accent)]">
+      <IconSearch size={14} className="shrink-0 text-[var(--ink-tertiary)]" />
+      <input
+        type="search"
+        value={value}
+        placeholder="搜索保险库"
+        onChange={(e) => onChange(e.target.value)}
+        className="min-w-0 flex-1 bg-transparent text-sm text-[var(--ink-primary)] outline-none placeholder:text-[var(--ink-tertiary)]"
+      />
+      {value !== '' && (
+        <button
+          type="button"
+          onClick={() => onChange('')}
+          aria-label="清除搜索"
+          className="shrink-0 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:text-[var(--ink-secondary)]"
+        >
+          <IconClose size={13} />
+        </button>
+      )}
+    </label>
+  );
+}
+
+/**
+ * 一组带标题的条目。
+ *
+ * 分组标题是这里唯一的层级信号 —— 弹窗里没有侧栏、没有面包屑，
+ * 「这些是本站的」和「这些是别的」只能靠一行小字说清楚。
+ * 空组**整个不渲染**（包括标题）：标题下面什么都没有比没有标题更糟。
+ */
+function ItemList({ label, items, icons, onFill }: {
+  label: string;
+  items: ItemSummary[];
+  icons: IconStore | null;
+  onFill: (itemId: string) => void;
+}) {
+  if (items.length === 0) return null;
+  return (
+    <section className="flex flex-col gap-2">
+      <h2 className="px-1 text-2xs font-medium text-[var(--ink-tertiary)]">{label}</h2>
+      {items.map((it) => (
+        <ItemRow key={it.id} item={it} icons={icons} onFill={() => onFill(it.id)} />
+      ))}
+    </section>
+  );
+}
+
 /** 空状态要说明**为什么**空，并给出下一步 —— 一句「没有结果」等于没说 */
-function Empty({ reason }: { reason: string }) {
+function Empty({ reason, hint }: { reason: string; hint: string }) {
   return (
     <div className="card-well px-4 py-7 text-center">
       <span className="mx-auto mb-2.5 grid h-9 w-9 place-items-center rounded-full bg-[var(--surface-paper)] text-[var(--ink-tertiary)]">
         <IconSearch size={17} />
       </span>
-      <p className="text-[var(--text-sm)] text-[var(--ink-secondary)]">{reason}</p>
-      <p className="mt-1 text-[var(--text-xs)] text-[var(--ink-tertiary)]">
-        在 Coffer 里把网址加到对应条目上，这里就能匹配到
-      </p>
+      <p className="text-sm text-[var(--ink-secondary)]">{reason}</p>
+      <p className="mt-1 text-xs text-[var(--ink-tertiary)]">{hint}</p>
     </div>
   );
 }
@@ -383,7 +528,7 @@ function Empty({ reason }: { reason: string }) {
 function Note({ tone, children }: { tone: 'risk' | 'accent'; children: React.ReactNode }) {
   const color = tone === 'risk' ? 'var(--risk)' : 'var(--ink-secondary)';
   return (
-    <p className="flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2 text-[var(--text-sm)]"
+    <p className="flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2 text-sm"
       role="status">
       {tone === 'risk' && <IconAlert size={14} className="mt-0.5 shrink-0" style={{ color }} />}
       <span className="min-w-0 flex-1" style={{ color }}>{children}</span>
@@ -391,6 +536,21 @@ function Note({ tone, children }: { tone: 'risk' | 'accent'; children: React.Rea
   );
 }
 
+/**
+ * 连接表单（还没登录时）。
+ *
+ * 版面对齐桌面端的 `Connect.tsx` —— 两端是同一个产品，这一屏又是新用户
+ * 见到的**第一屏**，两边长得不一样的话「统一」就无从谈起。
+ *
+ * 和早先相比改了三处，都是那一屏显得「丑」的具体原因：
+ *
+ * 1. **标签可见**，不再靠 placeholder。placeholder 一打字就没了，
+ *    用户回看时不知道那一格原来要填什么；读屏软件也读不到它当标签用。
+ * 2. **说明文字挪到最下面**。它是一句安心的脚注（「永不发送到服务器」），
+ *    不是操作指引，摆在第一个输入框上面会把表单的起点压下去。
+ * 3. **间距分组**：字段之间 `gap-4`、按钮和脚注各自分开，
+ *    早先全部 `gap-2.5` 等距 —— 等距等于没有分组。
+ */
 function ConnectForm({ busy, onSubmit }: {
   busy: boolean;
   onSubmit: (p: { serverUrl: string; email: string; masterPassword: string }) => void;
@@ -400,29 +560,59 @@ function ConnectForm({ busy, onSubmit }: {
   const [masterPassword, setMasterPassword] = useState('');
 
   return (
-    <form className="flex flex-col gap-2.5" onSubmit={(e) => {
+    <form className="flex flex-col gap-4" onSubmit={(e) => {
       e.preventDefault();
       onSubmit({ serverUrl: serverUrl.trim(), email: email.trim(), masterPassword });
     }}>
-      <p className="text-[var(--text-xs)] leading-relaxed text-[var(--ink-tertiary)]">
-        主密码只在本地用于派生密钥，永不发送到服务器。
-      </p>
-      <input required type="url" value={serverUrl} placeholder="https://vault.example.com"
-        aria-label="服务器地址"
-        onChange={(e) => setServerUrl(e.target.value)}
-        className="field text-[var(--text-sm)]" />
-      <input required type="email" value={email} placeholder="邮箱"
-        aria-label="邮箱"
-        onChange={(e) => setEmail(e.target.value)}
-        className="field text-[var(--text-sm)]" />
-      <input required type="password" value={masterPassword} placeholder="主密码"
-        aria-label="主密码"
-        onChange={(e) => setMasterPassword(e.target.value)}
-        className="field secret text-[var(--text-sm)]" />
-      <button type="submit" disabled={busy} className="btn btn-primary py-2.5">
+      <h1 className="text-md font-medium text-[var(--ink-secondary)]">
+        连接到你的 Vaultwarden
+      </h1>
+
+      <Field label="服务器地址">
+        <input required type="url" value={serverUrl} autoFocus
+          placeholder="https://vault.example.com"
+          onChange={(e) => setServerUrl(e.target.value)}
+          className="field text-sm" />
+      </Field>
+
+      <Field label="邮箱">
+        <input required type="email" value={email}
+          autoFocus={serverUrl !== ''}
+          onChange={(e) => setEmail(e.target.value)}
+          className="field text-sm" />
+      </Field>
+
+      <Field label="主密码">
+        <input required type="password" value={masterPassword} disabled={busy}
+          onChange={(e) => setMasterPassword(e.target.value)}
+          className="field secret text-sm" />
+      </Field>
+
+      <button type="submit" disabled={busy} className="btn btn-primary w-full py-2.5">
+        {busy && <IconSpinner size={15} />}
         {busy ? '正在解锁…' : '解锁'}
       </button>
+
+      {/*
+        ⚠️ 这里就是将来放「连接到本地 Coffer 服务」的位置 —— 一个安静按钮，
+        和上面那个主动作分开。现在不放：一个按不动的入口比没有入口更糟。
+      */}
+      <p className="text-xs leading-relaxed text-[var(--ink-tertiary)]">
+        主密码只在本地用于派生密钥，<strong className="font-medium">永不发送到服务器</strong>。
+      </p>
     </form>
+  );
+}
+
+/** 带可见标签的字段 —— 和桌面端 `Connect.tsx` 里那个一致 */
+function Field({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <label className="block">
+      <span className="mb-1.5 block text-xs font-medium text-[var(--ink-secondary)]">
+        {label}
+      </span>
+      {children}
+    </label>
   );
 }
 
@@ -444,7 +634,7 @@ function Generator() {
   return (
     <div className="card p-3">
       <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 text-[var(--text-xs)] font-medium text-[var(--ink-tertiary)]">
+        <span className="min-w-0 flex-1 text-xs font-medium text-[var(--ink-tertiary)]">
           生成密码
         </span>
         <button onClick={() => setValue(generatePassword({ length, digits, symbols }))}
@@ -452,7 +642,7 @@ function Generator() {
       </div>
 
       <div className="mt-2 flex items-center gap-2">
-        <code className="secret min-w-0 flex-1 truncate rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-2 py-1.5 text-[var(--text-sm)]">
+        <code className="secret min-w-0 flex-1 truncate rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-2 py-1.5 text-sm">
           {value}
         </code>
         <button
@@ -476,13 +666,13 @@ function Generator() {
         </button>
       </div>
 
-      <label className="mt-2.5 flex items-center gap-2 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+      <label className="mt-2.5 flex items-center gap-2 text-xs text-[var(--ink-secondary)]">
         长度
         <input type="range" min={8} max={64} value={length}
           onChange={(e) => setLength(Number(e.target.value))} className="flex-1" />
         <span className="tnum w-6 text-right">{length}</span>
       </label>
-      <div className="mt-1.5 flex gap-4 text-[var(--text-xs)] text-[var(--ink-secondary)]">
+      <div className="mt-1.5 flex gap-4 text-xs text-[var(--ink-secondary)]">
         <label className="flex items-center gap-1.5">
           <input type="checkbox" checked={digits} onChange={(e) => setDigits(e.target.checked)} />
           包含数字
@@ -501,7 +691,7 @@ function Generator() {
               background: strength.score >= 3 ? 'var(--safe)' : strength.score >= 2 ? 'var(--caution)' : 'var(--risk)',
             }} />
           </div>
-          <span className="shrink-0 text-[var(--text-2xs)] tabular-nums text-[var(--ink-tertiary)]">
+          <span className="shrink-0 text-2xs tabular-nums text-[var(--ink-tertiary)]">
             约 {Math.round(strength.entropyBits)} 位熵
           </span>
         </div>
