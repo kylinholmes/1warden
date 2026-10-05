@@ -20,6 +20,7 @@
  */
 import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
+  summaryOf, iconDomainOf, avatarOf,
   type AccountInfo, type FieldDescriptor, type VaultItem,
   type CaptureDecision,
   totpCode,
@@ -684,6 +685,11 @@ function summarise(i: VaultItem) {
     hasTotp: i.login?.totp != null,
     uris: i.login?.uris.map((u) => u.uri) ?? [],
     favorite: i.favorite,
+    // 显示用的三个 —— 见 Popup.tsx 里 ItemSummary 的说明
+    type: i.type,
+    summary: summaryOf(i),
+    iconDomain: iconDomainOf(i),
+    ...(() => { const a = avatarOf(i); return { avatarText: a.text, avatarHue: a.hue }; })(),
   };
 }
 

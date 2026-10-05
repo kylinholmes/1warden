@@ -13,3 +13,4 @@
  * 那时候「三栏 → 折叠 → 竖向」的响应式布局才有地方落。
  */
 export * from './icons';
+export * from './ItemIcon';

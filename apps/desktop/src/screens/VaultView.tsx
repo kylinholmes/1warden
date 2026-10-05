@@ -3,7 +3,7 @@ import { searchItems, totpCode, hasTotp, summaryOf, type VaultItem, type VaultFo
 import type { VaultClient, IconStore } from '@coffer/vault';
 import { saveFile } from '../save';
 import { iconStoreFor } from '../icon-store';
-import { ItemIcon } from '../components/ItemIcon';
+import { ItemIcon } from '@coffer/ui';
 import { SecretField } from '../components/SecretField';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';

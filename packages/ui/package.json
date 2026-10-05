@@ -9,7 +9,8 @@
     "./components.css": "./src/components.css"
   },
   "dependencies": {
-    "react": "^19.0.0"
+    "react": "^19.0.0",
+    "@coffer/vault": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0"

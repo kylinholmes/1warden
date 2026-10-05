@@ -1,7 +1,8 @@
 import { useEffect, useRef, useState } from 'react';
 import type { QuickItem } from '../quick-bridge';
 import { IconLock, IconSearch } from '@coffer/ui';
-import { IconGlyph } from '../components/ItemIcon';
+
+import { IconGlyph } from '@coffer/ui';
 import type { IconStore } from '@coffer/vault';
 
 /**

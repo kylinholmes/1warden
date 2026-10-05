@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { generatePassword, passwordStrength } from '@coffer/crypto';
+import { IconStore } from '@coffer/vault';
+import { iconStoreFor } from '../icon-store';
 import {
-  IconAlert, IconCheck, IconCopy, IconGlobe, IconKey, IconLock, IconSearch, IconStar,
+  IconAlert, IconCheck, IconCopy, IconGlobe, IconGlyph, IconKey, IconLock, IconSearch, IconStar,
 } from '@coffer/ui';
 
 /**
@@ -27,6 +29,19 @@ interface ItemSummary {
   hasTotp: boolean;
   uris: string[];
   favorite: boolean;
+
+  /*
+   * ── 显示用的字段 ──
+   *
+   * ⚠️ 和桌面端的快速面板同一个做法：弹窗**拿不到 `VaultItem`**
+   * （它只从 background 收摘要），所以 `summaryOf` / `avatarOf` 那套规则
+   * 在 background 那边算好、随摘要过来。不这样做的话规则要在两处各写一遍。
+   */
+  type: string;
+  summary: string | null;
+  iconDomain: string | null;
+  avatarText: string;
+  avatarHue: number;
 }
 
 interface Status {
@@ -58,6 +73,25 @@ async function send<T>(msg: Record<string, unknown>): Promise<T> {
 export function Popup() {
   const [status, setStatus] = useState<Status | null>(null);
   const [items, setItems] = useState<ItemSummary[]>([]);
+  /*
+   * 站点图标的缓存。
+   *
+   * 弹窗自己有 host_permissions（匹配所有 http/https），所以**可以直接
+   * fetch** 服务端的图标接口 —— 不用绕 background。桌面端那边不行
+   * （跨源被 CORS 拦），它得走 Rust。这是两边唯一的分歧点。
+   *
+   * 和桌面端一样是**模块级单例**：弹窗每次打开都重建的话缓存等于没有，
+   * 而服务端首次抓一个图标要 1.5 秒。
+   */
+  const icons = useMemo(() => {
+    const url = status?.account?.serverUrl;
+    if (!url) return null;
+    return iconStoreFor(url, async (u) => {
+      const r = await fetch(u);
+      if (!r.ok) return null;
+      return new Uint8Array(await r.arrayBuffer());
+    });
+  }, [status?.account?.serverUrl]);
   const [tabUrl, setTabUrl] = useState('');
   const [tabId, setTabId] = useState<number | undefined>(undefined);
   const [busy, setBusy] = useState(false);
@@ -149,7 +183,7 @@ export function Popup() {
             {items.length === 0
               ? <Empty reason={tabUrl ? '这个站点没有匹配的条目' : '当前标签页不是网页'} />
               : items.map((it) => (
-                <ItemRow key={it.id} item={it} onFill={async () => {
+                <ItemRow key={it.id} item={it} icons={icons} onFill={async () => {
                   if (tabId === undefined) return;
                   setBusy(true); setError(null); setNotice(null);
                   try {
@@ -252,7 +286,7 @@ function SiteLine({ url, account }: { url: string; account: string | null }) {
  * 用户常常是「复制密码 → 去别处粘贴」，而不是在网页表单里填。
  * 所以两者都得在，而且复制要够快（一次点击，不用展开菜单）。
  */
-function ItemRow({ item, onFill }: { item: ItemSummary; onFill: () => void }) {
+function ItemRow({ item, icons, onFill }: { item: ItemSummary; icons: IconStore | null; onFill: () => void }) {
   const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
@@ -279,9 +313,13 @@ function ItemRow({ item, onFill }: { item: ItemSummary; onFill: () => void }) {
   return (
     <div className="card p-2.5">
       <div className="flex items-center gap-2.5">
-        <span className="tile" data-type="login">
-          <IconKey size={16} />
-        </span>
+        <IconGlyph
+          domain={item.iconDomain}
+          text={item.avatarText}
+          hue={item.avatarHue}
+          type={item.type}
+          store={icons}
+        />
         <span className="min-w-0 flex-1">
           <span className="flex items-center gap-1.5">
             <span className="min-w-0 truncate text-[var(--text-md)] leading-snug">{item.name}</span>

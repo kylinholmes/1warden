@@ -24,14 +24,15 @@
  *
  * ## 两个入口
  *
- * `ItemIcon` 收条目、`IconGlyph` 收算好的字段。后者是给**另一个窗口**用的
- * （快速面板拿不到 `VaultItem`，字段由主窗口算好过桥）——
- * 两条路共用这一个实现，规则就不会在两个窗口里长歪。
+ * `ItemIcon` 收条目、`IconGlyph` 收算好的字段。后者是给**拿不到 VaultItem
+ * 的地方**用的（快速面板在另一个窗口、扩展端的弹窗只拿到摘要）——
+ * 字段由有 VaultItem 的那一方算好过桥。两条路共用这一个实现，
+ * 规则就不会在几处之间长歪。
  */
 import { useEffect, useState } from 'react';
 import { avatarOf, iconDomainOf, type VaultItem } from '@coffer/vault';
 import type { IconStore } from '@coffer/vault';
-import { TypeIcon } from '@coffer/ui';
+import { TypeIcon } from './icons';
 
 export function ItemIcon({ item, store }: { item: VaultItem; store: IconStore | null }) {
   const avatar = avatarOf(item);
