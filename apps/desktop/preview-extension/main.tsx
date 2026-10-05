@@ -233,6 +233,13 @@ if (new URLSearchParams(location.search).get('state') === 'reveal') {
       .find((b) => b.textContent?.includes('GitHub'))?.click();
   }, 400);
   setTimeout(() => {
-    document.querySelector<HTMLButtonElement>('button[aria-label="显示"]')?.click();
+    /*
+     * **把所有「显示」都点一遍** —— 密码和隐藏的自定义字段走的是**两条
+     * 不同的消息**（`coffer:reveal` / `coffer:reveal-custom`），而两条桩
+     * 回的值不同，所以一张截图就能分辨各自有没有走对。
+     */
+    for (const b of document.querySelectorAll<HTMLButtonElement>('button[aria-label="显示"]')) {
+      b.click();
+    }
   }, 900);
 }

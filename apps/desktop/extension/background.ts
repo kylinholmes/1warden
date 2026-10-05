@@ -245,6 +245,7 @@ type Request =
   | { type: 'coffer:save-capture'; tabId?: number }
   | { type: 'coffer:dismiss-capture'; tabId?: number }
   | { type: 'coffer:reveal'; itemId: string; field: 'username' | 'password' | 'totp' }
+  | { type: 'coffer:reveal-custom'; itemId: string; index: number }
   | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: 'coffer:webauthn'; payload: unknown };
 
@@ -566,6 +567,16 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
         identity: i.identity,
         sshKey: i.sshKey,
         secureNote: i.secureNote,
+        /*
+         * 自定义字段 —— ⚠️ **隐藏字段（type 1）的值不回**，只回名字。
+         * 人们恰恰把密钥、PIN 这种东西放进隐藏字段，所以它必须走
+         * `coffer:reveal-custom` 一个一个要，和密码同一个规矩。
+         */
+        customFields: i.customFields.map((f) => ({
+          name: f.name,
+          type: f.type,
+          value: f.type === 1 ? null : f.value,
+        })),
       };
     }
 
@@ -929,6 +940,22 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       if (result['ok'] === true) await writeDone(key, result);
       else await releaseClaim(key);
       return result;
+    }
+
+    /*
+     * 自定义字段的揭示。
+     *
+     * ⚠️ 单独一条消息，**不并进 `coffer:reveal`** —— 那个 handler 开头就
+     * `if (!item?.login) throw`，而自定义字段和 login 无关：一条安全笔记
+     * 照样可以有隐藏字段。
+     */
+    case 'coffer:reveal-custom': {
+      const session = await sessions.load();
+      if (!session) throw new Error('保险库未解锁');
+      const item = session.items.find((i) => i.id === req.itemId);
+      const field = item?.customFields[req.index];
+      if (!field) throw new Error('找不到这个自定义字段');
+      return { value: field.value };
     }
 
     case 'coffer:reveal': {

@@ -44,6 +44,8 @@ interface ExtraFields {
   identity: Record<string, unknown> | null;
   sshKey: { publicKey: string | null; fingerprint: string | null; privateKey: string | null } | null;
   secureNote: { type: number } | null;
+  /** 隐藏字段（type 1）的 `value` 是 `null` —— 要走揭示才拿得到，和密码同一个规矩 */
+  customFields: { name: string; type: number; value: string | null }[];
 }
 
 
@@ -220,6 +222,37 @@ export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
               .map(([k, v]) => (
                 <SecretField key={k} label={IDENTITY_LABEL[k] ?? k} value={v as string} />
               ))}
+          </Section>
+        )}
+
+        {/*
+          ⚠️ 自定义字段在弹窗里以前**完全不显示** —— 而它是「我把 PIN /
+          安全问题答案存在这儿」的地方。桌面端一直有，弹窗没有。
+        */}
+        {extra && extra.customFields.length > 0 && (
+          <Section title="自定义字段">
+            {extra?.customFields.map((f, i) => (
+              <SecretField
+                key={`${f.name}-${i}`}
+                label={f.name}
+                /* 隐藏字段的值没过来，占位点由 `revealed` 补 —— 见 SecretField */
+                value={f.value ?? '••••••••'}
+                {...(f.value === null
+                  ? {
+                      masked: true,
+                      revealValue: async () => {
+                        const res = await ext.runtime.sendMessage({
+                          type: 'coffer:reveal-custom', itemId: item.id, index: i,
+                        }) as { value?: string; error?: string };
+                        if (res?.error) throw new Error(res.error);
+                        return res?.value ?? '';
+                      },
+                    }
+                  : {})}
+                onCopied={noLocalClear}
+                onCopyError={(e) => setError(e instanceof Error ? e.message : '复制失败')}
+              />
+            ))}
           </Section>
         )}
 

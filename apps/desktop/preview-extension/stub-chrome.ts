@@ -114,6 +114,12 @@ function summarise(item: VaultItem): ItemSummary {
   };
 }
 
+/** 一条文本 + 一条隐藏 —— 两种情况都要能在预览里看到 */
+const CUSTOM_FIELDS = [
+  { name: '组织', type: 0, value: 'acme-corp' },
+  { name: 'PIN 码', type: 1, value: null },
+];
+
 /** 站点匹配：只按 host 粗判，够撑开界面就行 —— 真实匹配在 background 里 */
 const MATCH_IDS = new Set(['1', '2']);
 
@@ -150,8 +156,13 @@ export function stubChrome(): void {
       case 'coffer:item': {
         const it = ITEMS.find((x) => x.id === String(msg.itemId));
         return { notes: it?.notes ?? null, card: it?.card ?? null, identity: it?.identity ?? null,
-                 sshKey: it?.sshKey ?? null, secureNote: it?.secureNote ?? null };
+                 sshKey: it?.sshKey ?? null, secureNote: it?.secureNote ?? null,
+                 /* 隐藏字段（type 1）的 value 回 null —— 和真实后台同一个规矩，
+                    否则预览里看到的「隐藏字段也直接显示」是产品不会有的样子 */
+                 customFields: CUSTOM_FIELDS };
       }
+      case 'coffer:reveal-custom':
+        return { value: '482913' };
       /*
        * ⚠️ 这里回的 `skipped` 必须是**逐条的行号 + 原因**，不是只回个数。
        *
@@ -254,7 +265,18 @@ export function stubChrome(): void {
        * 桩照形状回，预览里那个眼睛按钮才是真的在验东西。
        */
       case 'coffer:reveal':
-        return { value: 'kJ8#mPq2$vXn9!wZt4&bR' };
+        /*
+         * ⚠️ **按字段回不同的值。**
+         *
+         * 第一版对所有字段回同一个串，于是截图里「验证码」显示的是密码的值 ——
+         * 桩在骗人。而那个样子和「产品把两个字段接错了」长得一模一样，
+         * 本文件顶上写着「仪器骗人比没有仪器更糟」。
+         */
+        return {
+          value: msg.field === 'totp' ? '418902'
+            : msg.field === 'username' ? 'me@example.com'
+            : 'kJ8#mPq2$vXn9!wZt4&bR',
+        };
       case 'coffer:pending':
         return which === 'pending'
           ? { pending: { url: 'https://github.com/session', username: 'me@example.com', action: 'save', itemId: null } }
