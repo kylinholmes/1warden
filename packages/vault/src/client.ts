@@ -87,6 +87,8 @@ export class VaultClient {
   private readonly onPhase: ((label: string, ms: number) => void) | undefined;
   /** 连接起点。只给 `mark` 用 —— 诊断用，不参与任何逻辑 */
   private connectT0 = 0;
+  /** `connect` 算出来的 KDF 参数 —— 两步验证的第二段要用，见那里的说明 */
+  private pendingKdf: KdfConfig | null = null;
 
   /**
    * 报一次「从点登录到现在」的累计耗时。
@@ -205,11 +207,20 @@ export class VaultClient {
       }
       : { kdf: KDF_TYPE_PBKDF2, iterations: pl.iterations };
 
+    /*
+     * ⚠️ 存下来给 `connectWithTwoFactor` 用。
+     *
+     * 两步验证会把这次连接**分成两段调用**，而第二段同样要存解锁缓存 ——
+     * 没有这个字段的话它只能再问一次服务端，也就是在最慢的那条链路上
+     * 白白多一轮往返。
+     */
+    this.pendingKdf = kdf;
+
     const masterKey = await deriveMasterKey(params.masterPassword, params.email, kdf);
     this.mark('派生主密钥');
     const masterPasswordHash = await hashMasterPassword(masterKey, params.masterPassword);
 
-    await this.finishConnect(bare, params, masterKey, masterPasswordHash, undefined);
+    await this.finishConnect(bare, params, masterKey, masterPasswordHash, undefined, kdf);
   }
 
   async connectWithTwoFactor(code: string, provider: number, remember: boolean): Promise<void> {
@@ -217,9 +228,11 @@ export class VaultClient {
     if (!params) throw new Error('没有待完成的两步验证流程');
     if (!this.masterKey) throw new Error('内部状态丢失，请重新开始登录');
 
+    if (!this.pendingKdf) throw new Error('内部状态丢失，请重新开始登录');
     const bare = this.makeHttp(params.serverUrl);
     const hash = await hashMasterPassword(this.masterKey, params.masterPassword);
-    await this.finishConnect(bare, params, this.masterKey, hash, { token: code, provider, remember });
+    await this.finishConnect(bare, params, this.masterKey, hash,
+      { token: code, provider, remember }, this.pendingKdf);
   }
 
   /**
@@ -252,6 +265,20 @@ export class VaultClient {
     return { token, userKey: { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) } };
   }
 
+  /**
+   * 问服务端这个账户的 KDF 参数。
+   *
+   * ⚠️ 两条路**共用这一个方法**，不各写一遍：那个 `??` 的默认值
+   * （Argon2 的 memory/parallelism）写错一处就会算出错误的主密钥，
+   * 而症状是「密码明明对却打不开」—— 极难联想到是这个转换。
+   */
+  private async preloginKdf(bare: HttpClient, email: string): Promise<KdfConfig> {
+    const pl = await prelogin(bare, email);
+    return pl.kdf === KDF_TYPE_ARGON2ID
+      ? { kdf: KDF_TYPE_ARGON2ID, iterations: pl.iterations, memory: pl.memory ?? 64, parallelism: pl.parallelism ?? 4 }
+      : { kdf: KDF_TYPE_PBKDF2, iterations: pl.iterations };
+  }
+
   /** 把令牌接到客户端上，并把账户写进会话。登录与补登录共用 */
   private adopt(bare: HttpClient, params: ConnectParams, masterKey: Uint8Array, token: TokenResponse): void {
     this.masterKey = masterKey;
@@ -269,6 +296,17 @@ export class VaultClient {
     bare: HttpClient, params: ConnectParams, masterKey: Uint8Array,
     masterPasswordHash: string,
     twoFactor: { token: string; provider: number; remember: boolean } | undefined,
+    /*
+     * ⚠️ KDF 参数**必须由调用方传进来**，不能在这里再问一次服务端。
+     *
+     * 调用方（`connect` / `unlock`）刚才为了派生主密钥**已经问过一次**了 ——
+     * 在这里重问就是**白多一轮网络往返**。在单次 5~10 秒的链路上，
+     * 那是用户实打实多等的几秒。
+     *
+     * 这个参数以前是 `saveUnlockCache` 内部调 `kdfOf()` 现取的 ——
+     * 也就是说这条浪费是「顺手再问一次」写出来的，而不是有什么理由。
+     */
+    kdf: KdfConfig,
   ): Promise<void> {
     const { token, userKey } = await this.authenticate(bare, params, masterKey, masterPasswordHash, twoFactor);
     this.mark('登录往返 + 解出用户密钥');
@@ -291,7 +329,7 @@ export class VaultClient {
     this.session.completeUnlock(userKey);
 
     // 存下「下次不用问服务端也能解锁」所需要的东西 —— 见 UnlockCache
-    await this.saveUnlockCache(params, masterKey, token);
+    await this.saveUnlockCache(params, masterKey, token, kdf);
 
     this.mark('开始同步');
     await this.hydrateThenSync(userKey);
@@ -309,7 +347,7 @@ export class VaultClient {
    * 而它看起来只是「省一次解密」。
    */
   private async saveUnlockCache(
-    params: ConnectParams, masterKey: Uint8Array, token: TokenResponse,
+    params: ConnectParams, masterKey: Uint8Array, token: TokenResponse, kdf: KdfConfig,
   ): Promise<void> {
     if (!this.unlockCache || !token.key) return;
     try {
@@ -323,7 +361,7 @@ export class VaultClient {
       await this.unlockCache.save({
         serverUrl: params.serverUrl,
         email: params.email,
-        kdf: await this.kdfOf(params),
+        kdf,
         wrappedUserKey: token.key,
       });
     } catch (e) {
@@ -331,13 +369,7 @@ export class VaultClient {
     }
   }
 
-  /** 问服务端这个账户的 KDF 参数。存缓存时用一次，代价可接受 */
-  private async kdfOf(params: ConnectParams): Promise<KdfConfig> {
-    const pl = await prelogin(this.makeHttp(params.serverUrl), params.email);
-    return pl.kdf === KDF_TYPE_ARGON2ID
-      ? { kdf: KDF_TYPE_ARGON2ID, iterations: pl.iterations, memory: pl.memory ?? 64, parallelism: pl.parallelism ?? 4 }
-      : { kdf: KDF_TYPE_PBKDF2, iterations: pl.iterations };
-  }
+
 
   /**
    * 后台同步：先吃缓存，再问服务端。**不阻塞调用方。**
@@ -857,12 +889,9 @@ export class VaultClient {
     const account = this.session.account;
     if (!account) throw new Error('没有已保存的账户');
 
-    const cached = await this.unlockCache?.load(account.serverUrl, account.email).catch(() => null);
-    const kdf = cached?.kdf ?? await this.kdfOf({
-      serverUrl: account.serverUrl, email: account.email, masterPassword,
-    });
-
     const bare = this.makeHttp(account.serverUrl);
+    const cached = await this.unlockCache?.load(account.serverUrl, account.email).catch(() => null);
+    const kdf = cached?.kdf ?? await this.preloginKdf(bare, account.email);
     const masterKey = await deriveMasterKey(masterPassword, account.email, kdf);
     const hash = await hashMasterPassword(masterKey, masterPassword);
 
@@ -870,7 +899,7 @@ export class VaultClient {
     // ⚠️ 这里面有 login —— **服务端验证就在那一步**。没有本地捷径，也不该有。
     await this.finishConnect(bare, {
       serverUrl: account.serverUrl, email: account.email, masterPassword,
-    }, masterKey, hash, undefined);
+    }, masterKey, hash, undefined, kdf);
   }
 
   /** 走网络那条路：原来那条，一次没变 */
@@ -888,7 +917,7 @@ export class VaultClient {
     const hash = await hashMasterPassword(masterKey, masterPassword);
 
     this.session.beginUnlock();
-    await this.finishConnect(bare, params, masterKey, hash, undefined);
+    await this.finishConnect(bare, params, masterKey, hash, undefined, kdf);
   }
 
 
