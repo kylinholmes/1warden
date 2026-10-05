@@ -159,10 +159,18 @@ export function stubChrome(): void {
                  sshKey: it?.sshKey ?? null, secureNote: it?.secureNote ?? null,
                  /* 隐藏字段（type 1）的 value 回 null —— 和真实后台同一个规矩，
                     否则预览里看到的「隐藏字段也直接显示」是产品不会有的样子 */
-                 customFields: CUSTOM_FIELDS };
+                 customFields: CUSTOM_FIELDS,
+                 /* 只回日期 —— 和真实后台同一个规矩 */
+                 passwordHistory: [
+                   { lastUsedDate: '2025-06-01T00:00:00Z' },
+                   { lastUsedDate: '2024-11-14T00:00:00Z' },
+                 ] };
       }
       case 'coffer:reveal-custom':
         return { value: '482913' };
+      /* 每条回不同的值 —— 和 `coffer:reveal` 同一个理由：桩不能骗人 */
+      case 'coffer:reveal-history':
+        return { value: msg.index === 0 ? 'old-pass-123' : 'older-pass-456' };
       /*
        * ⚠️ 这里回的 `skipped` 必须是**逐条的行号 + 原因**，不是只回个数。
        *

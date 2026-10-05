@@ -46,6 +46,8 @@ interface ExtraFields {
   secureNote: { type: number } | null;
   /** 隐藏字段（type 1）的 `value` 是 `null` —— 要走揭示才拿得到，和密码同一个规矩 */
   customFields: { name: string; type: number; value: string | null }[];
+  /** 只有日期 —— 值要走 `coffer:reveal-history` 才拿得到 */
+  passwordHistory: { lastUsedDate: string }[];
 }
 
 
@@ -249,6 +251,29 @@ export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
                       },
                     }
                   : {})}
+                onCopied={noLocalClear}
+                onCopyError={(e) => setError(e instanceof Error ? e.message : '复制失败')}
+              />
+            ))}
+          </Section>
+        )}
+
+        {/* 历史密码：日期 + 遮着的值。要看哪一条就点那一条的眼睛 —— 明文不主动过来 */}
+        {extra && extra.passwordHistory.length > 0 && (
+          <Section title="历史密码">
+            {extra.passwordHistory.map((h, i) => (
+              <SecretField
+                key={`${h.lastUsedDate}-${i}`}
+                label={new Date(h.lastUsedDate).toLocaleDateString('zh-CN')}
+                value={'••••••••'}
+                masked
+                revealValue={async () => {
+                  const res = await ext.runtime.sendMessage({
+                    type: 'coffer:reveal-history', itemId: item.id, index: i,
+                  }) as { value?: string; error?: string };
+                  if (res?.error) throw new Error(res.error);
+                  return res?.value ?? '';
+                }}
                 onCopied={noLocalClear}
                 onCopyError={(e) => setError(e instanceof Error ? e.message : '复制失败')}
               />

@@ -246,6 +246,7 @@ type Request =
   | { type: 'coffer:dismiss-capture'; tabId?: number }
   | { type: 'coffer:reveal'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: 'coffer:reveal-custom'; itemId: string; index: number }
+  | { type: 'coffer:reveal-history'; itemId: string; index: number }
   | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: 'coffer:webauthn'; payload: unknown };
 
@@ -577,6 +578,13 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
           type: f.type,
           value: f.type === 1 ? null : f.value,
         })),
+        /*
+         * 历史密码 —— ⚠️ **只回日期，不回值**。
+         * 那是一串**明文旧密码**，没有任何理由主动送进浏览器扩展。
+         * 要看某一条就走 `coffer:reveal-history`，和密码同一个规矩：
+         * 明文只在用户点开那一刻过一次手。
+         */
+        passwordHistory: i.passwordHistory.map((h) => ({ lastUsedDate: h.lastUsedDate })),
       };
     }
 
@@ -956,6 +964,16 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const field = item?.customFields[req.index];
       if (!field) throw new Error('找不到这个自定义字段');
       return { value: field.value };
+    }
+
+    /* 历史密码的揭示 —— 和自定义字段同一个理由：单独一条，不并进上面那个 */
+    case 'coffer:reveal-history': {
+      const session = await sessions.load();
+      if (!session) throw new Error('保险库未解锁');
+      const item = session.items.find((i) => i.id === req.itemId);
+      const entry = item?.passwordHistory[req.index];
+      if (!entry) throw new Error('找不到这条历史密码');
+      return { value: entry.password };
     }
 
     case 'coffer:reveal': {
