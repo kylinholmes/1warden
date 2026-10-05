@@ -18,7 +18,8 @@
     "dev:desktop": "cd apps/desktop && bun run tauri dev",
     "build:desktop": "cd apps/desktop && bun run tauri build",
     "e2e:extension": "bun run scripts/e2e-extension.ts",
-    "ui:shot": "bun run scripts/ui-shot.ts"
+    "ui:shot": "bun run scripts/ui-shot.ts",
+    "build:extension-firefox": "cd apps/extension && bun run build && cd ../.. && bun run scripts/build-extension-firefox.ts"
   },
   "devDependencies": {
     "@bitwarden/cli": "2025.2.0",
