@@ -2,7 +2,10 @@ import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
 import { searchItems, totpCode, hasTotp, summaryOf, sortItems, SORT_BY, SORT_LABEL, type SortBy, type VaultItem, type VaultFolder, type Attachment } from '@coffer/vault';
 import type { VaultClient, IconStore } from '@coffer/vault';
 import { saveFile } from '../save';
-import { iconStoreFor } from '@coffer/ui';
+/* `IS_DESKTOP` 是**编译期常量**（`__PLATFORM__`），打包时被替换成字面量 ——
+   于是移动端的产物里根本不包含 `AutotypeAction` 那一段，而不只是「不执行」。
+   见 packages/ui/src/platform.ts。 */
+import { iconStoreFor, IS_DESKTOP } from '@coffer/ui';
 import { useShowTypes } from '../prefs';
 import { ItemIcon } from '@coffer/ui';
 import { AutotypeAction } from '../components/AutotypeAction';
@@ -957,10 +960,17 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
             {/*
               原生窗口自动输入（spec §7.4）。放在登录字段这一组的末尾 ——
               它是「把凭据送出去」的动作，紧跟在被送出去的东西后面最合理。
+
+              ⚠️ **只有桌面端有这一条**，而且不是「还没做」——
+              「往**别的应用**的输入框里合成按键」这件事在 iOS 上根本不存在：
+              沙箱不允许，能做的是系统级自动填充（App Extension），
+              那是**另一套东西**，不是这一套的移植。见 docs 里移动端那一节。
             */}
-            <div className="border-t border-[var(--border-subtle)] py-3 first:border-0">
-              <AutotypeAction username={item.login.username} password={item.login.password} />
-            </div>
+            {IS_DESKTOP && (
+              <div className="border-t border-[var(--border-subtle)] py-3 first:border-0">
+                <AutotypeAction username={item.login.username} password={item.login.password} />
+              </div>
+            )}
           </Section>
         )}
 

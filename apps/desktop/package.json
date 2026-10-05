@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
+    "build:mobile": "vite build -c vite.mobile.config.ts",
     "preview": "vite preview",
     "tauri": "tauri",
     "preview:build": "vite build -c vite.preview.config.ts",

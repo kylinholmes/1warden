@@ -9,6 +9,7 @@
   "scripts": {
     "build:desktop": "cd apps/desktop && bun run tauri build",
     "build:extension": "cd apps/desktop && bun run build:extension",
+    "build:mobile": "cd apps/desktop && bun run build:mobile",
     "build:extension-firefox": "bun run build:extension && bun run scripts/build-extension-firefox.ts",
     "check": "bun run typecheck && bun run test",
     "check:all": "bun run check && bun run e2e:extension",

@@ -14,15 +14,17 @@ test-results/
 apps/desktop/src-tauri/target/
 apps/desktop/src-tauri/gen/
 
-# 扩展目标的产物。
+# 各个「带后缀的 dist」的产物。
 #
-# ⚠️ 上面的 `dist/` 和 `dist-preview/` **匹配不到**这三个 —— gitignore 里
-# 不带斜杠开头的目录名只匹配那一层，而这三个都带后缀。漏掉的话它们会一直
-# 出现在 `git status` 里，混在真正的改动中间。
+# ⚠️ 上面的 `dist/` 和 `dist-preview/` **匹配不到**这下面任何一个 ——
+# gitignore 里不带斜杠开头的目录名只匹配那一层，而这些都带后缀。
+# 漏掉的话它们会一直出现在 `git status` 里，混在真正的改动中间。
 #
 # `dist-extension/` + `dist-firefox/` 由 `bun run build:extension` 与
 # `scripts/build-extension-firefox.ts` 生成，`dist-preview-extension/` 由
-# `vite.preview-extension.config.ts` 生成。
+# `vite.preview-extension.config.ts` 生成，`dist-mobile/` 由
+# `vite.mobile.config.ts` 生成（`bun run build:mobile`）。
 apps/desktop/dist-extension/
 apps/desktop/dist-firefox/
 apps/desktop/dist-preview-extension/
+apps/desktop/dist-mobile/
