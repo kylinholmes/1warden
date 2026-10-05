@@ -11,6 +11,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { QuickAccess } from '../screens/QuickAccess';
 import { iconStoreFor } from '../icon-store';
 import { initPlatform } from '../platform';
+import { installDesktopHost } from '../host-impl';
 import { initNativeFeel } from '../native';
 import { initTheme } from '../theme';
 import {

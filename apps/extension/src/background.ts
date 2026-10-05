@@ -19,6 +19,7 @@
  * storage 里**，模块变量随时可能归零。
  */
 import { ext } from './ext-api';
+import { installExtensionHost } from './host-impl';
 import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
   summaryOf, iconDomainOf, avatarOf, searchItems, buildReport,
@@ -87,6 +88,9 @@ let traceBroken = false;
  * `.catch()` 接不住（Firefox 上真的把整个 background 崩掉了）。
  */
 restrictSessionToTrustedContexts(ext.storage.session);
+
+/* 宿主要在每个上下文各装一次 —— service worker 和弹窗是**两个**上下文 */
+installExtensionHost();
 
 /** 设备标识不是秘密，落盘无妨；但也不能每次启动都换（会在设备列表里堆一堆） */
 const deviceStore = {

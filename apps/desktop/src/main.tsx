@@ -3,9 +3,13 @@ import { createRoot } from 'react-dom/client';
 import { App, ErrorBoundary } from './App';
 import { webAssemblyAvailable } from './capabilities';
 import { initPlatform } from './platform';
+import { installDesktopHost } from './host-impl';
 import { initNativeFeel } from './native';
 import { initTheme } from './theme';
 import './styles.css';
+
+// 宿主要**最先**装：后面所有代码都可能用到它（发请求、读存储）
+installDesktopHost();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('找不到 #root 挂载点');
