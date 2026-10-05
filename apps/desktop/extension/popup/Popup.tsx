@@ -1,16 +1,15 @@
 import { ext } from '../ext-api';
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { generatePassword, passwordStrength } from '@coffer/crypto';
 import { IconStore } from '@coffer/vault';
 
 import {
-  CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
-  IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
+  IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems,
+  IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconStar,
   ItemRow, NavDrawer, NavRow, NavTrigger, Section,
-  ConnectScreen, SecurityReportView,
-  STRENGTH_LABELS, apiMessageOf, countByType, crackSentence,
+  ConnectScreen, GeneratorBody, SecurityReportView,
+  apiMessageOf, countByType,
   host, iconStoreFor, rememberAccount, useAccounts,
-  scheduleClipboardClear, typeDestinations,
+  typeDestinations,
   type BreachState, type ReportBrief,
 } from '@coffer/ui';
 
@@ -520,7 +519,16 @@ export function Popup() {
                   />
                 )
               ) : dest === 'generator' ? (
-                <Generator />
+                /*
+                 * ⚠️ 和桌面端**同一个** `GeneratorBody`。
+                 * 这里以前是本文件里写的一个简化版：没有口令、只有两类字符，
+                 * 而且结果被 `truncate` 截断 —— 生成 64 位密码，屏幕上只有
+                 * `aB3$x…`，而用户正要把它抄走。
+                 *
+                 * 桌面端那个是浮层，这里不是（弹窗整屏就 440px，浮层没意义）——
+                 * **两个外壳，一份内容**。
+                 */
+                <GeneratorBody className="min-h-0 flex-1 overflow-y-auto px-4 py-5" />
               ) : (
                 <>
                   {/*
@@ -939,90 +947,6 @@ function Note({ tone, children }: { tone: 'risk' | 'accent'; children: React.Rea
       {tone === 'risk' && <IconAlert size={14} className="mt-0.5 shrink-0" style={{ color }} />}
       <span className="min-w-0 flex-1" style={{ color }}>{children}</span>
     </p>
-  );
-}
-
-/** 生成器默认只暴露三项 —— 与 1Password 一致，其余收起来 */
-function Generator() {
-  const [length, setLength] = useState(20);
-  const [digits, setDigits] = useState(true);
-  const [symbols, setSymbols] = useState(true);
-  const [value, setValue] = useState('');
-
-  useEffect(() => {
-    setValue(generatePassword({ length, digits, symbols }));
-  }, [length, digits, symbols]);
-
-  const strength = value ? passwordStrength(value) : null;
-
-  return (
-    <div className="card p-3">
-      <div className="flex items-center gap-2">
-        <span className="min-w-0 flex-1 text-xs font-medium text-[var(--ink-tertiary)]">
-          生成密码
-        </span>
-        <button onClick={() => setValue(generatePassword({ length, digits, symbols }))}
-          className="btn btn-ghost shrink-0">换一个</button>
-      </div>
-
-      <div className="mt-2 flex items-center gap-2">
-        <code className="secret min-w-0 flex-1 truncate rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-2 py-1.5 text-sm">
-          {value}
-        </code>
-        {/*
-          和别处**同一个** `CopyButton` —— 早先这里是内联的一份，
-          连「30 秒后按值清空」都自己写了一遍（而且那份定时器随弹窗关闭而消失，
-          和详情里走后台离屏文档的那条路径并不一致）。
-        */}
-        <CopyButton
-          getValue={async () => value}
-          onCopied={scheduleClipboardClear}
-          className="btn btn-quiet shrink-0 gap-1.5 text-[var(--accent)]"
-          iconSize={12}
-        />
-      </div>
-
-      <label className="mt-2.5 flex items-center gap-2 text-xs text-[var(--ink-secondary)]">
-        长度
-        <input type="range" min={8} max={64} value={length}
-          onChange={(e) => setLength(Number(e.target.value))} className="flex-1" />
-        <span className="tnum w-6 text-right">{length}</span>
-      </label>
-      <div className="mt-1.5 flex gap-4 text-xs text-[var(--ink-secondary)]">
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" checked={digits} onChange={(e) => setDigits(e.target.checked)} />
-          包含数字
-        </label>
-        <label className="flex items-center gap-1.5">
-          <input type="checkbox" checked={symbols} onChange={(e) => setSymbols(e.target.checked)} />
-          包含符号
-        </label>
-      </div>
-
-      {strength && (
-        <div className="mt-2.5 flex items-center gap-2.5">
-          <div className="h-1 flex-1 overflow-hidden rounded-full bg-[var(--border-subtle)]">
-            <div className="h-full rounded-full transition-[width] duration-[var(--dur-base)]" style={{
-              width: `${Math.min(100, (strength.score / 4) * 100)}%`,
-              background: strength.score >= 3 ? 'var(--safe)' : strength.score >= 2 ? 'var(--caution)' : 'var(--risk)',
-            }} />
-          </div>
-          {/*
-            ⚠️ 说的是**结论**，不只是熵值。
-            「约 131 位熵」是个没有结论的数字 —— 普通用户不知道 131 是好还是坏。
-            词表和桌面端共用（`@coffer/ui` 的 `strength.ts`），两端同一套说法。
-          */}
-          <span className="shrink-0 text-2xs text-[var(--ink-tertiary)]">
-            {STRENGTH_LABELS[strength.score] ?? ''}
-          </span>
-        </div>
-      )}
-      {strength && (
-        <p className="mt-1 text-2xs text-[var(--ink-tertiary)]">
-          {crackSentence(strength.entropyBits, strength.score)}
-        </p>
-      )}
-    </div>
   );
 }
 

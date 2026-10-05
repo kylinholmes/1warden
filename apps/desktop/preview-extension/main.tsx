@@ -156,3 +156,9 @@ if (new URLSearchParams(location.search).get('state') === 'quick') {
       .find((b) => b.textContent?.includes('me@example.com'))?.click();
   }, 500);
 }
+
+/* `?state=generator`：点开生成器那一项，核对和桌面端是不是同一份 */
+if (new URLSearchParams(location.search).get('state') === 'generator') {
+  setTimeout(() => [...document.querySelectorAll('button')]
+    .find((b) => b.textContent?.trim() === '生成')?.click(), 500);
+}

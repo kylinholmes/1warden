@@ -11,7 +11,8 @@
   },
   "dependencies": {
     "react": "^19.0.0",
-    "@coffer/vault": "workspace:*"
+    "@coffer/vault": "workspace:*",
+    "@coffer/crypto": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0"

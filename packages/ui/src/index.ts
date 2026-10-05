@@ -50,3 +50,5 @@ export * from './SecurityReportView';
 export * from './TwoFactorForm';
 export * from './accounts';
 export * from './ConnectScreen';
+export * from './Segmented';
+export * from './Generator';

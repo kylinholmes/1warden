@@ -52,6 +52,7 @@
       "name": "@coffer/ui",
       "version": "0.0.0",
       "dependencies": {
+        "@coffer/crypto": "workspace:*",
         "@coffer/vault": "workspace:*",
         "react": "^19.0.0",
       },

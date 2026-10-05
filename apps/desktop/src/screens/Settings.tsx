@@ -1,6 +1,6 @@
 import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { FloatingPanel } from '../components/FloatingPanel';
-import { Segmented } from '../components/Segmented';
+import { Segmented } from '@coffer/ui';
 import { useShowTypes } from '../prefs';
 import { getThemeMode, setThemeMode, subscribeTheme, type ThemeMode } from '../theme';
 import {
