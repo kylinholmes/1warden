@@ -23,7 +23,6 @@
  * 这样它能在 node 里测，也让「用的是哪个存储区」变成一个显式、可审查的选择，
  * 而不是散落在代码里的一行 `ext.storage.local`。
  */
-import { ext } from './ext-api';
 import { fromBase64, toBase64, type SymmetricKey } from '@coffer/crypto';
 import type { AccountInfo, VaultFolder, VaultItem, VaultClientState } from '@coffer/vault';
 
@@ -36,6 +35,59 @@ export interface StorageArea {
   set(items: Record<string, unknown>): Promise<void>;
   remove(keys: string | string[]): Promise<void>;
   clear(): Promise<void>;
+}
+
+/**
+ * 会话区上**只有 Chrome 有**的那部分。
+ *
+ * ⚠️ `setAccessLevel` 在这里是**可选**的，可选的原因很具体 —— 见
+ * `restrictSessionToTrustedContexts`。
+ *
+ * ⚠️ `@types/chrome` 把它声明成必选方法，而 Firefox 上它根本不存在：
+ * 类型对着运行时撒谎，照着类型写出来的代码就会在求值时崩掉。所以这里
+ * 刻意不复用那份类型。
+ */
+export interface SessionAreaAccess {
+  setAccessLevel?(options: {
+    accessLevel: 'TRUSTED_CONTEXTS' | 'TRUSTED_AND_UNTRUSTED_CONTEXTS';
+  }): Promise<void> | void;
+}
+
+/**
+ * 把「content script 读不到会话区」这条前提**显式钉住**。
+ *
+ * `storage.session` 里躺着用户密钥，所以「谁能读」是安全属性，不是配置细节。
+ * 两个浏览器的做法不一样，但结论一致 —— 都只让受信任上下文读：
+ *
+ * - **Chrome**：默认就是 `TRUSTED_CONTEXTS`，但默认值是可以被改的，而
+ *   `setAccessLevel` 存在的意义正是「允许有人把它调宽」。所以这里显式声明一次，
+ *   将来谁要为了别的功能调宽，至少得先删掉这行、看见这段注释。
+ * - **Firefox**（以及基于它的 Zen）：**没有** `setAccessLevel`，因为这条限制
+ *   在它那里是**结构性**的 —— schema 里 `storage.session` 的 `allowedContexts`
+ *   只有 `devtools`，而命名空间默认是 `["content", "devtools"]`，`content`
+ *   是被显式去掉的。content script 连 `storage.session.*` 都调不到，
+ *   也就没有「调宽」这个动作可言。
+ *
+ * ⚠️ 所以这里的判断必须是**能力检测**，不能写成
+ * `session.setAccessLevel({...}).catch(() => {})`。
+ * 属性不存在时抛的是**同步** `TypeError`，`.catch()` 那个表达式压根没机会被
+ * 构造出来 —— 求值到这一行，整个 background 脚本就断了，扩展直接不工作
+ * （症状：popup 永远停在「正在载入…」，只有后台控制台看得见异常）。
+ *
+ * 设不上不影响正确性：**默认值本来就是我们要的那个**。这个调用是声明，不是保障。
+ */
+export function restrictSessionToTrustedContexts(area: SessionAreaAccess): void {
+  const setAccessLevel = area.setAccessLevel;
+  if (typeof setAccessLevel !== 'function') return;
+
+  try {
+    // 绑回 area：有些 WebIDL 风格的实现依赖 this，脱开调用会抛 Illegal invocation
+    void Promise.resolve(setAccessLevel.call(area, { accessLevel: 'TRUSTED_CONTEXTS' })).catch(() => {
+      /* 设不上就算了 —— 见上文，默认值就是安全的那个 */
+    });
+  } catch {
+    /* 同步抛同理 */
+  }
 }
 
 /**

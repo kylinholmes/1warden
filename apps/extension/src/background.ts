@@ -26,7 +26,7 @@ import {
   type CaptureDecision,
   totpCode,
 } from '@coffer/vault';
-import { SessionStore, type StorageArea } from './session-store';
+import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
 import { extensionSyncCache } from './sync-cache';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
 import { handleWebauthn, type WebauthnPayload } from './webauthn';
@@ -80,13 +80,11 @@ let traceBroken = false;
 /**
  * 再上一道锁：让 content script 读不到会话区。
  *
- * 默认值就是 `TRUSTED_CONTEXTS`，这里显式写出来 —— 这是一个**安全属性**，
- * 不该依赖某个 API 的默认值不被人改。将来若有人为了别的功能调宽它，
- * 至少得先删掉这行、看见这段注释。
+ * 具体的判断与两个浏览器的差异都在 `restrictSessionToTrustedContexts` 里 ——
+ * **能力检测**而不是 `.catch()`，因为属性不存在时抛的是同步 TypeError，
+ * `.catch()` 接不住（Firefox 上真的把整个 background 崩掉了）。
  */
-void ext.storage.session.setAccessLevel({ accessLevel: 'TRUSTED_CONTEXTS' }).catch(() => {
-  // 老版本 Chrome 没有这个方法；默认值本来就是安全的，忽略
-});
+restrictSessionToTrustedContexts(ext.storage.session);
 
 /** 设备标识不是秘密，落盘无妨；但也不能每次启动都换（会在设备列表里堆一堆） */
 const deviceStore = {

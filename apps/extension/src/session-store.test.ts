@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { SessionStore, type StorageArea } from './session-store';
+import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
 import { makeUserKey, toBase64 } from '@coffer/crypto';
 import type { VaultItem } from '@coffer/vault';
 
@@ -198,5 +198,55 @@ describe('SessionStore —— 只写内存区', () => {
     expect(setSpy).toHaveBeenCalled();
     // 扩展不该碰全局的 chrome.storage —— 拿不到就说明只用了注入的那一份
     expect((globalThis as { chrome?: unknown }).chrome).toBeUndefined();
+  });
+});
+
+describe('restrictSessionToTrustedContexts —— 会话区的访问级别', () => {
+  it('Chrome：把访问级别显式声明为仅受信任上下文', () => {
+    const setAccessLevel = vi.fn(async () => {});
+    restrictSessionToTrustedContexts({ setAccessLevel });
+
+    expect(setAccessLevel).toHaveBeenCalledWith({ accessLevel: 'TRUSTED_CONTEXTS' });
+  });
+
+  it('以会话区自身为 this 调用', () => {
+    const area = {
+      calls: 0,
+      setAccessLevel(this: { calls: number }) { this.calls += 1; return Promise.resolve(); },
+    };
+    restrictSessionToTrustedContexts(area);
+
+    expect(area.calls).toBe(1);
+  });
+
+  /**
+   * ⚠️ 回归测试 —— 这条对应 Zen 里那次真实的崩溃。
+   *
+   * Firefox（以及基于它的 Zen）**没有** `setAccessLevel`：它把这条限制做进了
+   * schema（`storage.session` 的 allowedContexts 里没有 `content`），是结构性的、
+   * 不可调宽的，因此压根不需要这个 API。
+   *
+   * 原先的写法是 `ext.storage.session.setAccessLevel({...}).catch(() => {})`，
+   * 想用 `.catch()` 兜住「老 Chrome 没有」。但属性不存在时抛的是**同步** TypeError ——
+   * 求值到那一行整个 background 就断了，`.catch()` 根本没机会被构造出来。
+   *
+   * 所以必须是**能力检测**，不是异常处理。
+   */
+  it('Firefox：没有这个 API 时不能抛', () => {
+    expect(() => restrictSessionToTrustedContexts({})).not.toThrow();
+  });
+
+  it('同步抛出的实现也不能把 background 带崩', () => {
+    expect(() => restrictSessionToTrustedContexts({
+      setAccessLevel: () => { throw new TypeError('Illegal invocation'); },
+    })).not.toThrow();
+  });
+
+  it('返回被拒绝的 Promise 时不产生未处理的拒绝', async () => {
+    restrictSessionToTrustedContexts({
+      setAccessLevel: async () => { throw new Error('无权设置访问级别'); },
+    });
+    // 未处理的拒绝会让 vitest 直接判这条失败
+    await new Promise((resolve) => setTimeout(resolve, 0));
   });
 });
