@@ -42,7 +42,7 @@ import type { ItemSummary } from '../src/popup/Popup';
  */
 function loginItem(
   id: string, name: string,
-  opts: { username?: string; uri?: string; totp?: boolean; favorite?: boolean; type?: string; rawType?: number } = {},
+  opts: { username?: string; uri?: string; totp?: boolean; favorite?: boolean; type?: string; rawType?: number; folderId?: string } = {},
 ): VaultItem {
   const type = opts.type ?? 'login';
   return {
@@ -51,6 +51,7 @@ function loginItem(
     favorite: opts.favorite ?? false, reprompt: 0,
     createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
     deletedAt: null, archivedAt: null, wrappedKey: null,
+    folderId: opts.folderId ?? null,
     login: type === 'login' ? {
       username: opts.username ?? null,
       password: 'x', totp: opts.totp ? 'JBSWY3DPEHPK3PXP' : null,
@@ -74,11 +75,11 @@ const ITEMS: VaultItem[] = [
   loginItem('3', 'Vaultwarden 自建', { username: 'admin', uri: 'https://vault.example.com', favorite: true }),
   loginItem('4', '招商银行', { username: '6225 **** 1234' }),
   loginItem('5', '一个名字相当长的条目用来验证截断行为', { username: 'someone@very-long-domain.example', totp: true }),
-  loginItem('6', 'AWS 生产环境', { username: 'deploy', totp: true }),
+  loginItem('6', 'AWS 生产环境', { username: 'deploy', totp: true, folderId: 'f1' }),
   loginItem('7', '家里的路由器', { username: 'root' }),
   loginItem('8', '知乎', { username: '13800138000', uri: 'https://zhihu.com' }),
   // 其它类型 —— 导航上的类型项是由**数据**来的，全都塞 login 就看不出这件事
-  loginItem('9', '招商银行 Visa', { type: 'card', rawType: 3, username: 'ZHANG SAN', favorite: true }),
+  loginItem('9', '招商银行 Visa', { type: 'card', rawType: 3, username: 'ZHANG SAN', favorite: true, folderId: 'f2' }),
   loginItem('10', '家里 Wi-Fi 密码', { type: 'secureNote', rawType: 2 }),
 ];
 
@@ -93,6 +94,7 @@ function summarise(item: VaultItem): ItemSummary {
     hasTotp: item.login?.totp !== null && item.login?.totp !== undefined,
     uris: (item.login?.uris ?? []).map((u) => u.uri),
     favorite: item.favorite,
+    folderId: item.folderId,
     type: item.type,
     summary: summaryOf(item),
     iconDomain: iconDomainOf(item),
@@ -125,6 +127,11 @@ export function stubChrome(): void {
        * ⚠️ 空 query 是「浏览整个保险库」，不是「搜不到」——
        * 桩也要照这个语义回，否则预览里看到的是产品不会有的样子。
        */
+      case 'coffer:folders':
+        return { folders: [
+          { id: 'f1', name: '工作' },
+          { id: 'f2', name: '个人' },
+        ] };
       case 'coffer:search': {
         const q = String(msg.query ?? '').trim();
         if (q === '') return { items: ITEMS.map(summarise) };

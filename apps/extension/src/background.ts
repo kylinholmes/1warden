@@ -218,6 +218,7 @@ type Request =
   | { type: 'coffer:list' }
   | { type: 'coffer:matches'; url: string }
   | { type: 'coffer:search'; query: string }
+  | { type: 'coffer:folders' }
   | { type: 'coffer:fill'; itemId: string; tabId: number }
   | { type: 'coffer:generate'; length?: number; digits?: boolean; symbols?: boolean }
   | { type: 'coffer:pending'; tabId?: number }
@@ -437,6 +438,25 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
      * 词首 > 包含 > 次要字段），而且**过滤掉已删除/已归档**的条目。
      * 各写一份的话，「搜到了已删除的密码」这种事迟早会发生。
      */
+    /**
+     * 文件夹列表 —— 给导航栏用。
+     *
+     * ⚠️ 和 `coffer:search` 分开而不是塞进每条摘要里：文件夹是**整个库**的
+     * 一份（几十个），条目是几百上千条。跟着摘要重复传会让消息大出一个量级，
+     * 而它们的变化频率完全不同（改文件夹名不该让整份列表失效）。
+     */
+    case 'coffer:folders': {
+      const session = await sessions.load();
+      if (!session) return { unlocked: false, folders: [] };
+      return {
+        unlocked: true,
+        folders: session.folders.map((f) => ({
+          id: f.id,
+          name: f.nameFailed ? '无法解密' : f.name,
+        })),
+      };
+    }
+
     case 'coffer:search': {
       const session = await sessions.load();
       if (!session) return { unlocked: false, items: [] };
@@ -712,6 +732,12 @@ function summarise(i: VaultItem) {
     hasTotp: i.login?.totp != null,
     uris: i.login?.uris.map((u) => u.uri) ?? [],
     favorite: i.favorite,
+    /*
+     * 文件夹 —— 扩展端要和桌面端**对齐**（用户明确要求：这些逻辑两边都要有）。
+     * 只是个 id，不带名字：名字在 `coffer:folders` 那条消息里单独给，
+     * 因为它是**整个库**的一份，跟着每条摘要重复几十遍没道理。
+     */
+    folderId: i.folderId,
     // 显示用的三个 —— 见 Popup.tsx 里 ItemSummary 的说明
     type: i.type,
     summary: summaryOf(i),

@@ -5,12 +5,12 @@ import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
-  IconKeyboard, IconLock, IconSearch, IconSpinner, IconStar, ItemRow, NavRail, NavRow,
+  IconFolder, IconKeyboard, IconLock, IconSearch, IconSpinner, IconStar, ItemRow, NavRail, NavRow,
   countByType, scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
 /** 导航目的地的键。类型项是 `type:<条目类型>` —— 见 `@coffer/ui` 的 destinations */
-type Destination = 'all' | 'favorites' | 'generator' | `type:${string}`;
+type Destination = 'all' | 'favorites' | 'generator' | `type:${string}` | `folder:${string}`;
 
 import { ItemDetail } from './ItemDetail';
 
@@ -42,6 +42,8 @@ export interface ItemSummary {
   hasTotp: boolean;
   uris: string[];
   favorite: boolean;
+  /** 所属文件夹。和桌面端对齐 —— 那个 `coffer:folders` 给名字，这里只带 id */
+  folderId: string | null;
 
   /*
    * ── 显示用的字段 ──
@@ -144,6 +146,12 @@ export function Popup() {
    */
   const [dest, setDest] = useState<Destination>('all');
   const [railExpanded, setRailExpanded] = useState(false);
+  /*
+   * 文件夹 —— 和桌面端**对齐**（用户明确要求这些两边都要有）。
+   * 单独一条消息：它是整个库的一份，跟着每条摘要重复几十遍没道理，
+   * 而且它和条目的变化频率完全不同。
+   */
+  const [folders, setFolders] = useState<{ id: string; name: string }[]>([]);
   const [openId, setOpenId] = useState<string | null>(null);
 
   // 解锁后拉一次主列表。锁定或登出时清掉 —— 留着的话下次解锁会先闪出旧数据
@@ -154,6 +162,15 @@ export function Popup() {
       .then((r) => { if (alive) setBrowse(r.items); })
       // 拉不到主列表不该盖住整屏 —— 站点匹配还在，那才是最常见的用法
       .catch(() => { if (alive) setBrowse([]); });
+    return () => { alive = false; };
+  }, [status?.unlocked]);
+
+  useEffect(() => {
+    if (!status?.unlocked) { setFolders([]); return; }
+    let alive = true;
+    void send<{ folders: { id: string; name: string }[] }>({ type: 'coffer:folders' })
+      .then((r) => { if (alive) setFolders(r.folders); })
+      .catch(() => { if (alive) setFolders([]); });
     return () => { alive = false; };
   }, [status?.unlocked]);
 
@@ -237,7 +254,10 @@ export function Popup() {
       case 'all': return true;
       case 'favorites': return i.favorite;
       case 'generator': return false;
-      default: return `type:${i.type}` === dest;
+      default:
+        return dest.startsWith('folder:')
+          ? i.folderId === dest.slice('folder:'.length)
+          : `type:${i.type}` === dest;
     }
   };
 
@@ -288,6 +308,21 @@ export function Popup() {
             ],
           },
           { key: 'types', title: '类别', entries: railTypes },
+          /*
+           * 文件夹分组。空库时**整个不出现** —— 和桌面端同一条规则
+           * （「列一堆 0 既占地方，又让人以为自己的东西少了」）。
+           */
+          ...(folders.length > 0
+            ? [{
+                key: 'folders',
+                title: '文件夹',
+                entries: folders.map((f) => ({
+                  key: `folder:${f.id}`,
+                  label: f.name,
+                  icon: <IconFolder size={20} />,
+                })),
+              }]
+            : []),
           {
             key: 'tools',
             entries: [{ key: 'generator', label: '生成', icon: <IconDice size={20} /> }],
