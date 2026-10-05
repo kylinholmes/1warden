@@ -18,7 +18,7 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # ⚠️ 基础声明**不带** `tray-icon` / `image-png` —— 那两个是桌面端专属，
 # 在下面按 target 加。理由见那一节。
-tauri = { version = "2" }
+tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 # 二进制体经 IPC 传输要编码 —— Tauri 的 IPC 是 JSON。

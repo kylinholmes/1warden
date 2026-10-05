@@ -583,6 +583,42 @@ Rust 侧移进桌面端的：`rfd`（系统文件对话框）、`tray-icon` / `i
 safe-area 那条匹配到了 HTML 里的**文档注释**（注释里就写着 `viewport-fit=cover`），
 drawer 那条现在自带一条「判据能认出那段被删掉的规则吗」的自检。
 
+### ⚠️ 卡在模拟器运行时上，而且错误信息又是错的
+
+`tauri ios build -t aarch64-sim` 走到前端构建**成功**之后停住：
+
+```
+failed to build iOS app: Xcode Simulator SDK 27.0 is not installed, please open Xcode
+```
+
+**这句话是错的。** `xcodebuild -showsdks` 里 `iphonesimulator27.0` 好好地装着。
+
+加 `-vv` 才看到真正在比较什么：
+
+```
+Debug [cargo_mobile2::apple::target] installed runtimes: 26.5
+```
+
+`cargo-mobile2` 拿 **SDK 版本（27.0）** 去和**已装的模拟器运行时**比，
+而本机只有 **iOS 26.5** 的运行时 —— 于是它说「SDK 没装」。
+「SDK」和「runtime」是两样东西，报错把它们混成了一个词。
+
+要往下走需要 iOS 27.0 的模拟器运行时：
+
+```
+xcodebuild -downloadPlatform iOS
+```
+
+**约 8 GB**（现有的那个 26.5 运行时自己就占 7.9 GB）。
+这是个下载决定，不是一个实现细节 —— 所以停在这里等一句话，没有自作主张。
+
+⚠️ 换 `-t aarch64`（真机）绕不过去：那条路要签名证书，
+而构建日志第一行就是 `No code signing certificates found`。
+
+**这一条和上面那条 rustc 是同一个形状**：错误信息指向一个
+已经查过、且结论是「没问题」的地方（SDK 装没装），
+真正的原因（运行时版本对不上）一个字都没提。
+
 ## 四、验收
 
 用户给的判据：

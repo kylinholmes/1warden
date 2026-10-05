@@ -12,7 +12,18 @@ test-results/
 
 # Rust / Tauri
 apps/desktop/src-tauri/target/
-apps/desktop/src-tauri/gen/
+# ⚠️ 只忽略 `gen/schemas` —— 那是每次构建都会重新生成的 ACL 清单/校验 schema。
+#
+# `gen/apple/`（`tauri ios init` 生成）**要提交**：它是 Xcode 工程的脚手架 ——
+# `project.yml` / `Podfile` / `Sources` / `Assets.xcassets`，
+# 改 Info.plist、entitlements、应用图标都在那儿。Tauri 自己在那个目录里
+# 放了一份 `.gitignore`，排除的只有 `xcuserdata/` `build/` `Externals/` ——
+# 也就是说它本来就假定这个目录是进版本库的。
+#
+# 这里一开始写的是整个 `gen/`。那时候它下面**只有** schemas，所以完全看不出
+# 问题；等 `tauri ios init` 生成 `gen/apple` 之后，那些文件会**静默地不进
+# 版本库** —— 而本机上一切正常，直到有人 clone 下来发现 iOS 跑不起来。
+apps/desktop/src-tauri/gen/schemas/
 
 # 各个「带后缀的 dist」的产物。
 #
