@@ -5,7 +5,6 @@ import { saveFile } from '../save';
 import { iconStoreFor } from '../icon-store';
 import { useShowTypes } from '../prefs';
 import { ItemIcon } from '@coffer/ui';
-import { SecretField } from '../components/SecretField';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';
 import { ImportScreen } from './Import';
@@ -19,7 +18,7 @@ import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  ItemRow, TypeIcon, scheduleClipboardClear,
+  ItemRow, SecretField, Section, TypeIcon, scheduleClipboardClear,
 } from '@coffer/ui';
 
 interface Props {
@@ -1183,15 +1182,7 @@ function AttachmentRow({ client, item, attachment }: {
   );
 }
 
-function Section({ title, children }: { title?: string; children: React.ReactNode }) {
-  return (
-    <section className="mb-7">
-      {title && (
-        <h3 className="mb-2 text-xs font-medium text-[var(--ink-tertiary)]">{title}</h3>
-      )}
-      <div className="card px-4">{children}</div>
-    </section>
-  );
-}
+/* `Section` 也搬到 `@coffer/ui` 了 —— 详情两边的分组方式必须一致，
+   否则「登录信息」在一边是一张卡、在另一边是几个散字段。 */
 
 export { ItemDetail, EmptyDetail };

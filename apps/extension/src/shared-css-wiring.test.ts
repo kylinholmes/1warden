@@ -86,3 +86,35 @@ describe('@coffer/ui 的 CSS 在两个 app 里都接上了', () => {
     });
   }
 });
+
+/**
+ * 第二个守卫：**Tailwind 得知道去扫共享包**。
+ *
+ * 和上面那条是同一个病的**不同机制** —— 上面管的是 `.css` 文件有没有被
+ * `@import` 进来，这条管的是**工具类有没有被生成**。
+ *
+ * Tailwind 4 按构建根目录自动找源文件，而 `packages/ui` 在 app 外面：
+ * 不写 `@source` 的话，那些组件里用到的工具类**一个都不会被生成** ——
+ * 类名在 DOM 上、规则不在产物里。构建、类型检查、单测全都不报，
+ * 只有肉眼看得见。
+ *
+ * ⚠️ 已经有实例：`Section` 的 `mb-7` 在搬进共享包之后消失，
+ * 表现是「详情里两个分组贴在一起」—— 而两端各自读代码都完全正常。
+ * 这条不变量此前**只靠人记得**。
+ */
+describe('两个 app 都告诉 Tailwind 去扫共享包', () => {
+  for (const [label, suffix] of [
+    ['扩展端', './styles.css'],
+    ['桌面端', 'desktop/src/styles.css'],
+  ] as const) {
+    it(`${label}声明了指向 packages/ui 的 @source`, () => {
+      const css = sourceEndingWith(suffix)!;
+      expect(
+        css.includes("'../../../packages/ui/src'"),
+        `${label}的 styles.css 没有 @source 指向 packages/ui ——\n` +
+          '那些组件里用到的工具类不会出现在产物里，而构建、类型检查、单测都不会报。\n' +
+          "补一行：@source '../../../packages/ui/src';",
+      ).toBe(true);
+    });
+  }
+});

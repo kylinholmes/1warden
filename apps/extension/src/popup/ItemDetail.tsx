@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ext } from '../ext-api';
-import { CopyButton, IconGlyph, IconAlert, IconArrowLeft, IconGlobe, IconStar } from '@coffer/ui';
+import { IconGlyph, IconAlert, IconArrowLeft, IconStar, Section, SecretField } from '@coffer/ui';
 import { IconStore } from '@coffer/vault';
 import type { ItemSummary } from './Popup';
 
@@ -27,6 +27,13 @@ import type { ItemSummary } from './Popup';
  * 明文密码只在点「复制」的那一刻由后台取一次 —— 它**从不进入这个组件**。
  * 详情屏没有理由看到它，能看到就多一处会泄漏的地方。
  */
+/**
+ * 弹窗这边**不用**自己挂「30 秒后清空」的定时器 —— 后台的离屏文档会清，
+ * 而它活得比弹窗久。在弹窗里挂的话，用户复制完就关掉弹窗，
+ * 定时器跟着消失，安全网刚好漏掉它要接住的那种情况。
+ */
+const noLocalClear = (): void => {};
+
 export function ItemDetail({ item, icons, busy, onBack, onFill }: {
   item: ItemSummary;
   icons: IconStore | null;
@@ -54,10 +61,18 @@ export function ItemDetail({ item, icons, busy, onBack, onFill }: {
     };
   }
 
-  const fields: { key: 'username' | 'password' | 'totp'; label: string; value: string }[] = [];
-  if (item.username) fields.push({ key: 'username', label: '用户名', value: item.username });
-  if (item.hasPassword) fields.push({ key: 'password', label: '密码', value: '••••••••••' });
-  if (item.hasTotp) fields.push({ key: 'totp', label: '验证码', value: '••••••' });
+  /*
+   * ⚠️ 这里的 `shown` 是**显示**用的，不是真值 —— 弹窗手里根本没有明文
+   * （列表接口刻意只回摘要）。真值只在点「复制」那一刻由后台取一次，
+   * 见上面的 `valueFor`。
+   *
+   * 所以这几个字段**没有「显示/隐藏」开关**：没有可以揭示的东西。
+   * 桌面端那边有，因为明文就在它手里。
+   */
+  const fields: { key: 'username' | 'password' | 'totp'; label: string; shown: string }[] = [];
+  if (item.username) fields.push({ key: 'username', label: '用户名', shown: item.username });
+  if (item.hasPassword) fields.push({ key: 'password', label: '密码', shown: '••••••••••' });
+  if (item.hasTotp) fields.push({ key: 'totp', label: '验证码', shown: '••••••' });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -101,38 +116,33 @@ export function ItemDetail({ item, icons, busy, onBack, onFill }: {
         </div>
 
         {fields.length > 0 && (
-          <dl className="mt-4 flex flex-col">
-            {fields.map((f) => (
-              <div
-                key={f.key}
-                className="flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-b-0"
-              >
-                <dt className="w-16 shrink-0 text-xs text-[var(--ink-tertiary)]">{f.label}</dt>
-                <dd className="min-w-0 flex-1">
-                  <span className="secret block truncate text-md">{f.value}</span>
-                </dd>
-                <CopyButton
+          <div className="mt-5">
+            {/*
+              和桌面端**同一套零件**（`Section` + `SecretField`）——
+              详情两边的分组方式和字段排布必须一致，否则「登录信息」
+              在一边是一张卡、在另一边是几个散字段。
+            */}
+            <Section title="登录">
+              {fields.map((f) => (
+                <SecretField
+                  key={f.key}
+                  label={f.label}
+                  value={f.shown}
                   getValue={valueFor(f.key)}
-                  onError={(e) => setError(e instanceof Error ? e.message : '复制失败')}
-                  className="flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-xs text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+                  onCopied={noLocalClear}
+                  onCopyError={(e) => setError(e instanceof Error ? e.message : '复制失败')}
                 />
-              </div>
-            ))}
-          </dl>
+              ))}
+            </Section>
+          </div>
         )}
 
         {item.uris.length > 0 && (
-          <div className="mt-4">
-            <h2 className="mb-1.5 text-xs text-[var(--ink-tertiary)]">网址</h2>
-            <ul className="flex flex-col gap-1">
-              {item.uris.map((u) => (
-                <li key={u} className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]">
-                  <IconGlobe size={13} className="shrink-0 text-[var(--ink-tertiary)]" />
-                  <span className="secret min-w-0 truncate">{u}</span>
-                </li>
-              ))}
-            </ul>
-          </div>
+          <Section title="网址">
+            {item.uris.map((u, i) => (
+              <SecretField key={u} label={i === 0 ? '网址' : `网址 ${i + 1}`} value={u} />
+            ))}
+          </Section>
         )}
 
         {/*
