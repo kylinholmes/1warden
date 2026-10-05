@@ -27,7 +27,7 @@
 const which = new URLSearchParams(location.search).get('state') ?? 'matched';
 
 import { avatarOf, iconDomainOf, searchItems, summaryOf, type VaultItem } from '@coffer/vault';
-import type { ReportBrief } from '@coffer/ui';
+import type { ImportPreview, ReportBrief } from '@coffer/ui';
 import type { ItemSummary } from '../extension/popup/Popup';
 
 /**
@@ -152,8 +152,37 @@ export function stubChrome(): void {
         return { notes: it?.notes ?? null, card: it?.card ?? null, identity: it?.identity ?? null,
                  sshKey: it?.sshKey ?? null, secureNote: it?.secureNote ?? null };
       }
-      case 'coffer:import-parse':
-        return { format: '1pux', formatLabel: '1Password (.1pux)', folders: 3, items: 42, skipped: 2 };
+      /*
+       * ⚠️ 这里回的 `skipped` 必须是**逐条的行号 + 原因**，不是只回个数。
+       *
+       * 只回个数的话预览里只能显示「跳过 3 行」—— 而那正是弹窗合并前
+       * 少报的那一条（导入是一次性操作，用户既不知道少的是哪几行、
+       * 也无从补救）。桩跟着真实后台的形状回，这条预览才有意义。
+       */
+      case 'coffer:import-parse': {
+        const preview: Omit<ImportPreview, 'fileName'> = {
+          format: '1pux',
+          formatLabel: '1Password (.1pux)',
+          folders: 3,
+          total: 42,
+          byType: { login: 36, card: 3, secureNote: 2, identity: 1 },
+          skipped: [
+            { rowNumber: 7, reason: '这一行没有标题' },
+            { rowNumber: 19, reason: '网址不是 http/https' },
+            { rowNumber: 44, reason: '密码字段是空的' },
+          ],
+        };
+        return preview;
+      }
+      /* 失败的那些也要**有名字有原因** —— 同样是被少报过的那一条 */
+      case 'coffer:import-commit':
+        return {
+          created: 40,
+          failed: [
+            { name: '招商银行 Visa', reason: '服务器拒绝了这一条' },
+            { name: '家里的路由器', reason: '重复条目，已存在' },
+          ],
+        };
       /*
        * ⚠️ 这里的返回类型**显式标注**成 `ReportBrief`。
        *

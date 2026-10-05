@@ -162,3 +162,39 @@ if (new URLSearchParams(location.search).get('state') === 'generator') {
   setTimeout(() => [...document.querySelectorAll('button')]
     .find((b) => b.textContent?.trim() === '生成')?.click(), 500);
 }
+
+/*
+ * `?state=import-preview` / `?state=import-done`：走**真实路径**喂一个假文件。
+ *
+ * ⚠️ 这两个状态之前一直缺，于是导入的**预览 / 结果**两段从来没被肉眼核对过
+ * —— 而「跳过的行逐条说清楚」「失败的逐条列出」恰恰只在这两段里出现。
+ * 修的东西和看过的东西没有交集，那不算验证过。
+ *
+ * 喂文件走的是 `input.files = DataTransfer.files` 再派发 `change`，
+ * 和用户点选文件**同一条路** —— 不是绕过界面直接塞状态。
+ */
+{
+  const which = new URLSearchParams(location.search).get('state');
+  if (which === 'import-preview' || which === 'import-done') {
+    // 先切到导入那一项 —— 这些状态验的是**那一屏的后续阶段**，不是列表
+    setTimeout(() => {
+      [...document.querySelectorAll('button')]
+        .find((b) => b.textContent?.trim() === '导入')?.click();
+    }, 300);
+    setTimeout(() => {
+      const input = document.querySelector<HTMLInputElement>('input[type=file]');
+      if (!input) return;
+      const dt = new DataTransfer();
+      dt.items.add(new File(['name,url,username,password\n'], '1Password.1pux'));
+      input.files = dt.files;
+      input.dispatchEvent(new Event('change', { bubbles: true }));
+      // 结果那一段要再点一次「导入这 N 条」
+      if (which === 'import-done') {
+        setTimeout(() => {
+          [...document.querySelectorAll('button')]
+            .find((b) => b.textContent?.includes('导入这'))?.click();
+        }, 500);
+      }
+    }, 700);
+  }
+}
