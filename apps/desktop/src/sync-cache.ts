@@ -22,6 +22,7 @@
  * 而超限时 `setItem` 会抛 —— 捕获之后**降级成不缓存**（慢，但正确）。
  * 换文件存储要加一个 Rust 命令，为这点数据不值当。
  */
+import { host } from '@coffer/ui';
 import type { SyncCache, KdfCache, KdfCacheEntry } from '@coffer/vault';
 import type { AccountInfo } from '@coffer/vault';
 import type { SyncResult } from '@coffer/api';
@@ -36,7 +37,7 @@ export const syncCache: SyncCache = (() => {
     async load(a: AccountInfo) {
       const key = keyFor(a.serverUrl, a.email);
       try {
-        const raw = localStorage.getItem(key);
+        const raw = await host().storage.get(key);
         if (raw === null) {
           console.warn(`[缓存] 未命中 ${key}`);
           return null;
@@ -54,7 +55,7 @@ export const syncCache: SyncCache = (() => {
       const key = keyFor(a.serverUrl, a.email);
       try {
         const json = JSON.stringify(payload);
-        localStorage.setItem(key, json);
+        await host().storage.set(key, json);
         console.warn(`[缓存] 已写入 ${(json.length / 1024).toFixed(0)} KB`);
       } catch (e) {
         console.warn('[缓存] 写入失败 —— 多半是超配额', e);
@@ -79,7 +80,7 @@ export const kdfCache: KdfCache = {
   async load(serverUrl, email) {
     const key = `coffer.unlock.${serverUrl}|${email}`;
     try {
-      const raw = localStorage.getItem(key);
+      const raw = await host().storage.get(key);
       if (raw === null) return null;
       /*
        * ⚠️ 老版本存的那条**还带着 `wrappedUserKey`**，这里只取 `kdf`。
@@ -96,7 +97,7 @@ export const kdfCache: KdfCache = {
   },
   async save(entry) {
     try {
-      localStorage.setItem(`coffer.unlock.${entry.serverUrl}|${entry.email}`, JSON.stringify(entry));
+      await host().storage.set(`coffer.unlock.${entry.serverUrl}|${entry.email}`, JSON.stringify(entry));
     } catch {
       // 多半是超配额。不缓存是**可用**的，只是慢 —— 不能抛
     }
