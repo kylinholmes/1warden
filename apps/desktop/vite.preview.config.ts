@@ -15,6 +15,12 @@ import tailwindcss from '@tailwindcss/vite';
  * （本项目已经因为一个 Tailwind 命名空间冲突，把整个表单压成 12 像素宽）。
  */
 export default defineConfig({
+  /*
+   * 编译期平台常量 —— 共享组件靠它区分「这个构建是给谁的」。
+   * 打包时被替换成字面量，另一端的分支直接不进产物。
+   * 详见 packages/ui/src/platform.ts。
+   */
+  define: { __PLATFORM__: JSON.stringify('desktop') },
   root: resolve(__dirname, 'preview'),
   publicDir: false,
   plugins: [react(), tailwindcss()],

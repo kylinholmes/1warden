@@ -240,15 +240,21 @@ export function Popup() {
 
   return (
     /*
-      显式高度而不是让内容撑 —— 三层的内部滚动需要一个**确定**的高度，
-      而且弹窗应该是个稳定的「窗口」：切分类、进详情都不该让整个弹窗
-      忽高忽低。560 是留了余量的选择（Chrome 的弹窗上限是 600）。
-    */
-    /*
       布局类来自 `@coffer/ui/components.css` —— 和桌面端共用同一套容器查询。
       窄的时候详情盖住列表，宽的时候并排（见那边 `.vault-shell` 顶部的说明）。
+
+      显式的宽和高，而不是让内容撑。弹窗该是个稳定的「窗口」：切分类、
+      进详情都不该让它忽大忽小。560 留了余量（Chrome 的弹窗上限是 600）。
+
+      ⚠️ **宽度这一条是必须的，不是审美选择。** `.vault-shell` 上有
+      `container-type: inline-size`，而 inline-size 容器**算宽度时假装自己
+      没有内容** —— 浏览器弹窗恰恰是按内容撑开的，于是它算出 0 宽，
+      整个弹窗缩成一条线。桌面端没这个问题：Tauri 窗口有固定尺寸。
+
+      （preview 截图也抓不到这个：截图工具总是给一个固定视口宽度，
+      所以「弹窗撑不开」它看不见 —— 那是那个仪器的一个盲区。）
     */
-    <div className="screen-in vault-shell h-[560px]">
+    <div className="screen-in vault-shell h-[560px] w-[440px]">
       <Rail
         types={railTypes}
         current={dest}

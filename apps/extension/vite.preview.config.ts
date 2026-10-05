@@ -15,6 +15,12 @@ import tailwindcss from '@tailwindcss/vite';
  * 产出的 CSS 里就几乎没有工具类，界面变成一堆裸文本。
  */
 export default defineConfig({
+  /*
+   * 编译期平台常量 —— 共享组件靠它区分「这个构建是给谁的」。
+   * 打包时被替换成字面量，另一端的分支直接不进产物。
+   * 详见 packages/ui/src/platform.ts。
+   */
+  define: { __PLATFORM__: JSON.stringify('extension') },
   root: resolve(import.meta.dirname, 'preview'),
   publicDir: false,
   plugins: [react(), tailwindcss()],

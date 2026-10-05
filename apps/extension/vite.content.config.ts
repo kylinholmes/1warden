@@ -20,6 +20,12 @@ const WHICH = process.env['COFFER_ENTRY'] === 'webauthn'
   : { entry: 'src/content.ts', name: 'CofferContent', file: 'content.js' };
 
 export default defineConfig({
+  /*
+   * 编译期平台常量 —— 共享组件靠它区分「这个构建是给谁的」。
+   * 打包时被替换成字面量，另一端的分支直接不进产物。
+   * 详见 packages/ui/src/platform.ts。
+   */
+  define: { __PLATFORM__: JSON.stringify('extension') },
   root: 'src',
   publicDir: false,
   build: {

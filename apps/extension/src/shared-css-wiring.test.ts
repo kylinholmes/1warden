@@ -28,7 +28,9 @@ import { describe, it, expect } from 'vitest';
 const FILES = import.meta.glob(
   [
     './styles.css',
+    './popup/Popup.tsx',
     '../../../apps/desktop/src/styles.css',
+    '../../../packages/ui/src/components.css',
     '../../../packages/ui/package.json',
   ],
   { query: '?raw', import: 'default', eager: true },
@@ -117,4 +119,40 @@ describe('两个 app 都告诉 Tailwind 去扫共享包', () => {
       ).toBe(true);
     });
   }
+});
+
+/**
+ * 第三个守卫：**弹窗必须有显式宽度**。
+ *
+ * `.vault-shell` 上有 `container-type: inline-size`，而 inline-size 容器
+ * **算宽度时假装自己没有内容**。浏览器弹窗恰恰是按内容撑开的 ——
+ * 于是它算出 0 宽，整个弹窗缩成一条线。
+ *
+ * ⚠️ 这个真的发生过，而且把用户挡在外面。抓不到它的原因值得记下来：
+ * **preview 截图看不见** —— 截图工具总是给一个固定视口宽度，
+ * 所以「弹窗撑不开」这件事在仪器里根本不出现。
+ * 我是靠用户发来的截图才知道的。
+ *
+ * 所以这条守卫不测渲染，只测**这两件事必须同时成立**：
+ * 外壳是 inline-size 容器 ⟹ 弹窗根元素有显式的宽度。
+ */
+describe('弹窗外壳的尺寸约束', () => {
+  it('vault-shell 确实是 inline-size 容器（否则下面那条是空转的）', () => {
+    const css = sourceEndingWith('packages/ui/src/components.css')!;
+    expect(css).toContain('container-type: inline-size');
+    expect(css).toContain('container-name: shell');
+  });
+
+  it('弹窗根元素声明了显式宽度', () => {
+    const tsx = sourceEndingWith('popup/Popup.tsx')!;
+    const root = tsx.match(/<div className="screen-in vault-shell[^"]*"/)?.[0] ?? '';
+    expect(root, '没找到弹窗根元素 —— 选择器变了就要一起改').not.toBe('');
+    expect(
+      /w-\[\d+px\]/.test(root),
+      '弹窗根元素没有显式宽度。`.vault-shell` 是 inline-size 容器，' +
+        '它算宽度时假装自己没有内容 —— 而弹窗是按内容撑开的，' +
+        '结果是整个弹窗缩成一条线。加一个 `w-[440px]`（并同步改高度那条注释）。\n' +
+        '根元素：' + root,
+    ).toBe(true);
+  });
 });

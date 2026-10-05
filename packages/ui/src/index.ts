@@ -10,6 +10,7 @@
  *   · `./clipboard`     剪贴板约定（常量 + 纯函数，**无 React**，离屏文档也用）
  *   · `./CopyButton`    复制按钮（界面与反馈）
  *   · `./SecretField`   可复制/可揭示的字段 + 详情分组 `Section`
+ *   · `./platform`      编译期平台常量（`__PLATFORM__`，见那个文件顶部）
  *
  * 每一样都是**先发现了两份拷贝**才搬过来的：令牌那份扩展端已经落后一版，
  * 图标那份扩展端自己写着「和桌面端是同一套画法」—— 同一套画法写两遍，
@@ -33,3 +34,4 @@ export * from './clipboard';
 export * from './CopyButton';
 export * from './SecretField';
 export * from './destinations';
+export * from './platform';
