@@ -6,6 +6,7 @@ export * from './session';
 export * from './client';
 export * from './sync-engine';
 export * from './search';
+export * from './sort';
 export * from './url-match';
 export * from './item-display';
 export * from './icons';
