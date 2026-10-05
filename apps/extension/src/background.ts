@@ -22,10 +22,12 @@ import { ext } from './ext-api';
 import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
   summaryOf, iconDomainOf, avatarOf, searchItems, buildReport,
+  parseImport, detectImportFormat, IMPORT_FORMATS, type ImportFormatId,
   type AccountInfo, type FieldDescriptor, type VaultItem,
   type CaptureDecision,
   totpCode,
 } from '@coffer/vault';
+import { fromBase64 } from '@coffer/crypto';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
 import { extensionSyncCache } from './sync-cache';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
@@ -221,6 +223,7 @@ type Request =
   | { type: 'coffer:folders' }
   | { type: 'coffer:security' }
   | { type: 'coffer:item'; itemId: string }
+  | { type: 'coffer:import-parse'; dataBase64: string; format?: string }
   | { type: 'coffer:fill'; itemId: string; tabId: number }
   | { type: 'coffer:generate'; length?: number; digits?: boolean; symbols?: boolean }
   | { type: 'coffer:pending'; tabId?: number }
@@ -491,6 +494,40 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
         identity: i.identity,
         sshKey: i.sshKey,
         secureNote: i.secureNote,
+      };
+    }
+
+    /**
+     * **导入的第一步：只解析、不上传。**
+     *
+     * 用户选完文件先看到「会导入多少条、有哪些文件夹」，确认了才真写。
+     * 直接写的话，选错文件（比如把一个无关的 csv 拖进来）会让库里多出
+     * 一堆垃圾，而删除比导入麻烦得多。
+     *
+     * ⚠️ 文件走 base64 过消息通道：`parseImport` 要的是 `Uint8Array`，
+     * 而扩展的消息通道只保证结构化克隆 —— 直接传 `Uint8Array` 在
+     * 某些浏览器上会被转成 `{0:..,1:..}` 那种普通对象。
+     */
+    case 'coffer:import-parse': {
+      const bytes = fromBase64(req.dataBase64);
+      const format = detectImportFormat(bytes) ?? (req.format as ImportFormatId | undefined) ?? null;
+      if (format === null) {
+        throw new Error('认不出这个文件的格式（支持 1PUX / Bitwarden / KeePass / CSV）');
+      }
+      const parsed = await parseImport(bytes, format);
+      return {
+        format,
+        formatLabel: IMPORT_FORMATS.find((f) => f.id === format)?.label ?? format,
+        /* 文件夹只有名字（`ImportResult` 不单独给一份），按名字去重 */
+        folders: new Set(parsed.items.map((i) => i.folderName).filter((n) => n !== null)).size,
+        items: parsed.items.length,
+        /* 被跳过的行也要报 —— 静默丢掉是最容易被当成「导入坏了」的那种 */
+        skipped: parsed.skipped.length,
+        /* 按类型分一下，让用户在确认前知道「里面有 3 张卡」这种 */
+        byType: parsed.items.reduce<Record<string, number>>((m, i) => {
+          m[i.type] = (m[i.type] ?? 0) + 1;
+          return m;
+        }, {}),
       };
     }
 
