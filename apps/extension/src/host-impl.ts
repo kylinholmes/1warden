@@ -34,7 +34,8 @@ export function installExtensionHost(): void {
   };
 
   installHost({
-    fetch: (url, init) => fetch(url, init),
+    /* 包一层而不是直接给 `fetch`：它依赖全局对象的 `this`，脱开调用会抛 Illegal invocation */
+    fetch: (...args) => fetch(...args),
     storage,
   });
 }

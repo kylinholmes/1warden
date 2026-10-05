@@ -9,7 +9,7 @@ import { IconAlert } from '@coffer/ui';
 import { ToastProvider } from './components/Toast';
 import { useQuickBridge } from './use-quick-bridge';
 import { listen } from '@tauri-apps/api/event';
-import { tauriFetch } from './transport';
+import { host } from '@coffer/ui';
 
 export function App() {
   // 会话状态就是界面的状态。让 session 的变化驱动重渲染 ——
@@ -19,7 +19,7 @@ export function App() {
   // 自动锁定：空闲 15 分钟。外壳层还应监听系统休眠/锁屏 —— 那是 Tauri 侧的事。
   const client = useMemo(() => new VaultClient({
     // 桌面端的所有 HTTP 都走 Rust 侧 —— WebView 的 fetch 会被 CORS 拦掉
-    fetchImpl: tauriFetch,
+    fetchImpl: host().fetch,
     autoLockMs: 15 * 60 * 1000,
     onLock: () => forceRender(),
     // 同步开始/结束时也要重渲染 —— 界面上那个转圈靠它

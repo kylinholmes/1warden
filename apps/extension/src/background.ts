@@ -29,6 +29,7 @@ import {
   totpCode,
 } from '@coffer/vault';
 import { fromBase64 } from '@coffer/crypto';
+import { host } from '@coffer/ui';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
 import { extensionSyncCache } from './sync-cache';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
@@ -110,8 +111,11 @@ let client: VaultClient | null = null;
 
 function newClient(): VaultClient {
   return new VaultClient({
-    // 扩展有 host permission，直接 fetch 就行
-    fetchImpl: (...args) => fetch(...args),
+    /*
+     * 走宿主。扩展端这一步是直接 `fetch`（有 host permission，不受 CORS 限制），
+     * 桌面端走 Rust —— 差异只在这一行，见 `@coffer/ui/host`。
+     */
+    fetchImpl: host().fetch,
     deviceStore,
     autoLockMs: 15 * 60 * 1000,
     onLock: () => { void sessions.clear(); },

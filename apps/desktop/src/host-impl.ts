@@ -32,11 +32,8 @@ export function installDesktopHost(): void {
   };
 
   installHost({
-    /*
-     * 签名收窄到 Host 要的那几项。`tauriFetch` 的返回是 `Response`，
-     * 和接口一致 —— 所以这里是一次真实的适配，不是类型体操。
-     */
-    fetch: (url, init) => tauriFetch(url, init as RequestInit),
+    /* `tauriFetch` 本来就是 `typeof fetch` —— 直接用，不做适配层 */
+    fetch: tauriFetch,
     storage,
   });
 }

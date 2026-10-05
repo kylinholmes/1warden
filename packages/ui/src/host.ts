@@ -38,12 +38,16 @@ export interface Host {
   /**
    * 发 HTTP。
    *
-   * ⚠️ 签名故意收窄成 `(url, init) => Promise<Response>` 而不是
-   * `typeof fetch`：桌面端这条路径上有 Rust 侧的证书处理、
-   * 超时和错误归类，它**不是** `fetch` 的完整替代品。写成 `typeof fetch`
-   * 会让人以为流式读取、`AbortSignal` 那些都能用。
+   * ⚠️ 签名是完整的 `typeof fetch` —— 因为它要**直接交给** `VaultClient`
+   * 的 `fetchImpl` 接缝。我一度把它收窄成 `(url, init) => Response`，
+   * 想用类型表达「桌面端那条路不是 fetch 的完整替代品」，结果当场挡住了
+   * 唯一的消费者。**警告写在注释里就够了，不该写进类型里** ——
+   * 类型要做的是让对的用法通过，不是让可能的误用变得难写。
+   *
+   * 实际限制（桌面端）：流式读取、`AbortSignal`、自定义 `cache` 那些
+   * 由 Rust 侧决定支持多少，见 `apps/desktop/src/transport.ts` 顶部。
    */
-  fetch(url: string, init?: { method?: string; headers?: Record<string, string>; body?: string }): Promise<Response>;
+  fetch: typeof fetch;
 
   /** 落盘存储。**只放密文与偏好** —— 明文密钥永不落盘（spec 不变量 S1） */
   storage: HostStorage;
