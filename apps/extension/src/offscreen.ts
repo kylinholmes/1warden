@@ -1,4 +1,5 @@
 import { ext } from './ext-api';
+import { CLIPBOARD_CLEAR_MS } from '@coffer/ui/clipboard';
 
 /**
  * 离屏文档 —— 只干一件事：在 N 秒后清空剪贴板。
@@ -32,8 +33,15 @@ import { ext } from './ext-api';
  * 就成了空头承诺。
  */
 
-/** 剪贴板留存时长。与桌面端保持一致。 */
-const CLEAR_AFTER_MS = 30_000;
+/*
+ * ⚠️ 取值来自 `@coffer/ui/clipboard` —— **不要在这里再写一个 30_000**。
+ * 这条「复制后多久收回剪贴板」的约定在桌面端和弹窗里也是同一个数，
+ * 各写一份的话，改了三处漏一处就开始不一致（而那种不一致没人会注意到）。
+ *
+ * 走 `/clipboard` 这个独立入口而不是 `@coffer/ui`：离屏文档是个极小的脚本，
+ * 为了一个常量把 React 和整套图标打进去不划算。
+ */
+const CLEAR_AFTER_MS = CLIPBOARD_CLEAR_MS;
 
 let expected: string | null = null;
 let timer: ReturnType<typeof setTimeout> | null = null;

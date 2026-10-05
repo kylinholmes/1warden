@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { ext } from '../ext-api';
-import { IconGlyph, IconAlert, IconArrowLeft, IconCheck, IconCopy, IconGlobe, IconStar } from '@coffer/ui';
+import { CopyButton, IconGlyph, IconAlert, IconArrowLeft, IconGlobe, IconStar } from '@coffer/ui';
 import { IconStore } from '@coffer/vault';
 import type { ItemSummary } from './Popup';
 
@@ -34,27 +34,24 @@ export function ItemDetail({ item, icons, busy, onBack, onFill }: {
   onBack: () => void;
   onFill: () => void;
 }) {
-  const [copied, setCopied] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
-  async function copy(field: 'username' | 'password' | 'totp') {
-    setError(null);
-    try {
-      /*
-       * 后台取出明文并安排好「30 秒后清理」，值回到这里由我们写剪贴板。
-       * 写在这里而不是后台：弹窗**有用户手势**，而且写失败时能当场报错 ——
-       * 放到离屏文档里写就没人能告诉用户「这次没复制上」。
-       */
+  /**
+   * 取值那一步 —— 明文**只在复制那一刻过手**，不躺在组件状态里。
+   *
+   * 写剪贴板由 `CopyButton` 自己做（弹窗**有用户手势**，写失败时能当场报错；
+   * 放到离屏文档里写就没人能告诉用户「这次没复制上」）。
+   * 「30 秒后按值清空」则交给**后台**安排 —— 弹窗一关它的定时器就没了，
+   * 而「复制完忘了剪贴板里还有密码」正是弹窗已经关掉的那种情况。
+   */
+  function valueFor(field: 'username' | 'password' | 'totp'): () => Promise<string> {
+    return async () => {
       const res = await ext.runtime.sendMessage({
         type: 'coffer:copy', itemId: item.id, field,
       }) as { value?: string; error?: string };
       if (res?.error) throw new Error(res.error);
-      await navigator.clipboard.writeText(res?.value ?? '');
-      setCopied(field);
-      setTimeout(() => setCopied(null), 2000);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : '复制失败');
-    }
+      return res?.value ?? '';
+    };
   }
 
   const fields: { key: 'username' | 'password' | 'totp'; label: string; value: string }[] = [];
@@ -114,15 +111,11 @@ export function ItemDetail({ item, icons, busy, onBack, onFill }: {
                 <dd className="min-w-0 flex-1">
                   <span className="secret block truncate text-md">{f.value}</span>
                 </dd>
-                <button
-                  type="button"
-                  onClick={() => { void copy(f.key); }}
-                  aria-label={`复制${f.label}`}
+                <CopyButton
+                  getValue={valueFor(f.key)}
+                  onError={(e) => setError(e instanceof Error ? e.message : '复制失败')}
                   className="flex shrink-0 items-center gap-1.5 rounded-[var(--radius-sm)] px-2 py-1 text-xs text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
-                >
-                  {copied === f.key ? <IconCheck size={13} /> : <IconCopy size={13} />}
-                  {copied === f.key ? '已复制' : '复制'}
-                </button>
+                />
               </div>
             ))}
           </dl>

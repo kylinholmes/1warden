@@ -4,8 +4,8 @@ import { generatePassword, passwordStrength } from '@coffer/crypto';
 import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
-  IconAlert, IconCheck, IconClose, IconCopy, IconGlobe, IconGlyph, IconKey, IconLock,
-  IconSearch, IconSpinner, IconStar, ItemRow,
+  CopyButton, IconAlert, IconClose, IconGlobe, IconGlyph, IconKey, IconLock,
+  IconSearch, IconSpinner, IconStar, ItemRow, scheduleClipboardClear,
 } from '@coffer/ui';
 import { Rail, type Destination } from './Rail';
 import { ItemDetail } from './ItemDetail';
@@ -649,11 +649,9 @@ function Generator() {
   const [digits, setDigits] = useState(true);
   const [symbols, setSymbols] = useState(true);
   const [value, setValue] = useState('');
-  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     setValue(generatePassword({ length, digits, symbols }));
-    setCopied(false);
   }, [length, digits, symbols]);
 
   const strength = value ? passwordStrength(value) : null;
@@ -672,25 +670,17 @@ function Generator() {
         <code className="secret min-w-0 flex-1 truncate rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-2 py-1.5 text-sm">
           {value}
         </code>
-        <button
-          onClick={async () => {
-            await navigator.clipboard.writeText(value);
-            setCopied(true);
-            // 30 秒后清空剪贴板，且只在内容仍是我们的东西时才清
-            setTimeout(async () => {
-              try {
-                if (await navigator.clipboard.readText() === value) {
-                  await navigator.clipboard.writeText('');
-                }
-              } catch { /* 读剪贴板可能被拒绝 */ }
-            }, 30_000);
-          }}
-          data-state={copied ? 'ok' : undefined}
+        {/*
+          和别处**同一个** `CopyButton` —— 早先这里是内联的一份，
+          连「30 秒后按值清空」都自己写了一遍（而且那份定时器随弹窗关闭而消失，
+          和详情里走后台离屏文档的那条路径并不一致）。
+        */}
+        <CopyButton
+          getValue={async () => value}
+          onCopied={scheduleClipboardClear}
           className="btn btn-quiet shrink-0 gap-1.5 text-[var(--accent)]"
-        >
-          {copied ? <IconCheck size={12} /> : <IconCopy size={12} />}
-          {copied ? '已复制' : '复制'}
-        </button>
+          iconSize={12}
+        />
       </div>
 
       <label className="mt-2.5 flex items-center gap-2 text-xs text-[var(--ink-secondary)]">

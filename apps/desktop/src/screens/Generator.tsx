@@ -2,9 +2,9 @@ import { useEffect, useState, type ReactNode } from 'react';
 import { generatePassword, generatePassphrase, passwordStrength } from '@coffer/crypto';
 import { FloatingPanel } from '../components/FloatingPanel';
 import { Segmented } from '../components/Segmented';
-import { CopyButton } from '../components/CopyButton';
+
 import { STRENGTH_COLORS, STRENGTH_LABELS, crackSentence } from '../components/strength';
-import { IconClose, IconDice } from '@coffer/ui';
+import { CopyButton, IconClose, IconDice, scheduleClipboardClear } from '@coffer/ui';
 
 /**
  * 生成器 —— 侧栏里和「导入」并列的一块内容，做成浮层。
@@ -121,7 +121,11 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
             <IconDice size={13} />
             换一个
           </button>
-          <CopyButton value={value} className="btn btn-primary gap-1.5" />
+          <CopyButton
+            getValue={async () => value}
+            onCopied={scheduleClipboardClear}
+            className="btn btn-primary gap-1.5"
+          />
         </div>
 
         {strength && (

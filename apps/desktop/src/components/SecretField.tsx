@@ -1,5 +1,5 @@
-import { useState, useEffect, useRef, useCallback } from 'react';
-import { IconCheck, IconCopy, IconEye } from '@coffer/ui';
+import { useState, useEffect } from 'react';
+import { CopyButton, IconEye, scheduleClipboardClear } from '@coffer/ui';
 
 interface Props {
   label: string;
@@ -25,33 +25,6 @@ interface Props {
  */
 export function SecretField({ label, value, masked = false }: Props) {
   const [revealed, setRevealed] = useState(false);
-  const [copied, setCopied] = useState(false);
-  const clearTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  // 组件卸载（切换条目）时清掉计时器
-  useEffect(() => () => { if (clearTimer.current) clearTimeout(clearTimer.current); }, []);
-
-  const copy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(value);
-      setCopied(true);
-      if (clearTimer.current) clearTimeout(clearTimer.current);
-      clearTimer.current = setTimeout(async () => {
-        setCopied(false);
-        // ⚠️ 只有剪贴板里还是**我们写进去的那个值**时才清空。
-        // 无脑清空会抹掉用户在这 30 秒里后来复制的东西 —— 那是个数据丢失 bug。
-        try {
-          const current = await navigator.clipboard.readText();
-          if (current === value) await navigator.clipboard.writeText('');
-        } catch {
-          // 读剪贴板可能被系统拒绝；那就保持原样，宁可不清理也不要误删
-        }
-      }, 30_000);
-    } catch {
-      setCopied(false);
-    }
-  }, [value]);
-
   const hidden = masked && !revealed;
   const shown = hidden ? '•'.repeat(Math.min(value.length, 20)) : value;
 
@@ -86,16 +59,15 @@ export function SecretField({ label, value, masked = false }: Props) {
             <IconEye size={14} off={revealed} />
           </button>
         )}
-        <button
-          onClick={copy}
-          aria-label="复制"
-          title="复制（30 秒后自动清空剪贴板）"
+        <CopyButton
+          getValue={async () => value}
+          onCopied={scheduleClipboardClear}
+          iconOnly
+          iconSize={14}
           className={`rounded-[var(--radius-sm)] p-1.5 transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
-            copied ? 'text-[var(--safe)]' : 'text-[var(--ink-tertiary)] hover:text-[var(--ink-primary)]'
+            'text-[var(--ink-tertiary)] hover:text-[var(--ink-primary)]'
           }`}
-        >
-          {copied ? <IconCheck size={14} /> : <IconCopy size={14} />}
-        </button>
+        />
       </span>
     </div>
   );

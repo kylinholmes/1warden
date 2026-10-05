@@ -13,12 +13,13 @@ import { ItemEditor } from './ItemEditor';
 import { Settings } from './Settings';
 import { Generator } from './Generator';
 import { FloatingPanel } from '../components/FloatingPanel';
-import { CopyButton } from '../components/CopyButton';
+
 import { useToast } from '../components/Toast';
 import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
-  IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash, ItemRow, TypeIcon,
+  CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
+  ItemRow, TypeIcon, scheduleClipboardClear,
 } from '@coffer/ui';
 
 interface Props {
@@ -1093,7 +1094,7 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
             {remaining}
           </span>
         </span>
-        <CopyButton value={code} />
+        <CopyButton getValue={async () => code} onCopied={scheduleClipboardClear} />
       </span>
     </div>
   );

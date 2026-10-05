@@ -12,35 +12,10 @@ import {
   type VaultClient, type VaultItem,
 } from '@coffer/vault';
 import { QUICK_WINDOW, type QuickItem, type QuickAction } from './quick-bridge';
+import { copyWithAutoClear } from '@coffer/ui';
 
 /** 面板一次最多列这么多 —— 再多就得靠搜索了，列满反而看不清 */
 const MAX_RESULTS = 8;
-
-/** 剪贴板留存时长。与扩展和 CopyButton 保持一致。 */
-const CLEAR_AFTER_MS = 30_000;
-
-let clearTimer: ReturnType<typeof setTimeout> | null = null;
-
-/**
- * 写剪贴板并安排 30 秒后清空。
- *
- * ⚠️ 只有剪贴板里**还是我们写进去的东西**时才清 —— 无条件清空会把用户后来
- * 复制的内容抹掉。
- */
-async function copyToClipboard(value: string): Promise<void> {
-  await navigator.clipboard.writeText(value);
-  if (clearTimer !== null) clearTimeout(clearTimer);
-  clearTimer = setTimeout(() => {
-    clearTimer = null;
-    void (async () => {
-      try {
-        if (await navigator.clipboard.readText() === value) {
-          await navigator.clipboard.writeText('');
-        }
-      } catch { /* 读不了就不动它 */ }
-    })();
-  }, CLEAR_AFTER_MS);
-}
 
 /**
  * 把条目压成面板要的那几个字段。
@@ -103,20 +78,20 @@ export function useQuickBridge(client: VaultClient): void {
           switch (e.payload.action) {
             case 'copy-password': {
               if (item.login.password === null) { await reply(false, '这条记录没有密码'); return; }
-              await copyToClipboard(item.login.password);
+              await copyWithAutoClear(item.login.password);
               await reply(true, '密码已复制，30 秒后清空');
               return;
             }
             case 'copy-username': {
               if (item.login.username === null) { await reply(false, '这条记录没有用户名'); return; }
-              await copyToClipboard(item.login.username);
+              await copyWithAutoClear(item.login.username);
               await reply(true, '用户名已复制，30 秒后清空');
               return;
             }
             case 'copy-totp': {
               const code = await totpCode(item);
               if (code === null) { await reply(false, '这条记录没有验证码'); return; }
-              await copyToClipboard(code.code);
+              await copyWithAutoClear(code.code);
               await reply(true, '验证码已复制');
               return;
             }
