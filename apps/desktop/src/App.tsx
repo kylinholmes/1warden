@@ -1,6 +1,6 @@
 import { useMemo, useReducer, useCallback, useEffect, Component, type ErrorInfo } from 'react';
 import { VaultClient, type SessionStatus } from '@coffer/vault';
-import { syncCache, kdfCache } from './sync-cache';
+import { syncCache, kdfCache } from '@coffer/ui';
 import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';

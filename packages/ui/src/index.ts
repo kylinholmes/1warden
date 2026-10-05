@@ -40,4 +40,5 @@ export * from './destinations';
 export * from './platform';
 export * from './host';
 export * from './icon-disk';
+export * from './sync-cache';
 export * from './NavRail';

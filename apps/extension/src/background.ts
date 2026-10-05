@@ -31,7 +31,7 @@ import {
 import { fromBase64 } from '@coffer/crypto';
 import { host } from '@coffer/ui';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
-import { extensionSyncCache, kdfCache } from './sync-cache';
+import { syncCache, kdfCache } from '@coffer/ui';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
 import { handleWebauthn, type WebauthnPayload } from './webauthn';
 
@@ -123,7 +123,7 @@ function newClient(): VaultClient {
      * 上次同步的密文缓存 —— 解锁后先拿它把界面填上，再去问服务端。
      * 桌面端早就有，扩展端一直缺（每次解锁都要等一整轮网络）。
      */
-    syncCache: extensionSyncCache,
+    syncCache,
     /* 省掉解锁时的那次 prelogin —— 桌面端一直有，扩展端以前没有 */
     kdfCache,
   });
