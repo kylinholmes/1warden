@@ -219,6 +219,18 @@ export function stubChrome(): void {
       }
       case 'coffer:breach-check':
         return { breached: [{ itemId: '3', count: 12 }] };
+      /*
+       * 编辑用的草稿 —— 整条，但密码是 `null`（界面上显示成占位符，
+       * 留空 = 不改）。桩要跟着真实后台的形状回，这条预览才有意义。
+       */
+      case 'coffer:item-draft': {
+        const it = ITEMS.find((x) => x.id === String(msg.itemId));
+        if (!it) return { item: null, hasPassword: false };
+        return {
+          item: { ...it, login: it.login === null ? null : { ...it.login, password: null } },
+          hasPassword: it.login?.password != null,
+        };
+      }
       case 'coffer:folders':
         return { folders: [
           { id: 'f1', name: '工作' },

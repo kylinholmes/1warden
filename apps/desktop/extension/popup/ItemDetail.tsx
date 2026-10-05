@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import { ext } from '../ext-api';
 import {
-  IDENTITY_LABEL, ItemIcon, IconAlert, IconArrowLeft, IconStar, Section, SecretField,
+  IDENTITY_LABEL, IconPencil, ItemIcon, IconAlert, IconArrowLeft, IconStar, Section, SecretField,
 } from '@coffer/ui';
 import { IconStore } from '@coffer/vault';
 import type { ItemSummary } from './Popup';
@@ -47,12 +47,13 @@ interface ExtraFields {
 }
 
 
-export function ItemDetail({ item, icons, busy, onBack, onFill }: {
+export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
   item: ItemSummary;
   icons: IconStore | null;
   busy: boolean;
   onBack: () => void;
   onFill: () => void;
+  onEdit: () => void;
 }) {
   const [error, setError] = useState<string | null>(null);
   /*
@@ -120,6 +121,15 @@ export function ItemDetail({ item, icons, busy, onBack, onFill }: {
           在大标题就在正下方时也是这么处理的。
         */}
         <span className="min-w-0 flex-1" />
+        <button
+          type="button"
+          onClick={onEdit}
+          aria-label="编辑"
+          title="编辑"
+          className="grid h-9 w-9 shrink-0 place-items-center rounded-full text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+        >
+          <IconPencil size={16} />
+        </button>
         {item.favorite && <IconStar size={15} filled className="mr-1 shrink-0 text-[var(--caution)]" />}
       </header>
 

@@ -271,6 +271,20 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
                   </button>
                 </div>
               </div>
+              {/*
+                ⚠️ 「留空 = 不改」必须**说出来**。
+                扩展端拿不到现有密码（弹窗只收摘要），所以编辑一条已有记录时
+                这一栏是空的 —— 而空栏自己不会告诉用户「保存不会把它抹掉」。
+                用户要么以为本来就空、要么以为存下去就清掉了，两种都是错的。
+
+                判据是「在编辑一条已有记录，而密码是空的」：
+                新建时 `isNew` 为真，走的是另一条路。
+              */}
+              {!isNew && draft.login?.password === null && (
+                <p className="mt-1.5 text-xs text-[var(--ink-tertiary)]">
+                  留空则保持原密码不变。想换就填一个新的，或点「生成」。
+                </p>
+              )}
               <StrengthMeter value={draft.login?.password ?? ''} />
             </Row>
 

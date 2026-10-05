@@ -208,3 +208,17 @@ if (new URLSearchParams(location.search).get('state') === 'new') {
     document.querySelector<HTMLButtonElement>('button[aria-label="新建条目"]')?.click();
   }, 500);
 }
+
+/*
+ * `?state=edit`：点开一条，再点 app bar 上的铅笔 —— 核对**编辑**那一屏。
+ * 走真实点击路径（先详情、再编辑），验的才是真的。
+ */
+if (new URLSearchParams(location.search).get('state') === 'edit') {
+  setTimeout(() => {
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('GitHub'))?.click();
+  }, 400);
+  setTimeout(() => {
+    document.querySelector<HTMLButtonElement>('button[aria-label="编辑"]')?.click();
+  }, 900);
+}

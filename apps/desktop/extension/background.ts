@@ -236,6 +236,7 @@ type Request =
   | { type: 'coffer:breach-check' }
   | { type: 'coffer:save-item'; draft: VaultItem }
   | { type: 'coffer:item'; itemId: string }
+  | { type: 'coffer:item-draft'; itemId: string }
   | { type: 'coffer:import-parse'; dataBase64: string; format?: string }
   | { type: 'coffer:import-commit'; dataBase64: string; format?: string }
   | { type: 'coffer:fill'; itemId: string; tabId: number }
@@ -579,6 +580,33 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
      * 而扩展的消息通道只保证结构化克隆 —— 直接传 `Uint8Array` 在
      * 某些浏览器上会被转成 `{0:..,1:..}` 那种普通对象。
      */
+    /**
+     * 编辑用的草稿 —— **整条，但密码是 `null`**。
+     *
+     * ⚠️ 这是「编辑」和「查看」的分界。
+     *
+     * 查看那条路（`coffer:item`）只给 notes / card / identity / sshKey /
+     * secureNote，密码要 `coffer:reveal` 一个字段一个字段地要 ——
+     * 弹窗**刻意**拿不到明文（spec 不变量 S1）。
+     *
+     * 编辑要的是「表单能填满」，而表单里**除了密码**都是可以给弹窗的东西：
+     * 用户名、网址、验证码、备注、卡号……它们本来就在详情里显示得出来。
+     * 密码留 `null`，界面上显示成占位符，用户**留空 = 不改**
+     * （见 `coffer:save-item` 里那段回填）。
+     *
+     * 所以这一条**没有**在读那条不变量上开口子：出去的仍然没有明文密码。
+     */
+    case 'coffer:item-draft': {
+      const session = await sessions.load();
+      if (!session) throw new Error('保险库未解锁');
+      const i = session.items.find((x) => x.id === req.itemId);
+      if (!i) throw new Error('找不到这条记录');
+      return {
+        item: { ...i, login: i.login === null ? null : { ...i.login, password: null } },
+        hasPassword: i.login?.password !== null && i.login?.password !== undefined,
+      };
+    }
+
     /*
      * 保存一条（新建或编辑）。
      *
@@ -590,7 +618,25 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
      */
     case 'coffer:save-item': {
       const c = await unlockedClient();
-      const saved = await c.saveItem(req.draft);
+      const draft = req.draft;
+
+      /*
+       * ⚠️ **密码是 `null` 表示「用户没动它」，不是「清空」。**
+       *
+       * 弹窗走的是 `coffer:item-draft`，那条路不给明文密码 —— 所以它交回来
+       * 的草稿里那一栏本来就是空的。不回填的话，用户只改了个名字就会
+       * **把密码抹掉**，而他不会知道，直到下次登录。
+       *
+       * 回填放在**后台**：只有这里同时握有旧值和要写的新值。
+       * 代价是用户没法把密码清空 —— 那是很罕见的需求，而「改个名字
+       * 顺手删掉密码」是必现的。
+       */
+      if (draft.id && draft.login !== null && draft.login.password === null) {
+        const old = (await sessions.load())?.items.find((x) => x.id === draft.id);
+        if (old?.login?.password != null) draft.login.password = old.login.password;
+      }
+
+      const saved = await c.saveItem(draft);
       await refreshBadges();
       return { item: saved };
     }

@@ -203,13 +203,13 @@ export function Popup() {
   }, []);
   const [openId, setOpenId] = useState<string | null>(null);
   /**
-   * 新建条目那一屏开着没有。
+   * 编辑器：`null` = 关着；`{ item: null }` = 新建；`{ item }` = 编辑。
    *
-   * ⚠️ **只有新建，没有编辑** —— 编辑要先决定「打开时整条揭示给弹窗」
-   * 还是「密码留空 = 不改」（读那条不变量 S1 的口子开不开）。
-   * 新建不涉及这个问题：用户敲的是自己刚打的字。
+   * ⚠️ 编辑用的草稿走 `coffer:item-draft` —— **整条，但密码是 `null`**。
+   * 也就是说弹窗仍然拿不到明文密码，那条不变量没开口子；
+   * 「留空 = 不改」由后台在保存时回填（只有它同时握有旧值和新值）。
    */
-  const [editorOpen, setEditorOpen] = useState(false);
+  const [editor, setEditor] = useState<{ item: VaultItem | null } | null>(null);
 
   // 解锁后拉一次主列表。锁定或登出时清掉 —— 留着的话下次解锁会先闪出旧数据
   useEffect(() => {
@@ -436,10 +436,10 @@ export function Popup() {
           await refresh();
           return r.item;
         }}
-        item={null}
-        open={editorOpen}
-        onCancel={() => setEditorOpen(false)}
-        onDone={() => setEditorOpen(false)}
+        item={editor?.item ?? null}
+        open={editor !== null}
+        onCancel={() => setEditor(null)}
+        onDone={() => setEditor(null)}
       />
 
       <div className="vault-content" data-detail={openItem !== null}>
@@ -582,7 +582,7 @@ export function Popup() {
                         搜索靠内容 */}
                     <button
                       type="button"
-                      onClick={() => setEditorOpen(true)}
+                      onClick={() => setEditor({ item: null })}
                       aria-label="新建条目"
                       title="新建条目"
                       className="btn btn-quiet shrink-0 p-1.5"
@@ -661,6 +661,16 @@ export function Popup() {
                 busy={busy}
                 onBack={() => setOpenId(null)}
                 onFill={() => { void fill(openItem.id); }}
+                onEdit={() => {
+                  /*
+                   * 拉草稿再开编辑器。**不**把 `openItem`（摘要）直接当草稿 ——
+                   * 摘要里没有备注、卡号、自定义字段那些，拿它当草稿的话
+                   * 一保存就把它们全抹掉了。
+                   */
+                  void send<{ item: VaultItem }>({ type: 'coffer:item-draft', itemId: openItem.id })
+                    .then((r) => setEditor({ item: r.item }))
+                    .catch((e: unknown) => setError(apiMessageOf(e)));
+                }}
               />
             ) : (
               <EmptyDetail />
