@@ -12,7 +12,7 @@
  *
  * 前置：
  *   ./scripts/dev-server.sh start     # Vaultwarden
- *   cd apps/extension && bun run build
+ *   bun run build:extension
  *
  * 跑：
  *   bun run scripts/e2e-extension.ts
@@ -23,7 +23,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 const EDGE = '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge';
-const DIST = join(import.meta.dir, '..', 'apps', 'extension', 'dist');
+const DIST = join(import.meta.dir, '..', 'apps', 'desktop', 'dist-extension');
 const PORT = 9222;
 const PAGE_PORT = 8899;
 /**

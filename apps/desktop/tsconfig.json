@@ -10,15 +10,41 @@
     "declaration": false,
     "jsx": "react-jsx",
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
-    "types": ["vite/client"],
+    /*
+     * `chrome` 是为 `extension/**` 加的（扩展目标）。
+     *
+     * ⚠️ 这**顺带放宽了 `src/`**：加进来之后，桌面端的代码里写 `chrome.*`
+     * 也能通过类型检查，然后在浏览器里炸掉 —— 而这个 tsconfig 以前是拦得住
+     * 这件事的。拦它的责任移交给了 `extension/chrome-api-guard.test.ts`：
+     * 那个守卫的扫描范围已经扩到 `../src`，两边任何一处出现裸 `chrome`
+     * 都会被它拦下。**放宽类型的同时必须补上守卫，否则就是净损失。**
+     *
+     * ⚠️ 反过来说，`node` 仍然**不在** `types` 里，而且是故意的：
+     * 加进去的话 `process` / `Buffer` / `__dirname` 会在整个源码里通过
+     * 类型检查（包括 content script 和 popup），然后在浏览器里炸掉。
+     * 见 chrome-api-guard.test.ts 顶部对这条的说明。
+     */
+    "types": ["vite/client", "chrome"],
     "noEmit": true
   },
   /*
-   * ⚠️ `preview/**` 也在内。
+   * ⚠️ 四块都在内，各有各的理由：
    *
-   * 它一度不在 —— 于是预览的假数据和真实类型脱节了都没人知道，
-   * 而预览是**用来看的仪器**：仪器骗人比没有仪器更糟。
-   * 它用的是同一套组件，类型本来就该一起管。
+   * - `extension/**` —— 扩展目标的源码（含 content script 与 popup）。
+   *   它以前是 `apps/extension`，有自己的 tsconfig。合并成一个 app 之后
+   *   如果这里漏了它，扩展代码就**没有任何人做类型检查**了。
+   * - `preview/**` 与 `preview-extension/**` —— 预览的假数据曾经和真实类型
+   *   脱节了都没人知道，而预览是**用来看的仪器**：仪器骗人比没有仪器更糟。
+   *   它们用的是同一套组件，类型本来就该一起管。
    */
-  "include": ["src/**/*.ts", "src/**/*.tsx", "preview/**/*.ts", "preview/**/*.tsx"]
+  "include": [
+    "src/**/*.ts",
+    "src/**/*.tsx",
+    "extension/**/*.ts",
+    "extension/**/*.tsx",
+    "preview/**/*.ts",
+    "preview/**/*.tsx",
+    "preview-extension/**/*.ts",
+    "preview-extension/**/*.tsx"
+  ]
 }

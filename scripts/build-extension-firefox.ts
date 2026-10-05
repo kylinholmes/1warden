@@ -4,7 +4,7 @@
  *
  *   bun run scripts/build-extension-firefox.ts
  *
- * 产物 `apps/extension/dist-firefox/` —— **不覆盖** `dist/`，
+ * 产物 `apps/desktop/dist-firefox/` —— **不覆盖** `dist-extension/`，
  * 所以 Chrome 那条路一点没变。
  *
  * ## 为什么是「先构建、再改写」而不是两套源码
@@ -27,11 +27,11 @@ import { cpSync, readFileSync, writeFileSync, rmSync, existsSync } from 'node:fs
 import { join } from 'node:path';
 
 const ROOT = join(import.meta.dir, '..');
-const SRC = join(ROOT, 'apps/extension/dist');
-const OUT = join(ROOT, 'apps/extension/dist-firefox');
+const SRC = join(ROOT, 'apps/desktop/dist-extension');
+const OUT = join(ROOT, 'apps/desktop/dist-firefox');
 
 if (!existsSync(SRC)) {
-  console.error(`❌ 找不到 ${SRC} —— 先跑一次 apps/extension 的 build`);
+  console.error(`❌ 找不到 ${SRC} —— 先跑一次 \`bun run build:extension\``);
   process.exit(1);
 }
 
@@ -78,7 +78,7 @@ m['browser_specific_settings'] = {
 };
 
 writeFileSync(manifestPath, JSON.stringify(m, null, 2) + '\n');
-console.log('✅ 已产出 Firefox 版：apps/extension/dist-firefox');
+console.log('✅ 已产出 Firefox 版：apps/desktop/dist-firefox');
 console.log('   ⚠️ 复制可用，但**不会自动清空剪贴板**（Firefox 没有 offscreen API，');
 console.log('      所以「30 秒后清理」那个定时器没有地方活）。');
 console.log('   装入方式：Zen/Firefox 的 about:debugging → 临时载入 → 选 dist-firefox/manifest.json');

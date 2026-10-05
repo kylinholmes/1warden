@@ -29,7 +29,11 @@ const FILES = import.meta.glob(
   [
     './styles.css',
     './popup/Popup.tsx',
-    '../../../apps/desktop/src/styles.css',
+    // ⚠️ 桌面端的 styles.css 就在**上一层**。合并成一个 app 之前，扩展在
+    // `apps/extension/src/`，到这里要绕 `../../../apps/desktop/`；现在两边
+    // 同住 `apps/desktop/`，最短形式塌缩成了 `../src/`。glob 里写长的那个
+    // 也能解析到同一个文件，但**拿回来的键是最短形式** —— 见下面按后缀查的说明。
+    '../src/styles.css',
     '../../../packages/ui/src/components.css',
     '../../../packages/ui/package.json',
   ],
@@ -39,10 +43,16 @@ const FILES = import.meta.glob(
 /**
  * ⚠️ 按**后缀**查，不按写下的路径查。
  *
- * Vite 会把 glob 的键规范化成最短形式：`'../../../apps/desktop/src/styles.css'`
- * 拿回来的键是 `'../../desktop/src/styles.css'`（`../../../apps/` 就等于 `../../`）。
- * 拿写下的字符串去索引会得到 `undefined`，而且报出来的是「读不到 CSS」这种
- * 指错方向的错 —— 我自己先踩了一次。
+ * Vite 会把 glob 的键规范化成最短形式，而**最短形式取决于测试文件自己住在哪**：
+ *
+ * | 测试文件的位置 | 写下的 glob | 拿回来的键 |
+ * |---|---|---|
+ * | `apps/extension/src/`（旧） | `'../../../apps/desktop/src/styles.css'` | `'../../desktop/src/styles.css'` |
+ * | `apps/desktop/extension/`（今） | 同上 | `'../src/styles.css'` |
+ *
+ * 拿写下的字符串去索引会得到 `undefined`，而报出来的是「读不到 CSS」这种
+ * 指错方向的错 —— **这个坑我踩了两次**，两次都是因为改了文件的位置。
+ * 所以判据用后缀（`'src/styles.css'`），它跟着文件走、不跟着位置走。
  */
 function sourceEndingWith(suffix: string): string | undefined {
   const key = Object.keys(FILES).find((k) => k.endsWith(suffix));
@@ -68,13 +78,13 @@ describe('@coffer/ui 的 CSS 在两个 app 里都接上了', () => {
 
   it('glob 确实读到了三份文件', () => {
     expect(sourceEndingWith('./styles.css')).toBeTypeOf('string');
-    expect(sourceEndingWith('desktop/src/styles.css')).toBeTypeOf('string');
+    expect(sourceEndingWith('src/styles.css')).toBeTypeOf('string');
     expect(sourceEndingWith('packages/ui/package.json')).toBeTypeOf('string');
   });
 
   for (const [label, suffix] of [
     ['扩展端', './styles.css'],
-    ['桌面端', 'desktop/src/styles.css'],
+    ['桌面端', 'src/styles.css'],
   ] as const) {
     it(`${label}引了共享包导出的每一份 CSS`, () => {
       const css = sourceEndingWith(suffix)!;
@@ -107,7 +117,7 @@ describe('@coffer/ui 的 CSS 在两个 app 里都接上了', () => {
 describe('两个 app 都告诉 Tailwind 去扫共享包', () => {
   for (const [label, suffix] of [
     ['扩展端', './styles.css'],
-    ['桌面端', 'desktop/src/styles.css'],
+    ['桌面端', 'src/styles.css'],
   ] as const) {
     it(`${label}声明了指向 packages/ui 的 @source`, () => {
       const css = sourceEndingWith(suffix)!;

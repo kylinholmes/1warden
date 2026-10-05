@@ -19,7 +19,7 @@
 import './stub-chrome';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
-import { Popup } from '../src/popup/Popup';
+import { Popup } from '../extension/popup/Popup';
 import './preview.css';
 
 createRoot(document.getElementById('root')!).render(

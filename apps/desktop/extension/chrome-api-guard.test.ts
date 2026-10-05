@@ -43,15 +43,25 @@ import ts from 'typescript';
  *
  * ## 为什么用 `import.meta.glob` 而不是 `node:fs`
  *
- * 扩展的 tsconfig 把 `types` 限定成 `["chrome", "vite/client"]` —— **故意不含
- * `node`**。加了的话，`process` / `Buffer` / `__dirname` 会在整个扩展源码里
- * 通过类型检查（包括 content script 和 popup），然后在浏览器里炸掉。
+ * 这里的 `types` 限定成 `["vite/client", "chrome"]` —— **故意不含 `node`**。
+ * 加了的话，`process` / `Buffer` / `__dirname` 会在整个源码里通过类型检查
+ * （包括 content script 和 popup），然后在浏览器里炸掉。
  * 那是这个项目已经踩过的坑（「类型放行、运行时崩」），不能为了一个测试破例。
  *
  * `vite/client` 本来就在白名单里，所以用 Vite 自己的 glob 读源码 ——
  * 同样是构建期求值，一行配置都不用改。
+ *
+ * ## ⚠️ 扫描范围**包含 `../src`（桌面端）
+ *
+ * 这不是顺手扩大的。合并成一个 app 之后，`chrome` 类型对所有源码都可见了 ——
+ * 包括桌面端的 `src/`，而那里 `chrome` **根本不存在**，写下去就是运行时
+ * `chrome is not defined`。以前两个 app 各有各的 tsconfig，桌面端那份没有
+ * `chrome` 类型，写错会直接编译不过；合并把这个天然的防线拆掉了。
+ *
+ * 所以防线挪到这里：**两边一起扫**。桌面端本来就一个裸 `chrome` 都不该有，
+ * 这条对它恒成立；万一将来有人从扩展代码里复制一段过来，这里会当场变红。
  */
-const SOURCES = import.meta.glob('./**/*.{ts,tsx}', {
+const SOURCES = import.meta.glob(['./**/*.{ts,tsx}', '../src/**/*.{ts,tsx}'], {
   query: '?raw',
   import: 'default',
   eager: true,
@@ -91,7 +101,9 @@ function rawNamespaceUses(file: string, source: string): string[] {
       const parent = node.parent;
       if (!ts.isPropertyAccessExpression(parent) || !rootsAtRawNamespace(parent)) {
         const { line } = sf.getLineAndCharacterOfPosition(node.getStart(sf));
-        found.push(`${file.replace('./', '')}:${line + 1}  ${node.getText(sf).split('\n')[0]!.slice(0, 70)}`);
+        // 只去掉**行首**的 `./`。用 `replace('./','')` 会命中 `../src/…`
+        // 里第二个字符起的那一段，报出来变成 `.src/…` —— 一个查不到的路径。
+        found.push(`${file.replace(/^\.\//, '')}:${line + 1}  ${node.getText(sf).split('\n')[0]!.slice(0, 70)}`);
       }
     }
     ts.forEachChild(node, visit);

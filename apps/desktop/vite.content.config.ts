@@ -14,10 +14,14 @@ import { resolve } from 'node:path';
  *
  *   content  → 隔离世界，负责字段上报、提交检测、WebAuthn 转发
  *   webauthn → MAIN world，负责替换 navigator.credentials
+ *
+ * ⚠️ 产物写进和 `vite.extension.config.ts` **同一个** `dist-extension/`，
+ * 所以这里的 `emptyOutDir` 必须是 `false` —— 否则第二次构建会把
+ * popup / background 删掉。
  */
 const WHICH = process.env['COFFER_ENTRY'] === 'webauthn'
-  ? { entry: 'src/webauthn-inject.ts', name: 'CofferWebauthn', file: 'webauthn.js' }
-  : { entry: 'src/content.ts', name: 'CofferContent', file: 'content.js' };
+  ? { entry: 'webauthn-inject.ts', name: 'CofferWebauthn', file: 'webauthn.js' }
+  : { entry: 'content.ts', name: 'CofferContent', file: 'content.js' };
 
 export default defineConfig({
   /*
@@ -26,15 +30,15 @@ export default defineConfig({
    * 详见 packages/ui/src/platform.ts。
    */
   define: { __PLATFORM__: JSON.stringify('extension') },
-  root: 'src',
+  root: resolve(__dirname, 'extension'),
   publicDir: false,
   build: {
-    outDir: resolve(__dirname, 'dist'),
+    outDir: resolve(__dirname, 'dist-extension'),
     emptyOutDir: false,   // 别把上一次构建的其他产物删掉
     target: 'chrome116',
     sourcemap: true,
     lib: {
-      entry: resolve(__dirname, WHICH.entry),
+      entry: resolve(__dirname, 'extension', WHICH.entry),
       name: WHICH.name,
       formats: ['iife'],
       fileName: () => WHICH.file,

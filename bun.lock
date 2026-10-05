@@ -26,26 +26,6 @@
       "devDependencies": {
         "@tailwindcss/vite": "4.1.14",
         "@tauri-apps/cli": "2.12.1",
-        "@types/react": "19.2.2",
-        "@types/react-dom": "19.2.1",
-        "@vitejs/plugin-react": "5.1.0",
-        "tailwindcss": "4.1.14",
-        "vite": "8.3.2",
-      },
-    },
-    "apps/extension": {
-      "name": "@coffer/extension",
-      "version": "0.0.0",
-      "dependencies": {
-        "@coffer/api": "workspace:*",
-        "@coffer/crypto": "workspace:*",
-        "@coffer/ui": "workspace:*",
-        "@coffer/vault": "workspace:*",
-        "react": "19.3.0",
-        "react-dom": "19.3.0",
-      },
-      "devDependencies": {
-        "@tailwindcss/vite": "4.1.14",
         "@types/chrome": "0.1.34",
         "@types/react": "19.2.2",
         "@types/react-dom": "19.2.1",
@@ -143,8 +123,6 @@
     "@coffer/crypto": ["@coffer/crypto@workspace:packages/crypto"],
 
     "@coffer/desktop": ["@coffer/desktop@workspace:apps/desktop"],
-
-    "@coffer/extension": ["@coffer/extension@workspace:apps/extension"],
 
     "@coffer/ui": ["@coffer/ui@workspace:packages/ui"],
 

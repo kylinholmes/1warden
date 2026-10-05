@@ -2,7 +2,20 @@ import { defineConfig } from 'vitest/config';
 
 export default defineConfig({
   test: {
-    include: ['packages/*/src/**/*.test.ts', 'apps/*/src/**/*.test.ts'],
+    /*
+     * ⚠️ 第三条是扩展的测试：它们住在 `extension/` 子目录而不是 `src/` ——
+     * 那是**另一个构建目标**的代码（content script / popup / service worker），
+     * 不属于桌面端的 `src/`。漏掉这一条的话，那些守卫测试会静默地一条都不跑，
+     * 而少跑测试不会报错，只是「通过」得比平时快。
+     *
+     * （写这条注释时踩了个老坑：第一版里直接写了 glob 原文，里面的
+     *  `星号斜杠` 把块注释提前闭合了 —— 和 host-impl.ts 里那次一模一样。）
+     */
+    include: [
+      'packages/*/src/**/*.test.ts',
+      'apps/*/src/**/*.test.ts',
+      'apps/*/extension/**/*.test.ts',
+    ],
     // 契约测试需要运行中的服务器，故意排除在单元测试之外 ——
     // `bun run test` 必须永远不需要网络。
     exclude: ['**/node_modules/**', '**/dist/**', '**/*.contract.test.ts'],

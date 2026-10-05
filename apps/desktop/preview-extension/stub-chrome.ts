@@ -27,7 +27,7 @@
 const which = new URLSearchParams(location.search).get('state') ?? 'matched';
 
 import { avatarOf, iconDomainOf, searchItems, summaryOf, type VaultItem } from '@coffer/vault';
-import type { ItemSummary } from '../src/popup/Popup';
+import type { ItemSummary } from '../extension/popup/Popup';
 
 /**
  * ⚠️ 假数据用**真实的展示函数**算出来，不手写字段。
@@ -42,12 +42,22 @@ import type { ItemSummary } from '../src/popup/Popup';
  */
 function loginItem(
   id: string, name: string,
-  opts: { username?: string; uri?: string; totp?: boolean; favorite?: boolean; type?: string; rawType?: number; folderId?: string } = {},
+  /*
+   * ⚠️ `type` 的类型是 `VaultItem['type']`（联合），**不是 `string`**。
+   *
+   * 写成 `string` 的时候这里一直编译不过 —— 而这个文件以前根本不在任何
+   * tsconfig 的 `include` 里（老扩展那份只管 `src/**`，预览在 `preview/**`），
+   * 所以没人知道。合并成一个 app 之后它进了类型检查，当场就红了。
+   *
+   * 这正是预览桩最该被管住的地方：它是**用来看的仪器**，仪器和真实类型脱节
+   * 就会把「仪器坏了」显示成「产品坏了」（这个文件顶上就记着一次）。
+   */
+  opts: { username?: string; uri?: string; totp?: boolean; favorite?: boolean; type?: VaultItem['type']; rawType?: number; folderId?: string } = {},
 ): VaultItem {
   const type = opts.type ?? 'login';
   return {
     id, type, rawType: opts.rawType ?? 1, name, nameFailed: false,
-    notes: null, notesFailed: false, folderId: null,
+    notes: null, notesFailed: false,
     favorite: opts.favorite ?? false, reprompt: 0,
     createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
     deletedAt: null, archivedAt: null, wrappedKey: null,
