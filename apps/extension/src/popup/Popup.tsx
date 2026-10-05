@@ -7,7 +7,8 @@ import {
   CopyButton, IconAlert, IconClose, IconDice, IconGlobe, IconGlyph, IconItems, IconKey,
   IconFolder, IconImport, IconKeyboard, IconLock, IconSearch, IconShield, IconSpinner, IconStar,
   ItemRow, NavDrawer, NavRow, Section,
-  GRADE_LABEL, STRENGTH_LABELS, WEAK_REASON, countByType, crackSentence, host, iconStoreFor,
+  GRADE_LABEL, STRENGTH_LABELS, WEAK_REASON, apiMessageOf, countByType, crackSentence,
+  host, iconStoreFor,
   scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
@@ -399,7 +400,7 @@ export function Popup() {
                 await send({ type: 'coffer:connect', ...p });
                 await refresh();
               } catch (e) {
-                setError(e instanceof Error ? e.message : '连接失败');
+                setError(apiMessageOf(e));
               } finally { setBusy(false); }
             }} />
           </div>

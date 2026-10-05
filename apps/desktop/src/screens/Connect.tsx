@@ -2,8 +2,7 @@ import { useState, useRef, useEffect, type FormEvent } from 'react';
 import type { VaultClient, TwoFactorChallenge } from '@coffer/vault';
 import { probeCertificate, trustCertificate, type CertInfo } from '../trust';
 import {
-  IconAlert, IconArrowLeft, IconChevronDown, IconGlobe, IconLock,
-  IconPlus, IconServer, IconSpinner,
+  IconAlert, IconArrowLeft, IconChevronDown, IconGlobe, IconLock, IconPlus, IconServer, IconSpinner, apiMessageOf,
 } from '@coffer/ui';
 
 interface Props {
@@ -132,7 +131,7 @@ export function Connect({ client, onConnected }: Props) {
       } else if (isCertUntrusted(err)) {
         await offerCertificate();
       } else {
-        setError(messageOf(err));
+        setError(apiMessageOf(err));
       }
     } finally {
       setBusy(false);
@@ -151,7 +150,7 @@ export function Connect({ client, onConnected }: Props) {
     try {
       setCert(await probeCertificate(serverUrl.trim()));
     } catch (e) {
-      setError(messageOf(e));
+      setError(apiMessageOf(e));
     }
   }
 
@@ -168,7 +167,7 @@ export function Connect({ client, onConnected }: Props) {
       await client.connectWithTwoFactor(code.trim(), challenge?.providers[0] ?? 0, remember);
       onConnected();
     } catch (err) {
-      setError(messageOf(err));
+      setError(apiMessageOf(err));
     } finally {
       setBusy(false);
     }
@@ -181,7 +180,7 @@ export function Connect({ client, onConnected }: Props) {
       await trustCertificate(serverUrl.trim(), cert.fingerprint);
       setCert(null);
     } catch (e) {
-      setError(messageOf(e));
+      setError(apiMessageOf(e));
       setBusy(false);
       return;
     }
@@ -497,17 +496,5 @@ function shortDate(value: string): string {
   return Number.isNaN(t) ? value : new Date(t).toLocaleDateString('zh-CN');
 }
 
-/** 把 ApiError 变成用户能看懂的话 —— 区分「密码错」和「连不上」是解锁屏的明确要求 */
-function messageOf(err: unknown): string {
-  const kind = (err as { kind?: string } | null)?.kind;
-  switch (kind) {
-    case 'network': return '连不上服务器，请检查地址与网络';
-    case 'timeout': return '服务器响应超时';
-    case 'auth': return '邮箱或主密码不正确';
-    case 'rateLimited': return '尝试过于频繁，请稍后再试';
-    case 'malformedResponse': return '服务器返回了无法理解的响应，可能不是 Vaultwarden';
-    case 'certUntrusted': return '服务器证书无法验证';
-    case 'server': return '服务器出错了';
-    default: return err instanceof Error ? err.message : '未知错误';
-  }
-}
+/* `messageOf` 搬到 `@coffer/ui` 的 `apiMessageOf` 了 —— 扩展端也要用
+   同一套措辞（它以前直接把服务端的英文原文显示给用户）。 */
