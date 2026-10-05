@@ -18,7 +18,8 @@ import {
   IconAlert, IconDice, IconFolder, IconGear, IconImport,
   IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  ItemRow, SecretField, Section, TypeIcon, scheduleClipboardClear,
+  ItemRow, SecretField, Section, TYPE_LABEL, TypeIcon, countByType,
+  scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 
 interface Props {
@@ -114,12 +115,19 @@ export function VaultView({ client, onLock }: Props) {
    * 其他分类的数字全变成 0，像是数据在丢。
    */
   const typeCounts = useMemo(() => {
-    const m = new Map<string, number>();
-    for (const i of items) m.set(i.type, (m.get(i.type) ?? 0) + 1);
-    // 按数量降序 —— 条目多的类别是用户更常用的，排前面少找一次
-    return [...m.entries()]
-      .map(([type, count]) => ({ type, count }))
-      .sort((a, b) => b.count - a.count);
+    /*
+     * ⚠️ 顺序和词表都来自 `@coffer/ui` 的 `typeDestinations` —— 弹窗的 rail
+     * 用的是同一个函数。
+     *
+     * 早先这里按**数量降序**（「条目多的排前面少找一次」），听着合理，
+     * 但它让整个导航在每次同步之后**重新洗牌** —— 用户刚记住「卡片在第三个」，
+     * 多同步两条就变成第五个了。位置稳定比少找一次更重要。
+     */
+    return typeDestinations(countByType(items), 16).map((d) => ({
+      type: d.key.slice('type:'.length),
+      label: d.label,
+      count: d.count ?? 0,
+    }));
   }, [items]);
 
   const filtered = useMemo(() => {
@@ -517,7 +525,8 @@ function Sidebar(props: {
   /** 后台正在同步 —— 列表已可用，只是在更新 */
   syncing: boolean;
   /** 各类别的条目数，**只含 count > 0 的**（侧栏不渲染空类别） */
-  typeCounts: { type: string; count: number }[];
+  /** 有内容的类型。`label` 来自共享词表 —— 不要再在这里查 `TYPE_LABEL` */
+  typeCounts: { type: string; label: string; count: number }[];
   /** 设置里的开关 —— 关掉整节不显示 */
   showTypes: boolean;
   onCreateFolder: (name: string) => Promise<void>;
@@ -717,7 +726,7 @@ function Sidebar(props: {
               <NavItem
                 key={t.type}
                 icon={<TypeIcon type={t.type} size={16} />}
-                label={TYPE_LABEL[t.type] ?? t.type}
+                label={t.label}
                 count={t.count}
                 active={props.category.kind === 'type' && props.category.type === t.type}
                 onClick={() => props.onSelect({ kind: 'type', type: t.type })}
@@ -1099,10 +1108,8 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
   );
 }
 
-const TYPE_LABEL: Record<string, string> = {
-  login: '登录', secureNote: '安全笔记', card: '信用卡',
-  identity: '身份信息', sshKey: 'SSH 密钥', unknown: '未知类型',
-};
+/* `TYPE_LABEL` 搬到 `@coffer/ui` 了 —— 两端各写一份的后果是
+   同一个类型在两个地方叫不同的名字（真发生过：「信用卡」vs「卡片」）。 */
 
 const IDENTITY_LABEL: Record<string, string> = {
   title: '称谓', firstName: '名', middleName: '中间名', lastName: '姓',

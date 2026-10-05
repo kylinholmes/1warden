@@ -1,4 +1,4 @@
-import { TypeIcon, IconDice, IconItems, IconStar, IconLock } from '@coffer/ui';
+import { IconDice, IconItems, IconStar, IconLock, type NavDestination } from '@coffer/ui';
 
 /**
  * 弹窗最左侧的导航栏 —— **Material 3 的 navigation rail**。
@@ -30,10 +30,12 @@ import { TypeIcon, IconDice, IconItems, IconStar, IconLock } from '@coffer/ui';
  * 两端的**分类体系**必须一致 —— 用户在桌面端把某条放进「身份」，
  * 在弹窗里就该在同一个地方找到它。
  */
-export type Destination =
-  | 'all' | 'favorites'
-  | 'login' | 'card' | 'identity' | 'secureNote' | 'sshKey'
-  | 'generator';
+/**
+ * 目的地。固定项是几个字面量，类型项是 `type:<条目类型>` ——
+ * ⚠️ 类型**不是**写死的联合：哪些类型存在由数据决定（见 `typeDestinations`）。
+ * 写死的话，服务端多一种类型、或者本地库里一个有都没有，导航就会撒谎。
+ */
+export type Destination = 'all' | 'favorites' | 'generator' | `type:${string}`;
 
 interface Entry {
   key: Destination;
@@ -45,32 +47,47 @@ interface Entry {
 const EXPANDED_W = 200;
 const COLLAPSED_W = 80;
 
-/** 类别那几项的图标用 `TypeIcon` —— 和条目列表里的类型图标是同一套画法 */
-function groups(): Entry[][] {
-  return [
+/**
+ * 分组。
+ *
+ * ⚠️ 类型那一组**由数据来**（`typeDestinations`）而不是写死五个 ——
+ * 写死的话，库里一条卡片都没有时，导航上仍挂着一个「信用卡」，
+ * 点进去是空的。两端共用同一份类型词表和顺序（见 `@coffer/ui` 的
+ * `destinations.tsx`）：早先桌面端叫「信用卡 / 安全笔记」，弹窗叫
+ * 「卡片 / 笔记」，同一个东西两个名字。
+ */
+function groups(typeDests: NavDestination[]): Entry[][] {
+  /*
+   * `typeDestinations` 产出的键**一定**是 `type:<类型>` —— 那个函数就是这么建的。
+   * 类型系统看不出这一点（`NavDestination.key` 是给两端共用的普通 string），
+   * 所以这里收窄一次，而不是把 Rail 的键类型放宽成 string（那会让
+   * 「点了一个不存在的分类」在类型上变得合法）。
+   */
+  const toEntry = (d: NavDestination): Entry => ({
+    key: d.key as Destination, label: d.label, icon: d.icon,
+  });
+  const all: Entry[][] = [
     [
       { key: 'all', label: '全部', icon: <IconItems size={20} /> },
       { key: 'favorites', label: '收藏', icon: <IconStar size={20} /> },
     ],
-    [
-      { key: 'login', label: '登录', icon: <TypeIcon type="login" size={20} /> },
-      { key: 'card', label: '卡片', icon: <TypeIcon type="card" size={20} /> },
-      { key: 'identity', label: '身份', icon: <TypeIcon type="identity" size={20} /> },
-      { key: 'secureNote', label: '笔记', icon: <TypeIcon type="secureNote" size={20} /> },
-      { key: 'sshKey', label: 'SSH', icon: <TypeIcon type="sshKey" size={20} /> },
-    ],
+    typeDests.map(toEntry),
     [
       { key: 'generator', label: '生成', icon: <IconDice size={20} /> },
     ],
   ];
+  // 空组整个不渲染 —— 标题下面什么都没有比没有标题更糟
+  return all.filter((g) => g.length > 0);
 }
 
-export function Rail({ current, onSelect, expanded, onToggleExpanded, onLock }: {
+export function Rail({ current, onSelect, expanded, onToggleExpanded, onLock, types }: {
   current: Destination;
   onSelect: (d: Destination) => void;
   expanded: boolean;
   onToggleExpanded: () => void;
   onLock: () => void;
+  /** 有内容的类型 —— 由 `typeDestinations(countByType(items), 20)` 得来 */
+  types: NavDestination[];
 }) {
   return (
     <nav
@@ -104,7 +121,7 @@ export function Rail({ current, onSelect, expanded, onToggleExpanded, onLock }: 
       </button>
 
       <div className="flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto px-3">
-        {groups().map((group, gi) => (
+        {groups(types).map((group, gi) => (
           <div key={gi} className="flex flex-col gap-0.5">
             {group.map((e) => (
               <RailItem

@@ -5,7 +5,7 @@ import { IconStore } from '@coffer/vault';
 import { iconStoreFor } from '../icon-store';
 import {
   CopyButton, IconAlert, IconClose, IconGlobe, IconGlyph, IconKey, IconLock,
-  IconSearch, IconSpinner, IconStar, ItemRow, scheduleClipboardClear,
+  IconSearch, IconSpinner, IconStar, ItemRow, countByType, scheduleClipboardClear, typeDestinations,
 } from '@coffer/ui';
 import { Rail, type Destination } from './Rail';
 import { ItemDetail } from './ItemDetail';
@@ -124,6 +124,12 @@ export function Popup() {
   const [hits, setHits] = useState<ItemSummary[] | null>(null);
 
   /*
+   * 导航上的类型项 —— 由**数据**来，两端共用同一份词表和顺序。
+   * 建在 `browse`（整个库）上而不是当前筛选结果上：导航不该随筛选自己变。
+   */
+  const railTypes = useMemo(() => typeDestinations(countByType(browse), 20), [browse]);
+
+  /*
    * ── 三层的状态
    *
    * `dest`   第一层 rail 选中的分类
@@ -227,7 +233,7 @@ export function Popup() {
       case 'all': return true;
       case 'favorites': return i.favorite;
       case 'generator': return false;
-      default: return i.type === dest;
+      default: return `type:${i.type}` === dest;
     }
   };
 
@@ -239,6 +245,7 @@ export function Popup() {
     */
     <div className="screen-in flex h-[560px]">
       <Rail
+        types={railTypes}
         current={dest}
         onSelect={(d) => { setDest(d); setOpenId(null); }}
         expanded={railExpanded}

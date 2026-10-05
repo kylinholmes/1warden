@@ -41,21 +41,29 @@ import type { ItemSummary } from '../src/popup/Popup';
  * 桩和真实数据的脱节在类型上就不成立了。
  */
 function loginItem(
-  id: string, name: string, opts: { username?: string; uri?: string; totp?: boolean; favorite?: boolean } = {},
+  id: string, name: string,
+  opts: { username?: string; uri?: string; totp?: boolean; favorite?: boolean; type?: string; rawType?: number } = {},
 ): VaultItem {
+  const type = opts.type ?? 'login';
   return {
-    id, type: 'login', rawType: 1, name, nameFailed: false,
+    id, type, rawType: opts.rawType ?? 1, name, nameFailed: false,
     notes: null, notesFailed: false, folderId: null,
     favorite: opts.favorite ?? false, reprompt: 0,
     createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
     deletedAt: null, archivedAt: null, wrappedKey: null,
-    login: {
+    login: type === 'login' ? {
       username: opts.username ?? null,
       password: 'x', totp: opts.totp ? 'JBSWY3DPEHPK3PXP' : null,
       uris: opts.uri === undefined ? [] : [{ uri: opts.uri, match: null }],
       passwordRevisionDate: null, fido2Credentials: [],
-    },
-    card: null, identity: null, secureNote: null, sshKey: null,
+    } : null,
+    card: type === 'card' ? {
+      cardholderName: opts.username ?? null, brand: 'Visa', number: '4480 0000 0000 0924',
+      expMonth: '09', expYear: '2029', code: '123',
+    } : null,
+    identity: null,
+    secureNote: type === 'secureNote' ? { type: 0 } : null,
+    sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }
@@ -69,6 +77,9 @@ const ITEMS: VaultItem[] = [
   loginItem('6', 'AWS 生产环境', { username: 'deploy', totp: true }),
   loginItem('7', '家里的路由器', { username: 'root' }),
   loginItem('8', '知乎', { username: '13800138000', uri: 'https://zhihu.com' }),
+  // 其它类型 —— 导航上的类型项是由**数据**来的，全都塞 login 就看不出这件事
+  loginItem('9', '招商银行 Visa', { type: 'card', rawType: 3, username: 'ZHANG SAN', favorite: true }),
+  loginItem('10', '家里 Wi-Fi 密码', { type: 'secureNote', rawType: 2 }),
 ];
 
 /** 和 `background.ts` 里的 `summarise` 同一套函数 —— 这是它存在的意义 */

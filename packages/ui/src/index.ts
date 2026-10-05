@@ -32,3 +32,4 @@ export * from './ItemRow';
 export * from './clipboard';
 export * from './CopyButton';
 export * from './SecretField';
+export * from './destinations';
