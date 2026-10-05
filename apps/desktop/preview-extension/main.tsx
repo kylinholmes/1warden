@@ -222,3 +222,17 @@ if (new URLSearchParams(location.search).get('state') === 'edit') {
     document.querySelector<HTMLButtonElement>('button[aria-label="编辑"]')?.click();
   }, 900);
 }
+
+/*
+ * `?state=reveal`：点开一条，再点密码那一行的「显示」。
+ * 揭示是**点击态**，所以要和 `detail` 分开截 —— 只看静态图验不到它。
+ */
+if (new URLSearchParams(location.search).get('state') === 'reveal') {
+  setTimeout(() => {
+    [...document.querySelectorAll('button')]
+      .find((b) => b.textContent?.includes('GitHub'))?.click();
+  }, 400);
+  setTimeout(() => {
+    document.querySelector<HTMLButtonElement>('button[aria-label="显示"]')?.click();
+  }, 900);
+}

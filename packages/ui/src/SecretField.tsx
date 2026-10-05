@@ -36,6 +36,17 @@ export interface SecretFieldProps {
    */
   getValue?: () => Promise<string>;
   /**
+   * 揭示时取的值。**不传就用 `value`。**
+   *
+   * ⚠️ 和 `getValue` **分开**，虽然两边取的是同一个值 —— 因为它们的
+   * **副作用不同**：复制会安排「30 秒后清空剪贴板」，而揭示不会
+   * （也不该）。复用 `getValue` 的话，每点一次「显示」都会给一个
+   * 从没被复制的值挂上一个清理定时器，明文还多躺一份在离屏文档里。
+   *
+   * 这个错误是**截图发现的**：揭示出来的值显示成了复制那条桩的假值。
+   */
+  revealValue?: () => Promise<string>;
+  /**
    * 复制成功之后。桌面端传 `scheduleClipboardClear`（它有常驻窗口，
    * 定时器有地方活）；弹窗**不传** —— 那边由后台的离屏文档负责，
    * 因为弹窗一关它的定时器就没了。
@@ -45,11 +56,46 @@ export interface SecretFieldProps {
 }
 
 export function SecretField({
-  label, value, masked = false, getValue, onCopied, onCopyError,
+  label, value, masked = false, getValue, revealValue, onCopied, onCopyError,
 }: SecretFieldProps) {
-  const [revealed, setRevealed] = useState(false);
-  const hidden = masked && !revealed;
-  const shown = hidden ? '•'.repeat(Math.min(value.length, 20)) : value;
+  /**
+   * 揭示出来的值。`null` = 遮着。
+   *
+   * ⚠️ 它存的可能是**异步取回来的**，不是 `value` —— 见下面的 `toggle`。
+   */
+  const [revealed, setRevealed] = useState<string | null>(null);
+  const [revealing, setRevealing] = useState(false);
+  const hidden = masked && revealed === null;
+  const shown = hidden ? '•'.repeat(Math.min(value.length, 20)) : (revealed ?? value);
+
+  /**
+   * 揭示 / 遮回去。
+   *
+   * ⚠️ **有 `getValue` 时要去取一次，而不是直接把 `value` 摊开。**
+   *
+   * 桌面端手里有明文，`value` 就是真值，摊开即可。而浏览器弹窗**没有**
+   * （列表接口刻意只回摘要）—— 它传进来的 `value` 是一串占位点。
+   * 以前这个开关只在「`value` 就是真值」时才给（见上面 `masked` 的说明），
+   * 于是弹窗里**根本没有「显示」这个按钮**，而桌面端有。
+   * 同一屏两边一个有眼睛一个没有，用户只会觉得弹窗是残的。
+   *
+   * 接上 `getValue` 之后两边一致：揭示同样是「取一次」，而且明文只在
+   * 揭开那一刻过手，不揭开就永远不到组件状态里 —— 和复制那条路一样。
+   */
+  async function toggle(): Promise<void> {
+    if (revealed !== null) { setRevealed(null); return; }
+    const fetch = revealValue ?? getValue;
+    if (!fetch) { setRevealed(value); return; }
+    setRevealing(true);
+    try {
+      setRevealed(await fetch());
+    } catch (e) {
+      // 取不到就保持遮着 —— 把失败说出去，但不要说成「已显示」
+      onCopyError?.(e);
+    } finally {
+      setRevealing(false);
+    }
+  }
 
   return (
     <div className="group flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-b-0">
@@ -75,12 +121,13 @@ export function SecretField({
         {masked && (
           <button
             type="button"
-            onClick={() => setRevealed((r) => !r)}
-            aria-label={revealed ? '隐藏' : '显示'}
-            title={revealed ? '隐藏' : '显示'}
-            className="rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+            onClick={() => { void toggle(); }}
+            disabled={revealing}
+            aria-label={hidden ? '显示' : '隐藏'}
+            title={hidden ? '显示' : '隐藏'}
+            className="rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)] disabled:opacity-50"
           >
-            <IconEye size={14} off={revealed} />
+            <IconEye size={14} off={hidden} />
           </button>
         )}
         <CopyButton

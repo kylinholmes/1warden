@@ -80,10 +80,14 @@ export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
    * 「30 秒后按值清空」则交给**后台**安排 —— 弹窗一关它的定时器就没了，
    * 而「复制完忘了剪贴板里还有密码」正是弹窗已经关掉的那种情况。
    */
-  function valueFor(field: 'username' | 'password' | 'totp'): () => Promise<string> {
+  /*
+   * 取一个字段的值。`copy` 那条会**顺手安排剪贴板清理**，揭示那条不会 ——
+   * 所以这里按用途分成两个，而不是共用一个（见 SecretField 的 `revealValue`）。
+   */
+  function valueFor(field: 'username' | 'password' | 'totp', via: 'copy' | 'reveal'): () => Promise<string> {
     return async () => {
       const res = await ext.runtime.sendMessage({
-        type: 'coffer:copy', itemId: item.id, field,
+        type: via === 'copy' ? 'coffer:copy' : 'coffer:reveal', itemId: item.id, field,
       }) as { value?: string; error?: string };
       if (res?.error) throw new Error(res.error);
       return res?.value ?? '';
@@ -95,13 +99,25 @@ export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
    * （列表接口刻意只回摘要）。真值只在点「复制」那一刻由后台取一次，
    * 见上面的 `valueFor`。
    *
-   * 所以这几个字段**没有「显示/隐藏」开关**：没有可以揭示的东西。
-   * 桌面端那边有，因为明文就在它手里。
+   * 但「看不了」和「点了才去看」是两回事 —— 后者是正常的密码管理器行为，
+   * 前者是残的。所以密码和验证码走 `SecretField` 的惰性揭示：
+   * 明文只在揭开那一刻由后台取一次，不揭开就永远不到弹窗里来。
    */
-  const fields: { key: 'username' | 'password' | 'totp'; label: string; shown: string }[] = [];
+  const fields: {
+    key: 'username' | 'password' | 'totp'; label: string; shown: string; masked?: boolean;
+  }[] = [];
+  // 用户名不遮 —— 它本来就在摘要里、在列表行里显示着，遮起来只是多一次点击
   if (item.username) fields.push({ key: 'username', label: '用户名', shown: item.username });
-  if (item.hasPassword) fields.push({ key: 'password', label: '密码', shown: '••••••••••' });
-  if (item.hasTotp) fields.push({ key: 'totp', label: '验证码', shown: '••••••' });
+  /*
+   * ⚠️ 密码和验证码**加揭示开关**（`masked`）。
+   *
+   * `shown` 是占位点，真值由 `SecretField` 在用户点「显示」那一刻
+   * 通过 `getValue` 去后台取（见那边 `toggle` 的说明）。
+   * 在此之前弹窗里**没有眼睛按钮**，而桌面端有 —— 同一屏一个有
+   * 一个没有，用户只会觉得弹窗是残的。
+   */
+  if (item.hasPassword) fields.push({ key: 'password', label: '密码', shown: '••••••••••', masked: true });
+  if (item.hasTotp) fields.push({ key: 'totp', label: '验证码', shown: '••••••', masked: true });
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -167,7 +183,8 @@ export function ItemDetail({ item, icons, busy, onBack, onFill, onEdit }: {
                   key={f.key}
                   label={f.label}
                   value={f.shown}
-                  getValue={valueFor(f.key)}
+                  {...(f.masked === true ? { masked: true, revealValue: valueFor(f.key, 'reveal') } : {})}
+                  getValue={valueFor(f.key, 'copy')}
                   onCopied={noLocalClear}
                   onCopyError={(e) => setError(e instanceof Error ? e.message : '复制失败')}
                 />

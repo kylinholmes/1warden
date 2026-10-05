@@ -249,6 +249,12 @@ export function stubChrome(): void {
        */
       case 'coffer:copy':
         return { value: 'preview-fake-secret' };
+      /*
+       * 揭示走的是**和复制同一条路**（`getValue` → 后台取一次）。
+       * 桩照形状回，预览里那个眼睛按钮才是真的在验东西。
+       */
+      case 'coffer:reveal':
+        return { value: 'kJ8#mPq2$vXn9!wZt4&bR' };
       case 'coffer:pending':
         return which === 'pending'
           ? { pending: { url: 'https://github.com/session', username: 'me@example.com', action: 'save', itemId: null } }
