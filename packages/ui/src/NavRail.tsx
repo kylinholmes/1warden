@@ -198,6 +198,7 @@ export function NavRow({ entry, active, expanded, onClick }: {
       <button
         type="button"
         onClick={onClick}
+        data-key={entry.key}
         aria-current={active ? 'page' : undefined}
         title={expanded ? undefined : entry.label}
         className={`nav-item flex w-full rounded-[var(--radius-sm)] transition-colors duration-[var(--dur-fast)] ${
@@ -210,7 +211,7 @@ export function NavRow({ entry, active, expanded, onClick }: {
             : 'text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]'
         }`}
       >
-        <span className={`shrink-0 ${active ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}`}>
+        <span className="nav-icon shrink-0">
           {entry.icon}
         </span>
         <span

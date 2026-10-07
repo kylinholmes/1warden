@@ -72,7 +72,7 @@ export function ImportView({
 }: {
   preview: ImportPreview | null;
   /** 导入中。桌面端和扩展端都由自己的动作产生 */
-  progress: { done: number; total: number } | null;
+  progress: { done: number | null; total: number } | null;
   result: ImportOutcome | null;
   error: string | null;
   /** 已经选过文件 —— 决定措辞和格式选择器要不要出现 */
@@ -185,16 +185,15 @@ function PickStep({ hasFile, onChoose }: { hasFile: boolean; onChoose: () => voi
   );
 }
 
-function Progress({ done, total }: { done: number; total: number }) {
-  const pct = total === 0 ? 0 : (done / total) * 100;
+function Progress({ done, total }: { done: number | null; total: number }) {
+  const pct = done === null ? 35 : total === 0 ? 0 : (done / total) * 100;
   return (
     <div className="card-well p-5">
       <p className="text-sm">
-        正在导入 <span className="font-medium tabular-nums">{done}</span>
-        <span className="text-[var(--ink-tertiary)]"> / {total}</span>
+        正在导入{done === null ? ` ${total} 条记录…` : <><span className="font-medium tabular-nums"> {done}</span><span className="text-[var(--ink-tertiary)]"> / {total}</span></>}
       </p>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--border-subtle)]"
-        role="progressbar" aria-valuenow={done} aria-valuemin={0} aria-valuemax={total}>
+        role="progressbar" aria-label="导入进度" aria-valuenow={done ?? undefined} aria-valuemin={0} aria-valuemax={total}>
         <div className="h-full rounded-full bg-[var(--accent)] transition-[width] duration-[var(--dur-fast)]"
           style={{ width: `${pct}%` }} />
       </div>

@@ -21,7 +21,11 @@ import { ToastProvider, useToast, type ToastInput } from '../src/components/Toas
 import { ItemEditor, installHost } from '@coffer/ui';
 import { initPlatform } from '../src/platform';
 import { initTheme, setThemeMode, type ThemeMode } from '../src/theme';
-import { emptyLogin, type VaultItem, type VaultFolder, type VaultClient } from '@coffer/vault';
+import { emptyLogin, VaultClient, type VaultItem, type VaultFolder } from '@coffer/vault';
+import { createApplicationClient } from '../src/application/client';
+import { createVaultService, itemDetail } from '../src/application/service';
+import { makeUserKey } from '@coffer/crypto';
+import { IS_EXTENSION, summarise } from '@coffer/ui';
 import './preview.css';
 
 /*
@@ -31,7 +35,7 @@ import './preview.css';
  * 少了 initPlatform，左栏**看不出**要给红绿灯让位（--traffic-inset）——
  * 两个都是「截图上看着正常、真机上不对」的那种漏。
  */
-initPlatform();
+if (!IS_EXTENSION) initPlatform();
 initTheme();
 
 function item(over: Partial<VaultItem> & { id: string; name: string }): VaultItem {
@@ -95,13 +99,14 @@ const FOLDERS: VaultFolder[] = [
  * 目的是让三栏布局（含侧栏的文件夹管理）能在不启动原生壳、不登录的情况下
  * 被截图核对。点击类操作会抛错，但预览只用来看，不用来点。
  */
-const fakeClient = {
-  getSession: () => ({
-    items: MESSY.map((i, n) => ({ ...i, folderId: n % 3 === 0 ? 'f1' : null })),
-    folders: FOLDERS,
-    account: { email: 'me@example.com', serverUrl: 'https://vault.example.com', userId: 'u', kdf: { kdf: 0, iterations: 1 } },
-  }),
-} as unknown as VaultClient;
+const previewVault = new VaultClient({ fetchImpl: async () => { throw new Error('预览不会连接服务器'); } });
+const previewAccount = { email: 'me@example.com', serverUrl: 'https://vault.example.com', userId: 'u', kdf: { kdf: 0 as const, iterations: 1 } };
+const previewItems = MESSY.map((i, n) => ({ ...i, folderId: n % 3 === 0 ? 'f1' : null }));
+previewVault.restore({ syncVerified: true, account: previewAccount, userKey: makeUserKey(), token: null, items: previewItems, folders: FOLDERS });
+const fakeClient = createApplicationClient(createVaultService(previewVault), {
+  capabilities: { native: false, browser: false, saveAttachments: false },
+  saveFile: async () => ({ path: null }),
+});
 
 /** 详情栏要看的是一条**内容齐全**的记录：用户名、密码、验证码、网址、备注都有 */
 const DETAIL: VaultItem = item({
@@ -130,7 +135,9 @@ function DetailPane({ children }: { children: React.ReactNode }) {
 }
 
 const params = new URLSearchParams(location.search);
-const which = params.get('screen') ?? 'messy';
+const which = params.get('screen') ?? params.get('state') ?? (IS_EXTENSION ? 'vault' : 'messy');
+if (which === 'clean') previewVault.getSession().replaceData(CLEAN, FOLDERS);
+if (which === 'detail') previewVault.getSession().replaceData([DETAIL], FOLDERS);
 
 /*
  * ⚠️ 预览也**必须装宿主**，否则「记住的账户」在预览里恒为空。
@@ -283,6 +290,7 @@ function SettingsPreview({ flow }: { flow: string }) {
     <>
       <VaultView client={fakeClient} onLock={() => {}} />
       <Settings
+        client={fakeClient}
         open={open}
         account="me@example.com"
         serverUrl="https://vault.example.com"
@@ -407,7 +415,7 @@ function Reopen({ onClick }: { onClick: () => void }) {
  * 一张全白的截图，而截图本身是「成功」的。
  * 提示条自己的预览再在里面套一层，好把可见上限调大。
  */
-createRoot(document.getElementById('root')!).render(
+void fakeClient.initialize().then(() => createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <ToastProvider>
     {which === 'settings' ? (
@@ -418,7 +426,7 @@ createRoot(document.getElementById('root')!).render(
       <ImportScreen client={fakeClient} onImported={() => {}} />
     ) : which === 'detail' ? (
       <DetailPane>
-        <ItemDetail icons={null} client={fakeClient} item={DETAIL} onEdit={() => {}} onDelete={() => {}} onToggleFavorite={() => {}} />
+        <ItemDetail icons={null} client={fakeClient} item={itemDetail(DETAIL)} onBack={() => {}} onEdit={() => {}} onDelete={() => {}} onToggleFavorite={() => {}} />
       </DetailPane>
     ) : which === 'detail-empty' ? (
       <DetailPane><EmptyDetail hasItems /></DetailPane>
@@ -468,8 +476,8 @@ createRoot(document.getElementById('root')!).render(
     ) : which === 'vault' ? (
       <VaultView client={fakeClient} onLock={() => {}} />
     ) : (
-      <SecurityReportView items={which === 'clean' ? CLEAN : MESSY} />
+      <SecurityReportView client={fakeClient} />
     )}
     </ToastProvider>
   </StrictMode>,
-);
+));

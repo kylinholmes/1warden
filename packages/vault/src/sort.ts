@@ -46,7 +46,7 @@ const collator = new Intl.Collator('zh-Hans-CN', { numeric: true, sensitivity: '
  * 它们是坏数据，不是「名字以某个字符开头的条目」—— 跟着倒序跑到最前面
  * 会很突兀，而且用户点它也没有意义。
  */
-export function sortItems(items: readonly VaultItem[], by: SortBy): VaultItem[] {
+export function sortItems<T extends Pick<VaultItem, 'name' | 'nameFailed' | 'createdAt' | 'updatedAt'>>(items: readonly T[], by: SortBy): T[] {
   const out = items.slice();
 
   if (by === SORT_BY.name) {

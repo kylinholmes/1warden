@@ -14,6 +14,7 @@ import {
 import {
   deriveMasterKey, hashMasterPassword, stretchMasterKey, decryptBytes,
   encryptString, makeUserKey,
+  zeroizeKey,
   KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
   type SymmetricKey, type KdfConfig,
 } from '@coffer/crypto';
@@ -22,7 +23,7 @@ import { SyncEngine, type SyncCache, type KdfCache } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
 import { unwrapAttachmentKey, decryptAttachmentContent } from './attachments';
 import { encryptBytes } from '@coffer/crypto';
-import type { AccountInfo, SessionStatus, StoredSession } from './session';
+import type { SessionStatus, StoredSession } from './session';
 import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
 import { emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
@@ -57,6 +58,8 @@ function blankImportItem(): VaultItem {
 export interface VaultClientState extends StoredSession {
   /** 访问令牌。null = 未曾登录过；`chrome.storage.session` 是内存存储，适合放它 */
   token: TokenResponse | null;
+  /** Missing on legacy sessions: absence never proves a completed server sync. */
+  syncVerified?: boolean;
 }
 
 export interface ConnectParams {
@@ -71,14 +74,24 @@ export interface TwoFactorChallenge {
   providersInfo: Record<string, unknown>;
 }
 
+type AuthAccount = Pick<ConnectParams, 'serverUrl' | 'email'>;
+interface PendingAuthentication {
+  generation: number;
+  account: AuthAccount;
+  masterKey: Uint8Array;
+  passwordHash: string;
+  kdf: KdfConfig;
+}
+
 export class VaultClient {
   private http: HttpClient;
   private session: VaultSession;
   private syncEngine: SyncEngine | null = null;
   private token: TokenResponse | null = null;
   private device: DeviceInfo;
-  private masterKey: Uint8Array | null = null;
-  private pendingConnect: ConnectParams | null = null;
+  private authenticationGeneration = 0;
+  private pendingAuthentication: PendingAuthentication | null = null;
+  private syncVerified = false;
 
   /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
   private readonly fetchImpl: typeof fetch;
@@ -87,8 +100,6 @@ export class VaultClient {
   private readonly onPhase: ((label: string, ms: number) => void) | undefined;
   /** 连接起点。只给 `mark` 用 —— 诊断用，不参与任何逻辑 */
   private connectT0 = 0;
-  /** `connect` 算出来的 KDF 参数 —— 两步验证的第二段要用，见那里的说明 */
-  private pendingKdf: KdfConfig | null = null;
 
   /**
    * 报一次「从点登录到现在」的累计耗时。
@@ -141,18 +152,26 @@ export class VaultClient {
       // 用桌面端的值而不是 CLI —— 服务端日志里能看出这是我们的应用
       type: DEVICE_TYPE.macOSDesktop,
       identifier: '',
-      name: 'Coffer',
+      name: '1Warden',
     };
     this.http = this.makeHttp('https://localhost');
     const sessionOpts: ConstructorParameters<typeof VaultSession>[0] = {};
     if (opts.autoLockMs !== undefined) sessionOpts.autoLockMs = opts.autoLockMs;
-    if (opts.onLock) sessionOpts.onLock = opts.onLock;
+    sessionOpts.onLock = () => {
+      this.invalidateAuthentication();
+      this.syncEngine = null;
+      this.session.setSyncing(false);
+      opts.onLock?.();
+    };
     if (opts.onStatus) sessionOpts.onStatusChange = opts.onStatus;
     if (opts.onSync) sessionOpts.onSyncChange = opts.onSync;
     this.session = new VaultSession(sessionOpts);
   }
 
   getSession(): VaultSession { return this.session; }
+
+  /** Cached or partially decrypted data cannot prove that a record is absent. */
+  hasVerifiedSync(): boolean { return this.session.isUnlocked() && this.syncVerified; }
 
   /** 设备标识只读一次，之后缓存 —— 它要落存储，不该每次请求都读一遍 */
   private deviceIdentity(): Promise<string> {
@@ -177,11 +196,12 @@ export class VaultClient {
   /**
    * 连接并解锁。
    *
-   * 若服务器要求两步验证，会抛出一个 `TwoFactorChallenge`（带 `__twoFactor` 标记），
+   * 若服务器要求两步验证，会抛出带 `kind: 'twoFactorRequired'` 的挑战，
    * 调用方应弹出输入框后调用 `connectWithTwoFactor`。
    */
   async connect(params: ConnectParams): Promise<void> {
-    this.pendingConnect = params;
+    this.invalidateAuthentication();
+    const generation = this.authenticationGeneration;
     const bare = this.makeHttp(params.serverUrl);
 
     /*
@@ -197,42 +217,66 @@ export class VaultClient {
      */
     this.connectT0 = performance.now();
 
-    const pl = await prelogin(bare, params.email);
+    const kdf = await this.preloginKdf(bare, params.email);
+    this.assertAuthentication(generation);
     this.mark('prelogin（取 KDF 参数）');
-    const kdf: KdfConfig = pl.kdf === KDF_TYPE_ARGON2ID
-      ? {
-        kdf: KDF_TYPE_ARGON2ID, iterations: pl.iterations,
-        // 服务端没给就退回官方默认值 —— 缺字段不该让登录直接失败
-        memory: pl.memory ?? 64, parallelism: pl.parallelism ?? 4,
-      }
-      : { kdf: KDF_TYPE_PBKDF2, iterations: pl.iterations };
-
-    /*
-     * ⚠️ 存下来给 `connectWithTwoFactor` 用。
-     *
-     * 两步验证会把这次连接**分成两段调用**，而第二段同样要存解锁缓存 ——
-     * 没有这个字段的话它只能再问一次服务端，也就是在最慢的那条链路上
-     * 白白多一轮往返。
-     */
-    this.pendingKdf = kdf;
-
-    const masterKey = await deriveMasterKey(params.masterPassword, params.email, kdf);
-    this.mark('派生主密钥');
-    const masterPasswordHash = await hashMasterPassword(masterKey, params.masterPassword);
-
-    await this.finishConnect(bare, params, masterKey, masterPasswordHash, undefined, kdf);
+    await this.authenticatePassword(params, kdf, generation);
   }
 
   async connectWithTwoFactor(code: string, provider: number, remember: boolean): Promise<void> {
-    const params = this.pendingConnect;
-    if (!params) throw new Error('没有待完成的两步验证流程');
-    if (!this.masterKey) throw new Error('内部状态丢失，请重新开始登录');
+    const pending = this.pendingAuthentication;
+    if (!pending) throw Object.assign(new Error('没有待完成的两步验证流程，请重新输入主密码'), { kind: 'authRestartRequired' });
+    await this.finishAuthentication(pending, { token: code, provider, remember });
+  }
 
-    if (!this.pendingKdf) throw new Error('内部状态丢失，请重新开始登录');
-    const bare = this.makeHttp(params.serverUrl);
-    const hash = await hashMasterPassword(this.masterKey, params.masterPassword);
-    await this.finishConnect(bare, params, this.masterKey, hash,
-      { token: code, provider, remember }, this.pendingKdf);
+  private clearPendingAuthentication(): void {
+    this.pendingAuthentication?.masterKey.fill(0);
+    this.pendingAuthentication = null;
+  }
+
+  private invalidateAuthentication(): void {
+    this.authenticationGeneration++;
+    this.syncVerified = false;
+    this.clearPendingAuthentication();
+  }
+
+  private assertAuthentication(generation: number): void {
+    if (generation !== this.authenticationGeneration) throw new Error('登录请求已过期，保险库可能已锁定');
+  }
+
+  private async authenticatePassword(params: ConnectParams, kdf: KdfConfig, generation: number): Promise<void> {
+    const masterKey = await deriveMasterKey(params.masterPassword, params.email, kdf);
+    try {
+      this.assertAuthentication(generation);
+      this.mark('派生主密钥');
+      const passwordHash = await hashMasterPassword(masterKey, params.masterPassword);
+      this.assertAuthentication(generation);
+      const pending: PendingAuthentication = {
+        generation, account: { serverUrl: params.serverUrl, email: params.email }, masterKey, passwordHash, kdf,
+      };
+      this.pendingAuthentication = pending;
+      await this.finishAuthentication(pending);
+    } finally {
+      // Keep only the material needed by an active OTP challenge, never the master password.
+      if (this.pendingAuthentication?.masterKey !== masterKey) masterKey.fill(0);
+    }
+  }
+
+  private async finishAuthentication(pending: PendingAuthentication,
+    twoFactor?: { token: string; provider: number; remember: boolean },
+  ): Promise<void> {
+    try {
+      this.assertAuthentication(pending.generation);
+      await this.finishConnect(this.makeHttp(pending.account.serverUrl), pending.account, pending.masterKey,
+        pending.passwordHash, twoFactor, pending.kdf, pending.generation);
+      this.assertAuthentication(pending.generation);
+      this.clearPendingAuthentication();
+    } catch (error) {
+      this.assertAuthentication(pending.generation);
+      // An OTP retry may fail through a typo or network outage; retain that challenge.
+      if (!twoFactor && (error as { kind?: string } | null)?.kind !== 'twoFactorRequired') this.clearPendingAuthentication();
+      throw error;
+    }
   }
 
   /**
@@ -242,16 +286,20 @@ export class VaultClient {
    * （那条路已经解锁过了，再翻一次状态会抛「只能在 unlocking 状态调用」）。
    */
   private async authenticate(
-    bare: HttpClient, params: ConnectParams, masterKey: Uint8Array,
+    bare: HttpClient, params: AuthAccount, masterKey: Uint8Array,
     masterPasswordHash: string,
     twoFactor: { token: string; provider: number; remember: boolean } | undefined,
+    generation: number,
   ): Promise<{ token: TokenResponse; userKey: SymmetricKey }> {
+    const identifier = await this.deviceIdentity();
+    this.assertAuthentication(generation);
     const token = await loginWithPassword(bare, {
       email: params.email,
       masterPasswordHash,
-      device: { ...this.device, identifier: await this.deviceIdentity() },
+      device: { ...this.device, identifier },
       ...(twoFactor ? { twoFactor } : {}),
     });
+    this.assertAuthentication(generation);
 
     if (!token.key) {
       throw new Error('服务器没有返回用户密钥（Key 字段缺失）—— 该账户可能没有完成密钥设置');
@@ -280,8 +328,7 @@ export class VaultClient {
   }
 
   /** 把令牌接到客户端上，并把账户写进会话。登录与补登录共用 */
-  private adopt(bare: HttpClient, params: ConnectParams, masterKey: Uint8Array, token: TokenResponse): void {
-    this.masterKey = masterKey;
+  private adopt(params: AuthAccount, token: TokenResponse): void {
     this.token = token;
     this.http = this.makeHttp(params.serverUrl, this.authHeaders());
     this.session.setAccount({
@@ -293,7 +340,7 @@ export class VaultClient {
   }
 
   private async finishConnect(
-    bare: HttpClient, params: ConnectParams, masterKey: Uint8Array,
+    bare: HttpClient, params: AuthAccount, masterKey: Uint8Array,
     masterPasswordHash: string,
     twoFactor: { token: string; provider: number; remember: boolean } | undefined,
     /*
@@ -307,10 +354,15 @@ export class VaultClient {
      * 也就是说这条浪费是「顺手再问一次」写出来的，而不是有什么理由。
      */
     kdf: KdfConfig,
+    generation: number,
   ): Promise<void> {
-    const { token, userKey } = await this.authenticate(bare, params, masterKey, masterPasswordHash, twoFactor);
+    const { token, userKey } = await this.authenticate(bare, params, masterKey, masterPasswordHash, twoFactor, generation);
+    if (generation !== this.authenticationGeneration) {
+      zeroizeKey(userKey);
+      this.assertAuthentication(generation);
+    }
     this.mark('登录往返 + 解出用户密钥');
-    this.adopt(bare, params, masterKey, token);
+    this.adopt(params, token);
     this.session.beginUnlock();
 
     /*
@@ -327,9 +379,11 @@ export class VaultClient {
      * 慢的那一段是网络（`/api/sync` 一次返回整个库的密文），不是解密。
      */
     this.session.completeUnlock(userKey);
+    this.clearPendingAuthentication();
 
-    // 存下「下次不用问服务端也能解锁」所需要的东西 —— 见 UnlockCache
+    // 只缓存非敏感 KDF 参数；下次解锁仍须服务端验证主密码。
     await this.saveKdfCache(params, kdf);
+    this.assertAuthentication(generation);
 
     this.mark('开始同步');
     await this.hydrateThenSync(userKey);
@@ -344,7 +398,7 @@ export class VaultClient {
    * 见 `unlock` 的说明），字段随之删掉 —— 见 `KdfCache` 的注释。
    */
   private async saveKdfCache(
-    params: ConnectParams, kdf: KdfConfig,
+    params: AuthAccount, kdf: KdfConfig,
   ): Promise<void> {
     if (!this.kdfCache) return;
     try {
@@ -386,7 +440,7 @@ export class VaultClient {
       const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
       console.warn(`[sync] 后台同步失败，界面停在已有数据上 —— ${why}`);
     } finally {
-      this.session.setSyncing(false);
+      if (this.session.getKey() === key) this.session.setSyncing(false);
     }
   }
 
@@ -427,6 +481,7 @@ export class VaultClient {
       items: this.session.items.slice(),
       folders: this.session.folders.slice(),
       token: this.token,
+      syncVerified: this.hasVerifiedSync(),
     };
   }
 
@@ -438,6 +493,8 @@ export class VaultClient {
    * 这种指向网络、让人去查 DNS 的错。
    */
   restore(state: VaultClientState): void {
+    this.invalidateAuthentication();
+    this.syncVerified = state.syncVerified === true;
     restoreSession(this.session, state);
     if (state.token === null) return;
     this.token = state.token;
@@ -489,10 +546,8 @@ export class VaultClient {
    * 两处各判断一次的话，改了一处忘了另一处，症状是「保存后条目打不开」
    * 或者「附件解出来是乱码」—— 都很难联想到是这里。
    */
-  private async keyFor(item: VaultItem): Promise<SymmetricKey> {
-    if (item.wrappedKey === null) return this.requireKey();
-
-    const userKey = this.requireKey();
+  private async keyFor(item: VaultItem, userKey = this.requireKey()): Promise<SymmetricKey> {
+    if (item.wrappedKey === null) return userKey;
     // 条目密钥的包装方式与附件密钥一致：按**字节**加密的 64 字节
     let raw: Uint8Array;
     try {
@@ -520,23 +575,32 @@ export class VaultClient {
   async uploadAttachment(
     itemId: string, fileName: string, bytes: Uint8Array,
   ): Promise<{ attachmentId: string }> {
+    const assertCurrent = this.currentSessionGuard();
     const item = this.session.items.find((i) => i.id === itemId);
     if (!item) throw new Error('找不到这条条目');
-    const wrappingKey = await this.keyFor(item);
     const userId = this.requireUserId();
 
-    // 1 + 2：这条附件自己的密钥，用它加密内容
-    const attachmentKey = makeUserKey();
-    const encrypted = await encryptBytes(bytes, attachmentKey);
-
-    const ticket = await createAttachmentV2(this.http, itemId, {
-      // 包装后的附件密钥 —— 按**字节**包装，和用户密钥一样
-      key: await encryptBytes(
-        new Uint8Array([...attachmentKey.encKey, ...attachmentKey.macKey]), wrappingKey,
-      ),
-      fileName: await encryptString(fileName, wrappingKey),
-      fileSize: encrypted.length,
+    const metadata = await this.withWriteKey(async (userKey) => {
+      const wrappingKey = await this.keyFor(item, userKey);
+      const attachmentKey = makeUserKey();
+      try {
+        assertCurrent();
+        const encrypted = await encryptBytes(bytes, attachmentKey);
+        assertCurrent();
+        const wrapped = await encryptBytes(
+          new Uint8Array([...attachmentKey.encKey, ...attachmentKey.macKey]), wrappingKey,
+        );
+        assertCurrent();
+        const encryptedName = await encryptString(fileName, wrappingKey);
+        return { key: wrapped, fileName: encryptedName, fileSize: encrypted.length };
+      } finally {
+        zeroizeKey(attachmentKey);
+        if (wrappingKey !== userKey) zeroizeKey(wrappingKey);
+      }
     });
+    assertCurrent();
+    const ticket = await createAttachmentV2(this.http, itemId, metadata);
+    assertCurrent();
 
     /*
      * 3：把加密后的字节 POST 上去。
@@ -584,11 +648,12 @@ export class VaultClient {
 
   /** 建同步引擎。`doSync` 与本地解锁那条路共用 —— 两处各建一份必然长歪 */
   private makeSyncEngine(): SyncEngine {
+    const http = this.http;
     const engine = new SyncEngine({
       session: this.session,
       deps: {
-        getRevisionDate: () => getRevisionDateVia(this.http),
-        sync: () => syncVia(this.http),
+        getRevisionDate: () => getRevisionDateVia(http),
+        sync: () => syncVia(http),
         decryptCipher,
         decryptFolder,
       },
@@ -599,10 +664,14 @@ export class VaultClient {
   }
 
   private async doSync(unlockedKey: SymmetricKey): Promise<void> {
+    this.syncVerified = false;
     this.syncEngine ??= this.makeSyncEngine();
     // 同步会把解密结果直接写进会话。`unlocking` 态也允许写入 ——
     // 首次解锁正是「先同步、后 completeUnlock」，数据必须在解锁完成前就位。
-    await this.syncEngine.sync({ unlockedKey, force: true });
+    const outcome = await this.syncEngine.sync({ unlockedKey, force: true });
+    if (this.session.getKey() === unlockedKey && this.session.isUnlocked()) {
+      this.syncVerified = !outcome.skipped && outcome.failedCount === 0;
+    }
   }
 
   getUserId(): string | null { return this.session.account?.userId ?? null; }
@@ -614,22 +683,26 @@ export class VaultClient {
 
   /** 新建文件夹。重名是允许的 —— 服务端不拦，用户也可能是故意建两个。 */
   async createFolder(name: string): Promise<VaultFolder> {
-    const key = this.requireKey();
-    const dto = await createFolderApi(this.http, await encryptString(name, key));
-    const folder = await decryptFolder(dto, key);
-    this.session.replaceData(
-      this.session.items.slice(),
-      [...this.session.folders, folder],
-    );
+    const assertCurrent = this.currentSessionGuard();
+    const encryptedName = await this.withWriteKey((key) => encryptString(name, key));
+    assertCurrent();
+    const dto = await createFolderApi(this.http, encryptedName);
+    assertCurrent();
+    const folder = await this.withWriteKey((key) => decryptFolder(dto, key));
+    assertCurrent();
+    this.session.replaceData(this.session.items.slice(), [...this.session.folders, folder]);
     return folder;
   }
 
   async renameFolder(id: string, name: string): Promise<void> {
-    const key = this.requireKey();
-    await updateFolderApi(this.http, id, await encryptString(name, key));
-    // 名字解出来才算数，所以重新同步一次而不是就地改 —— 免得本地显示
-    // 一个服务端并不认的名字
-    await this.refresh();
+    const assertCurrent = this.currentSessionGuard();
+    const encryptedName = await this.withWriteKey((key) => encryptString(name, key));
+    assertCurrent();
+    const dto = await updateFolderApi(this.http, id, encryptedName);
+    assertCurrent();
+    const folder = await this.withWriteKey((key) => decryptFolder(dto, key));
+    assertCurrent();
+    this.session.replaceData(this.session.items.slice(), this.session.folders.map((f) => f.id === id ? folder : f));
   }
 
   /**
@@ -639,7 +712,9 @@ export class VaultClient {
    * 界面上的措辞必须与这个事实一致，不能吓唬用户说会删掉里面的密码。
    */
   async deleteFolder(id: string): Promise<void> {
+    const assertCurrent = this.currentSessionGuard();
     await deleteFolderApi(this.http, id);
+    assertCurrent();
     this.session.replaceData(
       // 同时把本地条目的 folderId 清掉，否则它们会挂在一个已经不存在的文件夹上，
       // 在「此文件夹」筛选里永远查不到
@@ -650,13 +725,12 @@ export class VaultClient {
 
   // ── 写入 ──
   //
-  // 策略：**先乐观更新本地，再触发同步**。
-  // 直接等同步会让每次保存都卡住 UI 一两秒；而只改本地不同步则会让
-  // 服务端与本地悄悄分叉。乐观更新 + 后台同步两头都占。
+  // 服务端确认后直接应用返回的记录，避免每次保存再拉取整个保险库。
+  // 每次异步边界检查会话归属，已锁定或切换账户的结果不能继续写入。
 
   /** 新建或更新一条。`item.id` 为空串表示新建。 */
   async saveItem(item: VaultItem): Promise<VaultItem> {
-    const key = this.requireKey();
+    const assertCurrent = this.currentSessionGuard();
     const userId = this.requireUserId();
     const isNew = item.id === '';
 
@@ -673,23 +747,36 @@ export class VaultClient {
      * 加密的，任何客户端按声明去解都会失败 —— **条目就废了**。
      * 更糟的是它不会报错：保存成功、同步成功，用户下次打开才发现里面是空的。
      */
-    const itemKey = await this.keyFor(item);
-    const body = await encryptCipher(item, key, { ...opts, itemKey });
+    const body = await this.withWriteKey(async (key) => {
+      const itemKey = await this.keyFor(item, key);
+      try {
+        assertCurrent();
+        return await encryptCipher(item, key, { ...opts, itemKey });
+      } finally {
+        if (itemKey !== key) zeroizeKey(itemKey);
+      }
+    });
+    assertCurrent();
 
     const dto = isNew
       ? await createCipher(this.http, userId, body)
       : await updateCipher(this.http, item.id, userId, body);
 
-    const saved = await decryptCipher(dto, key);
+    assertCurrent();
+    const saved = await this.withWriteKey((key) => decryptCipher(dto, key));
+    assertCurrent();
     this.applyLocally(saved, isNew);
     return saved;
   }
 
   /** 软删除 —— 进回收站，**可恢复**。UI 上的「移到回收站」走这条。 */
   async moveToTrash(id: string): Promise<void> {
+    const assertCurrent = this.currentSessionGuard();
     await softDeleteCipher(this.http, id);
+    assertCurrent();
     this.removeLocally(id);
-    void this.refresh().catch(() => { /* 后台同步失败不影响用户已经看到的删除 */ });
+    // The server confirmed this deletion. Keep the remaining snapshot intact;
+    // starting an unawaited full refresh here exposed an empty vault to persistence.
   }
 
   /**
@@ -697,20 +784,26 @@ export class VaultClient {
    * UI 上必须先做二次确认，并且要明确告诉用户无法恢复。
    */
   async deletePermanently(id: string): Promise<void> {
+    const assertCurrent = this.currentSessionGuard();
     await hardDeleteCipher(this.http, id);
+    assertCurrent();
     this.removeLocally(id);
   }
 
   async toggleFavorite(id: string): Promise<void> {
+    const assertCurrent = this.currentSessionGuard();
     const item = this.session.items.find((i) => i.id === id);
     if (!item) return;
     // 收藏是局部更新 —— 不需要重新加密整条记录
     await updateCipherPartial(this.http, id, { favorite: !item.favorite });
+    assertCurrent();
     this.applyLocally({ ...item, favorite: !item.favorite }, false);
   }
 
   async setArchived(id: string, archived: boolean): Promise<void> {
+    const assertCurrent = this.currentSessionGuard();
     await setArchivedApi(this.http, id, archived);
+    assertCurrent();
     this.removeLocally(id);
     void this.refresh().catch(() => {});
   }
@@ -727,6 +820,33 @@ export class VaultClient {
     const key = this.session.getKey();
     if (!key) throw new Error('保险库未解锁');
     return key;
+  }
+
+  /** A locked then re-unlocked session is a different owner, even on the same client. */
+  private currentSessionGuard(): () => void {
+    const key = this.requireKey();
+    const generation = this.authenticationGeneration;
+    const assertCurrent = () => {
+      if (generation !== this.authenticationGeneration || key !== this.session.getKey() || !this.session.isUnlocked()) {
+        throw new Error('操作已取消，保险库已锁定或账户已变更');
+      }
+    };
+    assertCurrent();
+    return assertCurrent;
+  }
+
+  /** A short-lived crypto snapshot is wiped before waiting for a server response. */
+  private async withWriteKey<T>(operation: (key: SymmetricKey) => Promise<T>): Promise<T> {
+    const assertCurrent = this.currentSessionGuard();
+    const sessionKey = this.requireKey();
+    const key = { encKey: sessionKey.encKey.slice(), macKey: sessionKey.macKey.slice() };
+    try {
+      const result = await operation(key);
+      assertCurrent();
+      return result;
+    } finally {
+      zeroizeKey(key);
+    }
   }
 
   private requireUserId(): string {
@@ -755,7 +875,8 @@ export class VaultClient {
 
   lock(): void {
     // 密钥由 `session.lock()` 负责 zeroize —— 这里不再单独清一份副本
-    this.masterKey = null;
+    this.invalidateAuthentication();
+    this.syncEngine = null;
     this.session.lock();
   }
 
@@ -786,7 +907,7 @@ export class VaultClient {
    * 而慢是立刻能感觉到的、抹痕迹不是。
    */
   logout(): void {
-    this.masterKey = null;
+    this.invalidateAuthentication();
     this.token = null;
     this.syncEngine = null;
     this.session.logout();
@@ -810,18 +931,20 @@ export class VaultClient {
     items: readonly ImportedItem[],
     onProgress?: (done: number, total: number) => void,
   ): Promise<{ created: number; failed: { name: string; reason: string }[] }> {
-    const key = this.requireKey();
-    const userId = this.requireUserId();
+    const assertCurrent = this.currentSessionGuard();
 
     // 文件夹：已有的按名字复用，缺的建出来
     const folderIdByName = new Map(this.session.folders.map((f) => [f.name, f.id]));
     const wanted = [...new Set(items.map((i) => i.folderName).filter((n): n is string => n !== null))];
     for (const name of wanted) {
+      assertCurrent();
       if (folderIdByName.has(name)) continue;
       try {
         const created = await this.createFolder(name);
+        assertCurrent();
         folderIdByName.set(name, created.id);
       } catch {
+        assertCurrent();
         // 建文件夹失败不该让整批停下 —— 这些条目会变成「无文件夹」，
         // 内容还在，用户之后能自己归类
       }
@@ -831,6 +954,7 @@ export class VaultClient {
     const failed: { name: string; reason: string }[] = [];
 
     for (let i = 0; i < items.length; i++) {
+      assertCurrent();
       const src = items[i]!;
       try {
         const item: VaultItem = {
@@ -864,13 +988,11 @@ export class VaultClient {
             name: f.name, value: f.value, type: f.type, linkedId: null,
           })),
         };
-        const body = await encryptCipher(item, key, {});
-        const dto = await createCipher(this.http, userId, body);
-        // 直接解回来入会话，省掉一次整库同步
-        const saved = await decryptCipher(dto, key);
-        this.session.replaceData([...this.session.items, saved], this.session.folders.slice());
+        await this.saveItem(item);
+        assertCurrent();
         created++;
       } catch (e) {
+        assertCurrent();
         failed.push({ name: src.name, reason: e instanceof Error ? e.message : '写入失败' });
       }
       onProgress?.(i + 1, items.length);
@@ -905,36 +1027,16 @@ export class VaultClient {
   async unlock(masterPassword: string): Promise<void> {
     const account = this.session.account;
     if (!account) throw new Error('没有已保存的账户');
+    this.invalidateAuthentication();
+    const generation = this.authenticationGeneration;
 
     const bare = this.makeHttp(account.serverUrl);
     const cached = await this.kdfCache?.load(account.serverUrl, account.email).catch(() => null);
     const kdf = cached?.kdf ?? await this.preloginKdf(bare, account.email);
-    const masterKey = await deriveMasterKey(masterPassword, account.email, kdf);
-    const hash = await hashMasterPassword(masterKey, masterPassword);
-
-    this.session.beginUnlock();
-    // ⚠️ 这里面有 login —— **服务端验证就在那一步**。没有本地捷径，也不该有。
-    await this.finishConnect(bare, {
+    this.assertAuthentication(generation);
+    await this.authenticatePassword({
       serverUrl: account.serverUrl, email: account.email, masterPassword,
-    }, masterKey, hash, undefined, kdf);
-  }
-
-  /** 走网络那条路：原来那条，一次没变 */
-  private async unlockOnline(masterPassword: string, account: AccountInfo): Promise<void> {
-    const bare = this.makeHttp(account.serverUrl);
-    const params: ConnectParams = {
-      serverUrl: account.serverUrl, email: account.email, masterPassword,
-    };
-    const pl = await prelogin(bare, account.email);
-    const kdf: KdfConfig = pl.kdf === KDF_TYPE_ARGON2ID
-      ? { kdf: KDF_TYPE_ARGON2ID, iterations: pl.iterations, memory: pl.memory ?? 64, parallelism: pl.parallelism ?? 4 }
-      : { kdf: KDF_TYPE_PBKDF2, iterations: pl.iterations };
-
-    const masterKey = await deriveMasterKey(masterPassword, account.email, kdf);
-    const hash = await hashMasterPassword(masterKey, masterPassword);
-
-    this.session.beginUnlock();
-    await this.finishConnect(bare, params, masterKey, hash, undefined, kdf);
+    }, kdf, generation);
   }
 
 

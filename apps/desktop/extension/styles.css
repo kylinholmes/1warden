@@ -1,69 +1,11 @@
-@import 'tailwindcss';
+/* The PC stylesheet owns every component and layout. Only the popup viewport differs. */
+@import '../src/styles.css';
+@source '../src';
 
-/*
- * Coffer 设计系统 —— 扩展弹窗版。
- *
- * ⚠️ 令牌**不再拷贝**，从 `@coffer/ui/theme.css` 来 —— 那份是桌面端和扩展端
- * 共用的唯一定义。
- *
- * 在这之前两边各存一份拷贝，靠一句「改的时候两边都要改」的约定维持。
- * 那种约定守不住：这份已经落后了整整一版（还停在「只有媒体查询版暗色」，
- * 没有显式主题选择、没有玻璃那套），而用户眼里这是同一个产品。
- *
- * ## ⚠️ `components.css` 也必须引
- *
- * 加它之前这里漏了整整一段时间，后果是**弹窗里的条目图标块完全没有样式**：
- * `IconGlyph` 渲染的是 `.tile-img` / `.tile-avatar` / `.tile-glyph`，
- * 而这三个类住在 `components.css` 里 —— 类名在 DOM 上、规则却不在产物里，
- * 于是没有 34px 尺寸、没有圆角、没有彩色底。产物里查得到：
- * `grep tile-avatar dist/popup.css` → 0。
- *
- * ⚠️ 引的顺序有意义：共享的在前、本文件自己的 `@layer components` 在后，
- * 这样弹窗自己的规则在同名冲突时赢。
- *
- * 详见 docs/reference/design-system.md。
- */
-@import '@coffer/ui/theme.css';
-@import '@coffer/ui/components.css';
-
-/*
- * ⚠️ 必须告诉 Tailwind 去扫**共享包**。
- *
- * Tailwind 4 按构建根目录自动找源文件，而 `packages/ui` 在 app 外面 ——
- * 不声明的话，那些组件里用到的工具类**一个都不会被生成**：
- * 类名在 DOM 上、规则不在产物里，构建、类型检查、单测全都不报。
- *
- * 已经有实例：`Section` 的 `mb-7` 就是搬进共享包之后消失的 ——
- * 表现是「详情里两个分组贴在一起」，而两端各自看代码都完全正常。
- *
- * 有守卫盯着这条：`shared-css-wiring.test.ts`。
- */
-@source '../../../packages/ui/src';
-
-/*
- * ⚠️ 必须告诉 Tailwind 去扫**共享包**。
- *
- * Tailwind 4 按构建根目录自动找源文件，而 `packages/ui` 在 app 外面 ——
- * 不声明的话，那些组件里用到的工具类**一个都不会被生成**：
- * 类名在 DOM 上、规则不在产物里，构建、类型检查、单测全都不报。
- *
- * 已经有实例：`Section` 的 `mb-7` 就是搬进共享包之后消失的 ——
- * 表现是「详情里两个分组贴在一起」，而两端各自看代码都完全正常。
- */
-
-/* ── 动效 ─────────────────────────────────────────────── */
-
-@keyframes coffer-fade-in {
-  from { opacity: 0; }
-  to { opacity: 1; }
+/* Firefox measures body to size a standards-mode toolbar popup. Viewport-based
+   caps create a sizing loop while that popup is still being opened. */
+body {
+  width: 440px;
+  height: 600px;
+  background: var(--surface-canvas);
 }
-.fade-in { animation: coffer-fade-in var(--dur-fast) var(--ease-enter) both; }
-
-@keyframes coffer-screen-in {
-  from { opacity: 0; transform: translateY(5px); }
-  to { opacity: 1; transform: none; }
-}
-.screen-in { animation: coffer-screen-in var(--dur-base) var(--ease-enter) both; }
-
-@keyframes coffer-spin { to { transform: rotate(360deg); } }
-.spin { animation: coffer-spin 700ms linear infinite; }

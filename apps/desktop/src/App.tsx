@@ -1,93 +1,55 @@
-import { useMemo, useReducer, useCallback, useEffect, Component, type ErrorInfo } from 'react';
-import { VaultClient, type SessionStatus } from '@coffer/vault';
-import { syncCache, kdfCache } from '@coffer/ui';
+import { useCallback, useEffect, useState, useSyncExternalStore, Component, type ErrorInfo } from 'react';
+import type { ApplicationClient } from './application/types';
 import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
 import { screenFor } from './screens/screen-for';
-import { IconAlert } from '@coffer/ui';
+import { IconAlert, IconSpinner } from '@coffer/ui';
 import { ToastProvider } from './components/Toast';
-import { useQuickBridge } from './use-quick-bridge';
-import { listen } from '@tauri-apps/api/event';
-import { host } from '@coffer/ui';
 
-export function App() {
-  // 会话状态就是界面的状态。让 session 的变化驱动重渲染 ——
-  // 而不是自己再维护一份 phase，那样两边的真相迟早会分叉。
-  const [, forceRender] = useReducer((n: number) => n + 1, 0);
+/** One application tree; each entry supplies its own runtime. */
+export function App({ client }: { client: ApplicationClient }) {
+  const subscribe = useCallback((listener: () => void) => client.subscribe(listener), [client]);
+  const getSnapshot = useCallback(() => client.getSnapshot(), [client]);
+  const session = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const [ready, setReady] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [attempt, setAttempt] = useState(0);
 
-  // 自动锁定：空闲 15 分钟。外壳层还应监听系统休眠/锁屏 —— 那是 Tauri 侧的事。
-  const client = useMemo(() => new VaultClient({
-    // 桌面端的所有 HTTP 都走 Rust 侧 —— WebView 的 fetch 会被 CORS 拦掉
-    fetchImpl: host().fetch,
-    autoLockMs: 15 * 60 * 1000,
-    onLock: () => forceRender(),
-    // 同步开始/结束时也要重渲染 —— 界面上那个转圈靠它
-    onStatus: () => forceRender(),
-    onSync: () => forceRender(),
-    /*
-     * 连接各段的累计耗时。
-     *
-     * 打日志而不是界面提示：这是**诊断**信息，用户看不懂也不需要看。
-     *
-     * ⚠️ 用 `console.warn` 而不是 `console.info` —— **vite 只把 warn/error
-     * 转发到终端**，info 和 log 会被直接丢掉。第一版用的就是 info，
-     * 结果「加了计时」和「没加」在日志里长得一模一样（都是什么都没有），
-     * 差一点据此去怀疑计时代码没被调用。
-     *
-     * 代价是这几行会混在真正的警告里。前缀 `[连接]` 是给它们做区分的。
-     */
-    onPhase: (label, ms) => { console.warn(`[连接] ${label} — 累计 ${ms.toFixed(0)}ms`); },
-    /*
-     * 上次同步的密文缓存 —— 让「解锁后立刻看到条目」成为可能。
-     *
-     * ⚠️ 账户信息要等到**登录成功之后**才有，而这里是在构造时。
-     * 所以给一个惰性的：真正 load/save 的时候账户已经就位了。
-     */
-    syncCache,
-    kdfCache,
-  }), []);
-
-  // 快速面板是另一个窗口，它向这里要数据、也由这里执行动作 ——
-  // 主窗口是唯一持有会话的地方（见 quick-bridge.ts）
-  useQuickBridge(client);
+  useEffect(() => {
+    let alive = true;
+    setReady(false);
+    setError(null);
+    void client.initialize().then(() => { if (alive) setReady(true); }).catch((e: unknown) => {
+      if (alive) setError(e instanceof Error ? e.message : '无法载入保险库');
+    });
+    return () => { alive = false; };
+  }, [client, attempt]);
 
   const handleLock = useCallback(() => {
-    client.lock();
-    forceRender();
+    void client.lock().catch((e: unknown) => setError(e instanceof Error ? e.message : '锁定失败'));
   }, [client]);
-
-  // 菜单栏的「锁定保险库」。
-  //
-  // ⚠️ 为什么要绕一圈由前端来做：密钥和明文都在 WebView 的内存里，
-  // Rust 侧没有东西可清 —— 壳唯一能做的是告诉前端「用户要求锁定」。
-  useEffect(() => {
-    let un: (() => void) | undefined;
-    void listen('coffer:tray-lock', () => { handleLock(); }).then((u) => { un = u; });
-    return () => un?.();
-  }, [handleLock]);
-
-  const session = client.getSession();
   const screen = screenFor(session.status);
 
-  /*
-    提示条的宿主包在**所有屏幕之外** —— 它是窗口级的东西，不属于任何一屏。
-    保险库里的保存确认、解锁屏的报错、连接屏的报错，落在同一个右下角，
-    换个屏幕不会换一套反馈。
-  */
   return (
     <ToastProvider>
-      {screen === 'vault' ? (
-        <VaultView client={client} onLock={handleLock} />
-      ) : screen === 'unlock' ? (
-        <Unlock
-          client={client}
-          onUnlocked={forceRender}
-          onDisconnect={() => { client.logout(); forceRender(); }}
-        />
-      ) : (
-        <Connect client={client} onConnected={forceRender} />
-      )}
+      {!ready ? (
+        <div className="flex h-full items-center justify-center bg-[var(--surface-canvas)] p-8">
+          {error ? <div role="alert" className="text-sm text-[var(--risk)]">
+            <p>{error}</p>
+            <button className="btn btn-primary mt-4" onClick={() => setAttempt((n) => n + 1)}>重试</button>
+          </div> : <p className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在载入…</p>}
+        </div>
+      ) : <>
+        {error && <div role="alert" className="fixed bottom-4 left-4 z-50 rounded-[var(--radius-sm)] bg-[var(--surface-overlay)] p-3 text-sm text-[var(--risk)]">{error}</div>}
+        {screen === 'vault' ? (
+          <VaultView key={`${session.account?.serverUrl}:${session.account?.email}`} client={client} onLock={handleLock} />
+        ) : screen === 'unlock' ? (
+          <Unlock client={client} onUnlocked={() => setError(null)} onDisconnect={() => {
+            void client.logout().catch((e: unknown) => setError(e instanceof Error ? e.message : '退出失败'));
+          }} />
+        ) : <Connect client={client} onConnected={() => setError(null)} />}
+      </>}
     </ToastProvider>
   );
 }
@@ -127,7 +89,7 @@ export class ErrorBoundary extends Component<{ children: React.ReactNode }, Boun
           </span>
           <h1 className="text-lg font-semibold">界面出错了</h1>
           <p className="mt-1.5 text-sm leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
-            这是 Coffer 的缺陷，不是你的操作问题。你的保险库数据没有受影响 ——
+            这是 1Warden 的缺陷，不是你的操作问题。你的保险库数据没有受影响 ——
             它还在服务器上，重新打开即可。
           </p>
 

@@ -24,9 +24,9 @@ import { IconAlert, IconKeyboard } from '@coffer/ui';
  */
 const COUNTDOWN_SECONDS = 3;
 
-export function AutotypeAction({ username, password }: {
+export function AutotypeAction({ username, getPassword }: {
   username: string | null;
-  password: string | null;
+  getPassword: () => Promise<string>;
 }) {
   const [permission, setPermission] = useState<PermissionState | null>(null);
   const [count, setCount] = useState<number | null>(null);
@@ -40,8 +40,6 @@ export function AutotypeAction({ username, password }: {
   }, []);
 
   useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
-
-  if (password === null) return null;
 
   function start() {
     setResult(null);
@@ -73,7 +71,8 @@ export function AutotypeAction({ username, password }: {
       // 给窗口管理器一点时间完成焦点切换
       await new Promise((r) => setTimeout(r, 350));
 
-      await autotypeType({ username, password: password as string, submit: false });
+      const password = await getPassword();
+      await autotypeType({ username, password, submit: false });
       setResult({ ok: true, message: AUTOTYPE_SUCCESS_NOTE });
     } catch (e) {
       setResult({ ok: false, message: e instanceof Error ? e.message : '发送按键失败' });
@@ -102,7 +101,7 @@ export function AutotypeAction({ username, password }: {
           打开系统设置
         </button>
         <p className="mt-2.5 ml-[22px] text-xs leading-relaxed text-[var(--ink-tertiary)]">
-          Coffer 只会往当前焦点发送按键，不会读取任何应用的界面内容。
+          1Warden 只会往当前焦点发送按键，不会读取任何应用的界面内容。
         </p>
       </div>
     );

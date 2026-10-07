@@ -22,7 +22,7 @@
      * 条目类型的图标底 —— 上一版用 emoji（🔑💳👤），
      * 那是整个界面里唯一有彩色的东西，在克制的灰调里跳出来，
      * 而且 emoji 的字形由系统决定，大小和基线都不一致。
-     * 换成单色描边图标 + 一块淡色底：有颜色用于区分类型，但它退在文字后面。
+     * 彩色描边图标与浅色底区分类型，类别颜色不与安全状态绑定。
      */
     .tile {
       display: grid;
@@ -34,11 +34,23 @@
       background: var(--surface-hover);
       color: var(--ink-secondary);
     }
-    .tile[data-type='login'] { background: color-mix(in oklab, var(--accent) 12%, var(--surface-paper)); color: var(--accent); }
-    .tile[data-type='card'] { background: color-mix(in oklab, var(--caution) 15%, var(--surface-paper)); color: var(--caution); }
-    .tile[data-type='identity'] { background: color-mix(in oklab, var(--safe) 13%, var(--surface-paper)); color: var(--safe); }
-    .tile[data-type='secureNote'] { background: color-mix(in oklab, var(--ink-tertiary) 12%, var(--surface-paper)); color: var(--ink-secondary); }
-    .tile[data-type='sshKey'] { background: color-mix(in oklab, var(--risk) 11%, var(--surface-paper)); color: var(--risk); }
+    .tile[data-type='login'] { background: color-mix(in oklab, var(--accent) 14%, var(--surface-paper)); color: var(--accent); }
+    .tile[data-type='card'] { background: color-mix(in oklab, var(--rose) 14%, var(--surface-paper)); color: var(--rose); }
+    .tile[data-type='identity'] { background: color-mix(in oklab, var(--teal) 14%, var(--surface-paper)); color: var(--teal); }
+    .tile[data-type='secureNote'] { background: color-mix(in oklab, var(--violet) 14%, var(--surface-paper)); color: var(--violet); }
+    .tile[data-type='sshKey'] { background: color-mix(in oklab, var(--favorite) 14%, var(--surface-paper)); color: var(--favorite); }
+
+    /* Navigation keeps the category color even when another row is selected. */
+    .nav-icon { color: var(--accent); }
+    .nav-item[data-key='favorites'] .nav-icon,
+    .nav-item[data-key='type:sshKey'] .nav-icon { color: var(--favorite); }
+    .nav-item[data-key='security'] .nav-icon,
+    .nav-item[data-key='type:identity'] .nav-icon,
+    .nav-item[data-key^='folder:'] .nav-icon { color: var(--teal); }
+    .nav-item[data-key='generator'] .nav-icon,
+    .nav-item[data-key='type:secureNote'] .nav-icon { color: var(--violet); }
+    .nav-item[data-key='import'] .nav-icon,
+    .nav-item[data-key='type:card'] .nav-icon { color: var(--rose); }
 
     /*
      * 条目图标 —— 每条有自己的图标，不再按类型共用一个。
@@ -83,15 +95,12 @@
      * 彩色字母徽标 / 着色的类型图标。
      *
      * ⚠️ 色相 `--h` 由**条目**算出来（见 @coffer/vault 的 avatarOf），
-     * 明度和彩度写死在这里 —— 领域层不该知道当前是什么主题，那是 CSS 的事。
-     *
-     * L=0.58 C=0.14 是挑过的：近白的字压在上面，红到紫每个色相都够对比度，
-     * 而**不随主题变** —— 主题相关的色相意味着同一份值要在亮暗两处各写一遍，
-     * 而这份样式表里暗色令牌本来就写了两份（见上面那段的告示）。
+     * 明度和彩度走共享主题令牌，领域层只负责每个条目的稳定色相。
+     * 白色文字所需的对比度也由主题令牌统一控制。
      */
     .tile-avatar,
     .tile-glyph {
-      background: oklch(0.58 0.14 var(--h, 250));
+      background: oklch(var(--avatar-lightness) var(--avatar-chroma) var(--h, 250));
       color: oklch(0.99 0.005 var(--h, 250));
     }
     .tile-avatar {
@@ -161,6 +170,7 @@
       inset: 0;
       display: flex;
       flex-direction: column;
+      overflow-y: auto;
       background: var(--surface-paper);
     }
 
@@ -288,11 +298,17 @@
     .vault-rail[data-expanded='true'] { --nav-w: 214px; }
     .vault-rail[data-expanded='false'] { --nav-w: 80px; }
 
-    .vault-content[data-detail='false'] .vault-detail {
+    .vault-content[data-detail='false'][data-detail-mounted='false'] .vault-detail {
       display: none;
+    }
+    .vault-detail[data-state='open'] { animation: coffer-card-in var(--dur-base) var(--ease-enter) both; }
+    .vault-detail[data-state='closing'] {
+      animation: coffer-card-out var(--dur-base) var(--ease-move) both;
+      pointer-events: none;
     }
 
     @container vault (min-width: 620px) {
+      .detail-back { display: none; }
       .vault-list {
         flex: none;
         width: var(--list-w);
@@ -305,8 +321,9 @@
         flex: 1;
         background: transparent;
       }
+      .vault-detail[data-state] { animation: none; }
       /* 宽屏下它是独立的一栏，占位也该显示 */
-      .vault-content[data-detail='false'] .vault-detail {
+      .vault-content[data-detail='false'][data-detail-mounted='false'] .vault-detail {
         display: flex;
       }
     }
@@ -325,6 +342,23 @@
      * 「**某条规则该不该从 app 搬到包**」。后者只有肉眼看得见。
      * 这次是靠截图发现的。
      */
+  .floating-layer {
+    position: fixed;
+    inset: 0;
+    z-index: 50;
+    display: grid;
+    place-items: center;
+    overflow: hidden;
+    container: floating / inline-size;
+    overscroll-behavior: contain;
+  }
+  .floating-layer[data-open='false'] { pointer-events: none; }
+  .floating-layer > .panel {
+    width: calc(100% - 32px);
+    max-height: min(680px, calc(100dvh - 32px));
+    overflow-y: auto;
+    overscroll-behavior: contain;
+  }
   .panel {
     background: var(--surface-overlay);
     border: 1px solid var(--border-overlay);
@@ -332,6 +366,7 @@
     box-shadow: var(--elev-modal);
   }
   .panel-head {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -340,6 +375,7 @@
     border-bottom: 1px solid var(--border-subtle);
   }
   .panel-foot {
+    flex-shrink: 0;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -359,10 +395,19 @@
   from { opacity: 0; transform: translateY(4px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
+@keyframes coffer-card-in {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+@keyframes coffer-card-out {
+  from { transform: translateX(0); }
+  to { transform: translateX(100%); }
+}
 @keyframes coffer-panel-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: scale(0.985); }
 }
+
 @keyframes coffer-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
@@ -398,6 +443,11 @@
     border-radius: var(--radius-md);
     background: var(--surface-well);
     border: 1px solid var(--border-subtle);
+  }
+
+  .generator-result {
+    background: color-mix(in oklab, var(--violet) 7%, var(--surface-paper));
+    border-color: color-mix(in oklab, var(--violet) 24%, var(--border-subtle));
   }
 
   /* ── 按钮 ───────────────────────────────────────────── */
@@ -504,4 +554,31 @@
     transition: background-color var(--dur-fast) var(--ease-enter);
   }
   .field-bare::placeholder { color: var(--ink-tertiary); }
+}
+
+/* Full-window cards are a narrow-layout invariant, overriding per-dialog utility sizes. */
+@container floating (width < 620px) {
+  .floating-layer > .panel {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    max-width: none;
+    max-height: none;
+    border: 0;
+    border-radius: 0;
+  }
+  .floating-layer > .panel-in { animation: coffer-card-in var(--dur-base) var(--ease-enter) both; }
+  .floating-layer > .panel-out { animation: coffer-card-out var(--dur-base) var(--ease-move) both; }
+  /* Reserve native safe areas without replacing a dialog's existing content padding. */
+  .floating-layer > .panel::before,
+  .floating-layer > .panel::after {
+    content: '';
+    flex: none;
+    pointer-events: none;
+  }
+  .floating-layer > .panel::before {
+    height: max(var(--titlebar-h, 0px), env(safe-area-inset-top, 0px));
+  }
+  .floating-layer > .panel::after { height: env(safe-area-inset-bottom, 0px); }
 }

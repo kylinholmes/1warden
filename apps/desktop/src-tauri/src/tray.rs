@@ -28,7 +28,7 @@ const ID_QUIT: &str = "coffer.quit";
 pub const EVENT_LOCK: &str = "coffer:tray-lock";
 
 pub fn install(app: &AppHandle) -> tauri::Result<()> {
-    let open = MenuItem::with_id(app, ID_OPEN, "打开 Coffer", true, None::<&str>)?;
+    let open = MenuItem::with_id(app, ID_OPEN, "打开 1Warden", true, None::<&str>)?;
     let quick = MenuItem::with_id(app, ID_QUICK, "快速搜索…", true, None::<&str>)?;
     let lock = MenuItem::with_id(app, ID_LOCK, "锁定保险库", true, None::<&str>)?;
     let sep = PredefinedMenuItem::separator(app)?;

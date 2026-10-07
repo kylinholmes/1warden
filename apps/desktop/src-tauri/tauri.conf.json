@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Coffer",
+  "productName": "1Warden",
   "version": "0.0.0",
   "identifier": "app.coffer.desktop",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Coffer",
+        "title": "1Warden",
         "width": 1080,
         "height": 720,
         "minWidth": 820,
@@ -32,7 +32,7 @@
       },
       {
         "label": "quick",
-        "title": "Coffer",
+        "title": "1Warden",
         "url": "quick.html",
         "width": 620,
         "height": 400,
@@ -66,7 +66,7 @@
     ],
     "category": "Utility",
     "shortDescription": "个人密码管理器",
-    "longDescription": "Coffer 是一个面向个人用户的密码管理器，后端对接自建的 Vaultwarden。",
+    "longDescription": "1Warden 是一个面向个人用户的密码管理器，后端对接自建的 Vaultwarden。",
     "macOS": {
       "minimumSystemVersion": "13.0"
     }

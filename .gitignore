@@ -39,3 +39,5 @@ apps/desktop/dist-extension/
 apps/desktop/dist-firefox/
 apps/desktop/dist-preview-extension/
 apps/desktop/dist-mobile/
+apps/desktop/dist-preview-mobile/
+artifacts/

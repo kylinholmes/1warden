@@ -51,7 +51,7 @@ export interface SecretFieldProps {
    * 定时器有地方活）；弹窗**不传** —— 那边由后台的离屏文档负责，
    * 因为弹窗一关它的定时器就没了。
    */
-  onCopied?: (value: string) => void;
+  onCopied?: (value: string) => void | Promise<void>;
   onCopyError?: (e: unknown) => void;
 }
 
@@ -99,7 +99,7 @@ export function SecretField({
 
   return (
     <div className="group flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-b-0">
-      <span className="w-[76px] shrink-0 truncate text-sm text-[var(--ink-tertiary)]" title={label}>
+      <span className="w-[76px] shrink-0 truncate text-sm text-[var(--violet)]" title={label}>
         {label}
       </span>
 

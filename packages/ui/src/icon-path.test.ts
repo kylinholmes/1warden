@@ -69,7 +69,7 @@ describe('图标只有一条渲染路径', () => {
     expect(keys.some((k) => k.endsWith('ItemIcon.tsx'))).toBe(true);
     // 抽查两端各一处 —— glob 断了的话上面那条会因为「一个都没扫到」而恒过
     expect(keys.some((k) => k.endsWith('VaultView.tsx'))).toBe(true);
-    expect(keys.some((k) => k.endsWith('popup/Popup.tsx'))).toBe(true);
+    expect(keys.some((k) => k.endsWith('popup/main.tsx'))).toBe(true);
   });
 
   it('除了 ItemIcon 自己，没有别处直接渲染 IconGlyph', () => {

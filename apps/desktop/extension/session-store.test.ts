@@ -90,14 +90,30 @@ describe('SessionStore —— 往返', () => {
     await store.save({ account, userKey: makeUserKey(), items: [item('new')], folders: [], token: null });
     expect((await store.load())!.items.map((i) => i.id)).toEqual(['new']);
   });
+
+  it.each([true, false])('preserves sync readiness across worker restart (%s)', async (syncVerified) => {
+    await store.start({ account, userKey: makeUserKey(), items: [], folders: [], token: null, syncVerified });
+    const restarted = new SessionStore(area);
+    const loaded = await restarted.load();
+    expect(loaded?.syncVerified).toBe(syncVerified);
+    await restarted.save(loaded!);
+    expect((await new SessionStore(area).load())?.syncVerified).toBe(syncVerified);
+  });
+
+  it('keeps legacy sessions without sync readiness unknown', async () => {
+    const legacy = { account, userKey: makeUserKey(), items: [], folders: [], token: null };
+    await store.start(legacy);
+    expect(await new SessionStore(area).load()).toStrictEqual(legacy);
+  });
 });
 
 describe('SessionStore —— 清理', () => {
-  it('clear removes everything', async () => {
+  it('clear removes secrets and keeps only the account needed to unlock', async () => {
     await store.save({ account, userKey: makeUserKey(), items: [item('1')], folders: [], token: null });
     await store.clear();
     expect(await store.load()).toBeNull();
-    expect(Object.keys(area.dump())).toEqual([]);
+    expect(await store.loadAccount()).toEqual(account);
+    expect(Object.keys(area.dump())).toEqual(['coffer.account']);
   });
 
   it('locking leaves no key material behind', async () => {
@@ -109,6 +125,63 @@ describe('SessionStore —— 清理', () => {
     const raw = JSON.stringify(area.dump());
     expect(raw).not.toContain(toBase64(key.encKey));
     expect(raw).not.toContain(toBase64(key.macKey));
+  });
+
+  it('overwrites the session if removal fails so a worker cannot restore secrets after lock', async () => {
+    await store.save({ account, userKey: makeUserKey(), items: [], folders: [], token: null });
+    area.remove = async () => { throw new Error('remove failed'); };
+    await store.clear();
+    expect(await new SessionStore(area).load()).toBeNull();
+    expect(JSON.stringify(area.dump())).not.toContain('userKey');
+  });
+
+  it('clears an already-started storage write before acknowledging lock', async () => {
+    const session = { account, userKey: makeUserKey(), items: [], folders: [], token: null };
+    await store.start(session);
+    const set = area.set;
+    let started!: () => void;
+    const writing = new Promise<void>((resolve) => { started = resolve; });
+    let finish!: () => void;
+    area.set = async (items) => { started(); await new Promise<void>((resolve) => { finish = resolve; }); await set(items); };
+    const saving = store.save(session);
+    await writing;
+    const clearing = store.clear();
+    finish();
+    await Promise.allSettled([saving, clearing]);
+    expect(await new SessionStore(area).load()).toBeNull();
+    expect(JSON.stringify(area.dump())).not.toContain('userKey');
+  });
+});
+
+describe('SessionStore absolute expiry', () => {
+  it('does not extend the unlock deadline when a mutation persists or a worker restarts', async () => {
+    let now = 1_000;
+    const initial = new SessionStore(area, () => now);
+    await initial.save({ account, userKey: makeUserKey(), items: [item('1')], folders: [], token: null });
+    now = 800_000;
+    const restarted = new SessionStore(area, () => now);
+    const restored = await restarted.load();
+    expect(restored).not.toBeNull();
+    await restarted.save({ ...restored!, items: [item('2')] });
+    now = 901_000;
+    expect(await new SessionStore(area, () => now).load()).toBeNull();
+    expect(await restarted.loadAccount()).toEqual(account);
+    expect(JSON.stringify(area.dump())).not.toContain('userKey');
+    expect(JSON.stringify(area.dump())).not.toContain('item-2');
+  });
+
+  it('refuses legacy sessions without an absolute deadline', async () => {
+    await store.save({ account, userKey: makeUserKey(), items: [], folders: [], token: null });
+    const raw = area.dump()['coffer.session'] as Record<string, unknown>;
+    delete raw['expiresAt'];
+    await area.set({ 'coffer.session': raw });
+    expect(await store.load()).toBeNull();
+  });
+
+  it('logout also removes the remembered account', async () => {
+    await store.save({ account, userKey: makeUserKey(), items: [], folders: [], token: null });
+    await store.clear({ forgetAccount: true });
+    expect(await store.loadAccount()).toBeNull();
   });
 });
 
@@ -172,7 +245,7 @@ describe('SessionStore —— 损坏的数据不能把扩展卡死', () => {
     expect(await store.load()).toBeNull();
   });
 
-  it('does not throw when the storage area itself fails', async () => {
+  it('degrades failed reads to locked state but reports a failed secret deletion', async () => {
     const broken: StorageArea = {
       get: async () => { throw new Error('storage 坏了'); },
       set: async () => { throw new Error('storage 坏了'); },
@@ -181,7 +254,7 @@ describe('SessionStore —— 损坏的数据不能把扩展卡死', () => {
     };
     const s = new SessionStore(broken);
     await expect(s.load()).resolves.toBeNull();
-    await expect(s.clear()).resolves.toBeUndefined();
+    await expect(s.clear()).rejects.toThrow('storage 坏了');
   });
 });
 

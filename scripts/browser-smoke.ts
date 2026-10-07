@@ -1,0 +1,378 @@
+#!/usr/bin/env bun
+/**
+ * Built-extension smoke in real Chrome/Firefox, with disposable profiles and an
+ * in-memory synthetic vault. No development server/account or personal profile.
+ * See apps/desktop/extension/README.md for browser/tool setup.
+ */
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join, resolve } from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { createCipheriv, createHash, createHmac } from 'node:crypto';
+import type { VaultItem } from '../packages/vault/src/model';
+
+const ROOT = resolve(import.meta.dir, '..');
+const product = process.argv[2];
+if (!['chrome', 'firefox', 'edge', 'zen'].includes(product ?? '')) throw new Error('Usage: bun scripts/browser-smoke.ts chrome|firefox|edge|zen');
+const name = product === 'edge' || product === 'chrome' ? 'chrome' : 'firefox';
+const engine = name === 'chrome' ? 'Chromium' : 'Gecko';
+const localDefaults: Record<string, string> = {
+  edge: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  zen: '/Applications/Zen.app/Contents/MacOS/zen',
+};
+const executable = process.env[`COFFER_${product!.toUpperCase()}`] ?? localDefaults[product!];
+if (!executable || !existsSync(executable)) throw new Error(`Set COFFER_${product!.toUpperCase()} to the browser executable`);
+const modulePath = process.env.COFFER_PUPPETEER;
+// Kept outside the application dependency tree: this is an optional browser tool.
+const { default: puppeteer } = await import(modulePath ? pathToFileURL(resolve(modulePath)).href : 'puppeteer-core');
+const dist = join(ROOT, 'apps/desktop', name === 'chrome' ? 'dist-extension' : 'dist-firefox');
+if (!existsSync(join(dist, 'manifest.json'))) throw new Error(`Build the extension first: ${dist}`);
+function packageFiles(directory: string, prefix = ''): string[] {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const relative = join(prefix, entry.name);
+    if (entry.isDirectory()) return packageFiles(join(directory, entry.name), relative);
+    return entry.isFile() && !entry.name.endsWith('.map') ? [relative] : [];
+  });
+}
+const buildHashes = Object.fromEntries(packageFiles(dist).sort().map((file) => [
+  file, createHash('sha256').update(readFileSync(join(dist, file))).digest('hex'),
+]));
+const artifacts = resolve(process.env.COFFER_SMOKE_OUT ?? join(tmpdir(), `coffer-browser-smoke-${Date.now()}`));
+mkdirSync(artifacts, { recursive: true });
+const profile = mkdtempSync(join(tmpdir(), `coffer-smoke-${product}-`));
+const downloads = join(profile, 'downloads');
+mkdirSync(downloads);
+const firefoxUuid = 'f69448ed-9c3e-44ad-876b-950aab9a0cab';
+const checks: string[] = [];
+const errors: string[] = [];
+let version = '';
+let userAgent = '';
+let failure = '';
+const attachmentContent = Buffer.from('Synthetic attachment bytes\n\0\xff', 'utf8');
+function encryptFixture(bytes: Uint8Array, encByte: number, macByte: number): string {
+  const iv = Buffer.alloc(16, 31);
+  const cipher = createCipheriv('aes-256-cbc', Buffer.alloc(32, encByte), iv);
+  const encrypted = Buffer.concat([cipher.update(bytes), cipher.final()]);
+  const mac = createHmac('sha256', Buffer.alloc(32, macByte)).update(iv).update(encrypted).digest();
+  return `2.${iv.toString('base64')}|${encrypted.toString('base64')}|${mac.toString('base64')}`;
+}
+const encryptedAttachment = encryptFixture(attachmentContent, 41, 43);
+const attachmentKey = encryptFixture(Buffer.concat([Buffer.alloc(32, 41), Buffer.alloc(32, 43)]), 17, 23);
+
+function check(label: string, passed: boolean, diagnostic = ''): void {
+  if (!passed) throw new Error(`${label}${diagnostic ? `: ${diagnostic}` : ''}`);
+  checks.push(label);
+  console.log(`  ✓ ${label}`);
+}
+
+const site = Bun.serve({
+  hostname: '127.0.0.1', port: 0,
+  fetch(request) {
+    const url = new URL(request.url);
+    if (url.pathname === '/attachment') return new Response(encryptedAttachment);
+    if (url.pathname === '/api/ciphers/smoke-alpha/attachment/smoke-file') {
+      return Response.json({ id: 'smoke-file', url: `${url.origin}/attachment` });
+    }
+    if (url.pathname !== '/login') return new Response('', { status: 404 });
+    return new Response(`<!doctype html><html><meta charset="utf-8"><title>Smoke login</title>
+      <form><label>Email<input id="email" type="email" autocomplete="username"></label>
+      <label>Password<input id="password" type="password" autocomplete="current-password"></label>
+      <button type="submit">Sign in</button></form>
+      <script>document.querySelector('form').onsubmit=e=>e.preventDefault()</script></html>`,
+    { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+  },
+});
+const siteUrl = `http://127.0.0.1:${site.port}/login`;
+const secret = 'Synthetic-Smoke-Password-Only!42';
+const username = 'smoke@example.invalid';
+function item(id: string, title: string, date: string): VaultItem {
+  return {
+    id, name: title, type: 'login', rawType: 1, nameFailed: false, notes: 'Synthetic smoke fixture',
+    notesFailed: false, folderId: null, favorite: false, reprompt: 0,
+    createdAt: date, updatedAt: date, deletedAt: null, archivedAt: null, wrappedKey: null,
+    login: { username, password: secret, uris: [{ uri: siteUrl, match: 1 }], totp: null,
+      passwordRevisionDate: null, fido2Credentials: [] },
+    card: null, identity: null, secureNote: null, sshKey: null,
+    customFields: [], passwordHistory: [], attachments: id === 'smoke-alpha' ? [{
+      id: 'smoke-file', fileName: 'smoke-attachment.txt', size: String(encryptedAttachment.length), sizeName: '32 B',
+      url: `${new URL(siteUrl).origin}/attachment`, key: attachmentKey, failed: false,
+    }] : [],
+  };
+}
+const account = { serverUrl: `http://127.0.0.1:${site.port}`, email: username,
+  userId: 'synthetic-smoke-user', kdf: { kdf: 0, iterations: 600000 } };
+const seed = {
+  account, userKey: { encKey: Buffer.alloc(32, 17).toString('base64'), macKey: Buffer.alloc(32, 23).toString('base64') },
+  items: [item('smoke-alpha', 'Alpha smoke login', '2026-01-01T00:00:00Z'),
+    item('smoke-zulu', 'Zulu smoke login', '2026-02-01T00:00:00Z')],
+  folders: [], token: null, expiresAt: Date.now() + 15 * 60 * 1000,
+};
+
+let browser: any;
+let popup: any;
+async function screenshot(label: string): Promise<void> {
+  // Firefox 157 BiDi rejects captureScreenshot for privileged extension pages.
+  // Keep interaction assertions active and report this limitation explicitly.
+  if (name === 'chrome') {
+    await popup.evaluate(() => Promise.all(document.getAnimations()
+      .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
+      .map((animation) => animation.finished.catch(() => {}))));
+    await popup.screenshot({ path: join(artifacts, `${product}-${label}.png`) });
+  }
+}
+async function click(selector: string): Promise<void> {
+  const textSelector = selector.match(/^(.*)::-p-text\((.*)\)$/);
+  let element;
+  if (textSelector) {
+    const query = textSelector[1]!;
+    const text = textSelector[2]!;
+    await popup.waitForFunction((q: string, t: string) => Array.from(document.querySelectorAll(q))
+      .some((node) => node.textContent?.trim().startsWith(t)), {}, query, text);
+    element = await popup.evaluateHandle((q: string, t: string) => Array.from(document.querySelectorAll(q))
+      .find((node) => node.textContent?.trim().startsWith(t)), query, text);
+  } else element = await popup.waitForSelector(selector, { visible: true });
+  // Firefox 157 also rejects BiDi input.performActions on extension pages.
+  if (name === 'firefox') await element.evaluate((button: HTMLElement) => button.click());
+  else {
+    // The drawer slides in with CSS. A node can exist while still offscreen.
+    await popup.waitForFunction((node: Element) => {
+      const rect = node.getBoundingClientRect();
+      const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
+      return rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.right <= innerWidth
+        && rect.top >= 0 && rect.bottom <= innerHeight && hit !== null && node.contains(hit);
+    }, {}, element);
+    await element.click();
+  }
+  await element.dispose();
+}
+async function type(selector: string, value: string): Promise<void> {
+  if (name === 'chrome') return popup.type(selector, value);
+  await popup.$eval(selector, (input: HTMLInputElement, text: string) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, value);
+}
+async function openNavigation(): Promise<void> {
+  // Closing a dialog restores focus inside the drawer, which can keep it open.
+  // Its own overlay then covers the trigger; use the already-open navigation.
+  const open = await popup.$eval('.nav-drawer-panel', (panel: Element) => panel.getBoundingClientRect().right > 40);
+  if (!open) await click('button[aria-label="导航"]');
+}
+try {
+  browser = await puppeteer.launch({
+    browser: name, executablePath: executable, userDataDir: profile, headless: process.env.COFFER_SMOKE_HEADED !== '1',
+    enableExtensions: true, ...(name === 'chrome' ? { pipe: true, downloadBehavior: { policy: 'allow', downloadPath: downloads } } : {
+      // Firefox 153+ requires this opt-in to automate moz-extension pages.
+      args: ['--remote-allow-system-access'],
+      extraPrefsFirefox: { 'extensions.webextensions.uuids': JSON.stringify({ 'coffer@coffer.app': firefoxUuid }) },
+    }),
+  });
+  version = await browser.version();
+  userAgent = await browser.userAgent();
+  if (name === 'firefox') await browser.connection.send('browser.setDownloadBehavior', {
+    downloadBehavior: { type: 'allowed', destinationFolder: downloads },
+  });
+  console.log(`${product} (${engine}): ${version}\nExecutable: ${executable}\nArtifacts: ${artifacts}`);
+  if (process.env.COFFER_SMOKE_HEADED === '1') console.log(`Browser PID: ${browser.process()?.pid}`);
+  check('correct browser engine', name === 'chrome' ? /(?:Chrome|Edg|Edge)\//i.test(version) : /(?:firefox|zen)\//i.test(version), version);
+  const extensionId = await browser.installExtension(dist);
+  const origin = name === 'chrome' ? `chrome-extension://${extensionId}` : `moz-extension://${firefoxUuid}`;
+  const login = await browser.newPage();
+  await login.goto(siteUrl);
+  popup = await browser.newPage();
+  popup.on('pageerror', (error: Error) => errors.push(error.message));
+  popup.setDefaultTimeout(15_000);
+  await popup.setViewport({ width: 440, height: 600 });
+  // Firefox does not emit normal network-navigation events for moz-extension
+  // URLs. Wait on its BiDi readiness result, then the actual UI selector.
+  const openPopup = async (reload = false) => {
+    if (name === 'firefox') {
+      const context = popup.mainFrame().browsingContext;
+      if (reload) await context.reload({ wait: 'interactive' });
+      else await context.navigate(`${origin}/popup.html`, 'interactive');
+    } else if (reload) await popup.reload({ waitUntil: 'domcontentloaded' });
+    else await popup.goto(`${origin}/popup.html`, { waitUntil: 'domcontentloaded' });
+  };
+  await openPopup();
+  await popup.waitForSelector('input[type="email"]', { visible: true });
+  check('shared connect screen renders', await popup.$('input[type="password"]') !== null);
+  await screenshot('connect');
+
+  await popup.evaluate(async (fixture: unknown) => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    await api.storage.session.set({ 'coffer.session': fixture, 'coffer.account': (fixture as any).account });
+  }, seed);
+  await openPopup(true);
+  await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
+  check('shared vault renders from background session', true);
+  const rpc = async (method: string, args: unknown[] = []) => popup.evaluate(async (m: string, a: unknown[]) => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return api.runtime.sendMessage({ type: 'coffer:application', method: m, args: a });
+  }, method, args);
+  const snapshot = await rpc('snapshot');
+  check('snapshot contains summaries without passwords or keys', snapshot.ok && snapshot.result.items.length === 2
+    && !JSON.stringify(snapshot).includes(secret) && !JSON.stringify(snapshot).includes('userKey'));
+
+  const rowNames = () => popup.$$eval('.vault-list li > button', (rows: Element[]) => rows.map((row) => row.textContent ?? ''));
+  const initialRows = await rowNames();
+  check('default date sort puts newest first', initialRows[0]?.includes('Zulu smoke login') === true, JSON.stringify(initialRows));
+  await click('[aria-label="排序方式"]');
+  await click('button::-p-text(名称)');
+  await popup.waitForFunction(() => document.querySelector('.vault-list li > button')?.textContent?.includes('Alpha smoke login'));
+  check('name sort changes list order', true);
+  await type('[aria-label="搜索条目"]', 'Alpha');
+  await popup.waitForFunction(() => document.querySelectorAll('.vault-list li > button').length === 1);
+  check('search filters shared list', (await rowNames())[0]?.includes('Alpha smoke login') === true);
+  await click('.vault-list li > button');
+  await popup.waitForSelector('[aria-label="显示"]', { visible: true });
+  check('detail starts masked', !(await popup.evaluate(() => document.body.textContent)).includes(secret));
+  await click('[aria-label="显示"]');
+  await popup.waitForFunction((value: string) => document.body.textContent?.includes(value), {}, secret);
+  check('explicit reveal obtains password through background RPC', true);
+  await screenshot('detail-440');
+  await click('[aria-label="隐藏"]');
+  check('hide removes revealed value', !(await popup.evaluate(() => document.body.textContent)).includes(secret));
+  await click('button::-p-text(编辑)');
+  await popup.waitForSelector('#editor-title', { visible: true });
+  check('editor loads selected record through explicit draft RPC',
+    (await popup.$eval('#editor-title', (node: Element) => node.textContent)) === '编辑条目');
+  await screenshot('editor-440');
+  await click('[aria-label="关闭"]');
+  await popup.waitForSelector('[aria-label="返回列表"]', { visible: true });
+  check('editor cancel returns to selected detail', true);
+  if (process.env.COFFER_SMOKE_ATTACHMENTS === '1') {
+    await click('button::-p-text(取回)');
+    console.log(`  Waiting for attachment download; test destination: ${downloads}`);
+    await popup.waitForFunction(async () => {
+      const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+      return (await api.downloads.search({})).some((download: any) => download.state === 'complete');
+    }, { timeout: process.env.COFFER_SMOKE_HEADED === '1' ? 60_000 : 15_000 });
+    const file = await popup.evaluate(async () => {
+      const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+      return (await api.downloads.search({})).find((download: any) => download.state === 'complete');
+    });
+    check('attachment Blob download completes in isolated destination', file.filename.startsWith(downloads));
+    check('downloaded attachment matches decrypted fixture bytes', readFileSync(file.filename).equals(attachmentContent));
+  }
+  await click('[aria-label="返回列表"]');
+  await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
+  check('narrow detail returns to list', true);
+
+  // Enter through the actual drawer; each screen must retain its own way back.
+  async function navigation(label: string): Promise<void> {
+    await openNavigation();
+    await click(`nav button::-p-text(${label})`);
+  }
+  await navigation('生成器');
+  await popup.waitForSelector('[aria-label="关闭生成器"]', { visible: true });
+  check('generator opens from shared navigation', true);
+  await click('[aria-label="关闭生成器"]');
+  await navigation('安全报告');
+  await popup.waitForSelector('button[aria-label="导航"]', { visible: true });
+  check('security report retains narrow navigation', (await popup.evaluate(() => document.body.textContent)).includes('安全报告'));
+  await navigation('导入');
+  await popup.waitForSelector('button[aria-label="导航"]', { visible: true });
+  check('import retains narrow navigation', (await popup.evaluate(() => document.body.textContent)).includes('导入'));
+  await navigation('全部');
+  await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
+  await openNavigation();
+  await click('[aria-label="设置"]');
+  await popup.waitForSelector('[aria-label="关闭设置"]', { visible: true });
+  check('settings opens from the shared drawer', true);
+  await click('[aria-label="关闭设置"]');
+
+  const tabId = await popup.evaluate(async (url: string) => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return (await api.tabs.query({})).find((tab: any) => tab.url === url)?.id;
+  }, siteUrl);
+  check('test site tab is available', typeof tabId === 'number');
+  const fields = await popup.evaluate(async (id: number) => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return api.tabs.sendMessage(id, { type: 'coffer:read-fields' });
+  }, tabId);
+  check('real content script bridge responds', fields !== undefined);
+  const denial = await popup.evaluate(async (id: number) => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return api.scripting.executeScript({ target: { tabId: id }, func: async () => {
+      const contentApi = (globalThis as any).browser ?? (globalThis as any).chrome;
+      return contentApi.runtime.sendMessage({ type: 'coffer:application', method: 'reveal', args: ['smoke-alpha', { kind: 'password' }] });
+    } });
+  }, tabId);
+  check('content context cannot invoke privileged reveal RPC', denial[0]?.result?.ok === false
+    && !JSON.stringify(denial).includes(secret), JSON.stringify(denial));
+  const fill = await popup.evaluate(async (id: number) => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return api.runtime.sendMessage({ type: 'coffer:fill', itemId: 'smoke-alpha', tabId: id, application: true });
+  }, tabId);
+  check('background fill accepts explicit request', fill?.ok === true, JSON.stringify(fill));
+  await login.waitForFunction((expected: string) => (document.querySelector('#password') as HTMLInputElement)?.value === expected, {}, secret);
+  check('real site receives username and password', await login.$eval('#email', (input: HTMLInputElement) => input.value) === username);
+
+  await openPopup(true);
+  await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
+  await screenshot('vault-440');
+  if (process.env.COFFER_SMOKE_CLIPBOARD === '1') {
+    const copyPassword = async () => {
+      await click('.vault-list li > button');
+      await click('div.group:has(> span[title="密码"]) button[aria-label="复制"]');
+      await popup.waitForSelector('button[aria-label="已复制"]');
+      check('real shared copy button writes the revealed password',
+        await popup.evaluate(() => navigator.clipboard.readText()) === secret);
+    };
+    const closePastDeadline = async () => {
+      await popup.close();
+      console.log('  Waiting 32 seconds with the popup closed for clipboard cleanup…');
+      await new Promise((resolve) => setTimeout(resolve, 32_000));
+      popup = await browser.newPage();
+      popup.on('pageerror', (error: Error) => errors.push(error.message));
+      popup.setDefaultTimeout(15_000);
+      await popup.setViewport({ width: 440, height: 600 });
+      await openPopup();
+      await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
+    };
+    await copyPassword();
+    await closePastDeadline();
+    check('clipboard expires after popup closes', await popup.evaluate(() => navigator.clipboard.readText()) === '');
+    await copyPassword();
+    const laterCopy = 'Later synthetic clipboard content';
+    await popup.evaluate((value: string) => navigator.clipboard.writeText(value), laterCopy);
+    await closePastDeadline();
+    check('clipboard cleanup preserves a later copy', await popup.evaluate(() => navigator.clipboard.readText()) === laterCopy);
+    await popup.evaluate(() => navigator.clipboard.writeText(''));
+  }
+  await openNavigation();
+  await click('nav button::-p-text(锁定)');
+  await popup.waitForSelector('input[type="password"]', { visible: true });
+  const locked = await rpc('snapshot');
+  check('lock clears vault display and retains account', locked.ok && locked.result.status === 'locked'
+    && locked.result.items.length === 0 && locked.result.account?.email === username);
+  const stored = await popup.evaluate(async () => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return api.storage.session.get('coffer.session');
+  });
+  check('lock removes persisted session keys', stored['coffer.session'] === undefined);
+  await openPopup(true);
+  await popup.waitForSelector('input[type="password"]', { visible: true });
+  check('reopening preserves locked account state', (await rpc('snapshot')).result.status === 'locked');
+  check('no uncaught UI errors', errors.length === 0, errors.join('\n'));
+} catch (error) {
+  failure = error instanceof Error ? error.stack ?? error.message : String(error);
+  console.error(failure);
+  if (popup) {
+    await screenshot('failure').catch(() => {});
+    const text = await popup.evaluate(() => document.body.innerText).catch(() => 'unavailable');
+    console.error(`UI at failure: ${text}`);
+  }
+} finally {
+  await browser?.close().catch(() => {});
+  site.stop(true);
+  rmSync(profile, { recursive: true, force: true });
+  writeFileSync(join(artifacts, `${product}-report.json`), JSON.stringify({
+    browser: product, engine, version, userAgent, executable, extension: dist, buildHashes, viewport: [440, 600], checks, errors,
+    passed: !failure, failure, synthetic: true, timestamp: new Date().toISOString(),
+    screenshots: name === 'chrome' ? 'captured' : 'Gecko BiDi cannot capture privileged extension pages',
+    interaction: name === 'chrome' ? 'native pointer and keyboard' : 'DOM events; Gecko BiDi rejects native actions on extension pages',
+  }, null, 2) + '\n');
+}
+if (failure) process.exitCode = 1;
+else console.log(`PASS ${product}: ${checks.length} checks`);

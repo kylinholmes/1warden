@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Coffer 桌面端的默认权限。刻意保持最小 —— 每多一项能力就多一份攻击面。窗口的显示/隐藏/最小化走自写的 Rust 命令，因此不必放宽 ACL。",
+  "description": "1Warden 桌面端的默认权限。刻意保持最小 —— 每多一项能力就多一份攻击面。窗口的显示/隐藏/最小化走自写的 Rust 命令，因此不必放宽 ACL。",
   "windows": [
     "main",
     "quick"

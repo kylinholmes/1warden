@@ -15,6 +15,13 @@
 /** 剪贴板里明文密码的存活时间。**只有这一处定义** —— 它是一条安全约定，不是一个调参 */
 export const CLIPBOARD_CLEAR_MS = 30_000;
 
+let scheduler: ((value: string) => void | Promise<void>) | null = null;
+
+/** The browser background outlives the popup; native windows use the local timer. */
+export function installClipboardScheduler(handler: typeof scheduler): void {
+  scheduler = handler;
+}
+
 /**
  * 只清「还是我们写的那个值」。
  *
@@ -33,7 +40,8 @@ export async function clearIfUnchanged(value: string): Promise<void> {
  * 桌面端每一处 `CopyButton` 都该传这个当 `onCopied` —— 光是这一行，
  * 就把「30 秒」和「只清自己写的那个值」两条规则钉在了同一个地方。
  */
-export function scheduleClipboardClear(value: string): void {
+export async function scheduleClipboardClear(value: string): Promise<void> {
+  if (scheduler) { await scheduler(value); return; }
   setTimeout(() => { void clearIfUnchanged(value); }, CLIPBOARD_CLEAR_MS);
 }
 
@@ -45,6 +53,5 @@ export function scheduleClipboardClear(value: string): void {
  */
 export async function copyWithAutoClear(value: string): Promise<void> {
   await navigator.clipboard.writeText(value);
-  scheduleClipboardClear(value);
+  await scheduleClipboardClear(value);
 }
-

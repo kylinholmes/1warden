@@ -214,7 +214,7 @@ export const tauriFetch: typeof fetch = async (input, init) => {
   if (!isTauri()) {
     // 在纯浏览器里跑（`bun run dev` 直接开页面）时没有 Rust 侧可调，
     // 明确报错而不是抛一个看不懂的 invoke 失败
-    throw new TransportError('network', '当前不在 Coffer 桌面端中运行，无法发起请求');
+    throw new TransportError('network', '当前不在 1Warden 桌面端中运行，无法发起请求');
   }
 
   if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');

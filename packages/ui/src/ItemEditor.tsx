@@ -14,11 +14,11 @@ interface Props {
   /* 只读 —— 编辑器只拿它填下拉，不改文件夹本身 */
   folders: readonly VaultFolder[];
   /** 保存。桌面端直接调 client，扩展端发消息给后台 —— 加密在他们那边 */
-  onSave: (draft: VaultItem) => Promise<VaultItem>;
+  onSave: (draft: VaultItem) => Promise<Pick<VaultItem, 'id' | 'name'>>;
   item: VaultItem | null;      // null = 新建
   /** 浮层的开合。**组件本身一直挂着** —— 见下面「退场」那一段 */
   open: boolean;
-  onDone: (saved: VaultItem | null) => void;
+  onDone: (saved: Pick<VaultItem, 'id' | 'name'> | null) => void;
   onCancel: () => void;
 }
 

@@ -32,7 +32,7 @@
  * 只报「有没有」，不报值本身。弹窗要填充时再让 background 自己去取 ——
  * 少送出去一次就少一分风险，而列表本来也没有任何理由需要看到它们。
  */
-import { avatarOf, iconDomainOf, summaryOf, type VaultItem } from '@coffer/vault';
+import { avatarOf, hasTotp, iconDomainOf, summaryOf, type VaultItem } from '@coffer/vault';
 
 export interface ItemSummary {
   id: string;
@@ -54,6 +54,8 @@ export interface ItemSummary {
   favorite: boolean;
   /** 所属文件夹。只是 id —— 名字在另一端单独给（见下） */
   folderId: string | null;
+  createdAt: string;
+  updatedAt: string;
 
   /*
    * ── 显示用的字段 ──
@@ -84,7 +86,7 @@ export function summarise(i: VaultItem): ItemSummary {
     nameFailed: i.nameFailed,
     username: i.login?.username ?? null,
     hasPassword: i.login?.password != null,
-    hasTotp: i.login?.totp != null,
+    hasTotp: hasTotp(i),
     uris: i.login?.uris.map((u) => u.uri) ?? [],
     favorite: i.favorite,
     /*
@@ -92,6 +94,8 @@ export function summarise(i: VaultItem): ItemSummary {
      * 那条消息单独给），跟着每条摘要重复几十遍没道理。
      */
     folderId: i.folderId,
+    createdAt: i.createdAt,
+    updatedAt: i.updatedAt,
     type: i.type,
     summary: summaryOf(i),
     iconDomain: iconDomainOf(i),

@@ -109,7 +109,7 @@ function waitForRelay(timeoutMs: number): Promise<boolean> {
 async function ask(payload: Record<string, unknown>): Promise<Reply> {
   const id = nextId++;
   const ready = await waitForRelay(5_000);
-  if (!ready) throw new Error('Coffer 扩展没有响应，请确认已启用');
+  if (!ready) throw new Error('1Warden 扩展没有响应，请确认已启用');
 
   return new Promise<Reply>((resolve, reject) => {
     pending.set(id, { resolve, reject });
@@ -120,7 +120,7 @@ async function ask(payload: Record<string, unknown>): Promise<Reply> {
     // 页面那边会表现为一个永不 settle 的 Promise，比抛错更难查
     setTimeout(() => {
       if (!pending.delete(id)) return;
-      reject(new Error('Coffer 没有响应，请确认扩展已启用并解锁'));
+      reject(new Error('1Warden 没有响应，请确认扩展已启用并解锁'));
     }, 30_000);
   });
 }
@@ -169,7 +169,7 @@ async function handleCreate(options: CredentialCreationOptions): Promise<unknown
   });
   if (!reply.ok) throw new DOMException(reply.error ?? '创建 passkey 失败', 'NotAllowedError');
   if (!reply.attestationObject || !reply.clientDataJSON) {
-    throw new DOMException('Coffer 返回的数据不完整', 'UnknownError');
+    throw new DOMException('1Warden 返回的数据不完整', 'UnknownError');
   }
 
   const response = makeResponse(
@@ -209,7 +209,7 @@ async function handleGet(options: CredentialRequestOptions): Promise<unknown> {
   });
   if (!reply.ok) throw new DOMException(reply.error ?? '没有可用的 passkey', 'NotAllowedError');
   if (!reply.authenticatorData || !reply.signature || !reply.clientDataJSON) {
-    throw new DOMException('Coffer 返回的数据不完整', 'UnknownError');
+    throw new DOMException('1Warden 返回的数据不完整', 'UnknownError');
   }
 
   const response = makeResponse(

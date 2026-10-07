@@ -1,4 +1,6 @@
-import { useState, useSyncExternalStore, type ReactNode } from 'react';
+import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { ProfileEditor } from '../components/ProfileEditor';
+import type { ApplicationClient, ApplicationCapabilities } from '../application/types';
 import { FloatingPanel } from '@coffer/ui';
 import { Segmented } from '@coffer/ui';
 import { useShowTypes } from '../prefs';
@@ -43,11 +45,14 @@ const SECTIONS: Array<{ id: SectionId; label: string; icon: ReactNode }> = [
   { id: 'about', label: '关于', icon: <IconInfo size={16} /> },
 ];
 
-export function Settings({ open, account, serverUrl, onClose, initialSection = 'account' }: {
+export function Settings({ client, open, account, serverUrl, onClose, initialSection = 'account', capabilities = { native: false, browser: false, saveAttachments: false }, onDisconnect }: {
+  client?: ApplicationClient;
   open: boolean;
   account: string;
   serverUrl: string;
   onClose: () => void;
+  capabilities?: ApplicationCapabilities;
+  onDisconnect?: () => Promise<void>;
   /**
    * 打开时停在哪一组。
    *
@@ -58,6 +63,15 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
   initialSection?: SectionId;
 }) {
   const [section, setSection] = useState<SectionId>(initialSection);
+  const [disconnecting, setDisconnecting] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  useEffect(() => { if (open) { setSection(initialSection); setError(null); } }, [open, initialSection]);
+  async function disconnect(): Promise<void> {
+    if (!onDisconnect || disconnecting) return;
+    setDisconnecting(true); setError(null);
+    try { await onDisconnect(); } catch (e) { setError(e instanceof Error ? e.message : '断开连接失败'); }
+    finally { setDisconnecting(false); }
+  }
   /*
    * 主题的真相在 theme.ts、类别开关的真相在 prefs.ts（都是模块级 +
    * localStorage），组件只是它们的视图 ——
@@ -77,8 +91,10 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
           {/* 底栏按分组说实话：外观那组的主题是真能用的，其余三组还没接 */}
           <span className="min-w-0 truncate">
             {section === 'appearance'
-              ? '主题改动立即生效并会记住；这一组其余两项仍是占位'
-              : '这一组仍是外壳：控件尚未接入，改动不会保存'}
+              ? '主题与类别显示立即生效；灰色选项暂不可用'
+              : section === 'security' ? '灰色选项暂不可调整'
+              : section === 'autofill' ? '在条目详情中使用自动填充'
+              : '1Warden'}
           </span>
           <span className="shrink-0">
             <kbd className="text-2xs">esc</kbd> 关闭
@@ -106,7 +122,7 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
           role="tablist"
           aria-label="设置分组"
           aria-orientation="vertical"
-          className="w-[148px] shrink-0 overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--surface-chrome)] p-2"
+          className="w-[120px] sm:w-[148px] shrink-0 overflow-y-auto border-r border-[var(--border-subtle)] bg-[var(--surface-chrome)] p-2"
         >
           {SECTIONS.map((s) => {
             const active = s.id === section;
@@ -135,7 +151,7 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
                     : 'text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]'
                 }`}
               >
-                <span className={active ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}>{s.icon}</span>
+                <span style={{ color: `var(--${({ account: 'accent', security: 'teal', appearance: 'violet', autofill: 'rose', about: 'accent' })[s.id]})` }}>{s.icon}</span>
                 <span className="min-w-0 flex-1 truncate">{s.label}</span>
               </button>
             );
@@ -147,21 +163,23 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
           id={`settings-panel-${section}`}
           aria-labelledby={`settings-tab-${section}`}
           tabIndex={-1}
-          className="min-w-0 flex-1 overflow-y-auto px-5 py-4 outline-none"
+          className="min-w-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5 outline-none"
         >
-          {section === 'account' && (
+          {section === 'account' && (<>
+            {client && open && <ProfileEditor client={client} />}
             <Group title="账户" hint="这些来自你连接的那台服务器，不在这里改">
               <Row label="邮箱" value={account || '—'} />
               <Row label="服务器" value={serverUrl || '—'} />
               <Row label="断开并清除本机数据" hint="保险库在服务器上的内容不受影响">
-                <button className="btn btn-danger" disabled>断开连接</button>
+                <button className="btn btn-danger" onClick={() => { void disconnect(); }} disabled={!onDisconnect || disconnecting}>{disconnecting ? '正在断开…' : '断开连接'}</button>
               </Row>
+              {error && <p role="alert" className="py-3 text-xs text-[var(--risk)]">{error}</p>}
             </Group>
-          )}
+          </>)}
 
           {section === 'security' && (
             <Group title="安全" hint="锁定与剪贴板的行为">
-              <Row label="空闲后自动锁定" hint="切换窗口或系统休眠时也会立即锁定">
+              <Row label="解锁后自动锁定" hint="解锁 15 分钟后自动锁定；重新打开界面不会延长期限">
                 <Select disabled value="15" options={[['5', '5 分钟'], ['15', '15 分钟'], ['60', '1 小时'], ['0', '不自动锁定']]} />
               </Row>
               <Row label="复制后清空剪贴板" hint="只在剪贴板里还是我们写进去的值时才清">
@@ -219,24 +237,24 @@ export function Settings({ open, account, serverUrl, onClose, initialSection = '
           )}
 
           {section === 'autofill' && (
-            <Group title="自动填充" hint="让密码进到别的应用里">
-              <Row label="桌面自动填充" hint="需要辅助功能权限，只会发送按键，不读取界面内容">
-                <Check disabled />
-              </Row>
-              <Row label="浏览器扩展" hint="当前没有检测到已连接的浏览器">
-                <span className="text-sm text-[var(--ink-tertiary)]">未连接</span>
-              </Row>
-              <Row label="快速面板快捷键">
-                <Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>\</Kbd>
-              </Row>
+            <Group title="自动填充" hint={capabilities.browser ? '在当前浏览器中使用已保存的登录' : '让密码进到其他应用里'}>
+              {capabilities.browser && <>
+                <Row label="填充到当前页面" hint="打开登录条目的详情后点击填充；当前网站的匹配项显示在列表上方" />
+                <Row label="保存登录" hint="在网站登录后，可在列表上方保存或更新登录信息" />
+              </>}
+              {capabilities.native && <>
+                <Row label="桌面自动填充" hint="在条目详情中输入到其他应用；需要辅助功能权限" />
+                <Row label="快速面板快捷键"><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>\</Kbd></Row>
+              </>}
+              {!capabilities.native && !capabilities.browser && <Row label="复制登录信息" hint="在条目详情中复制用户名、密码或验证码" />}
             </Group>
           )}
 
           {section === 'about' && (
-            <Group title="关于" hint="Coffer 0.0.0">
+            <Group title="关于" hint="1Warden 0.0.0">
               <Row label="数据在哪里" hint="条目在服务端加密，主密码与本机派生的密钥永不发送" />
               <Row label="许可" hint="自有实现，未使用禁止用于 Vaultwarden 的官方 SDK" />
-              <Shortcuts />
+              <Shortcuts native={capabilities.native} />
             </Group>
           )}
         </div>
@@ -269,13 +287,13 @@ function Row({ label, hint, value, children }: {
   children?: ReactNode;
 }) {
   return (
-    <div className="flex items-center gap-4 border-b border-[var(--border-subtle)] py-3 last:border-b-0">
-      <div className="min-w-0 flex-1">
+    <div className="flex flex-wrap items-center gap-3 border-b border-[var(--border-subtle)] py-3 last:border-b-0">
+      <div className="min-w-[120px] flex-1">
         <div className="text-md">{label}</div>
         {hint && <div className="mt-0.5 text-xs leading-snug text-[var(--ink-tertiary)]">{hint}</div>}
       </div>
       {value !== undefined && (
-        <div className="secret max-w-[240px] shrink-0 truncate text-md text-[var(--ink-secondary)]" title={value}>
+        <div className="secret max-w-full truncate text-md text-[var(--ink-secondary)]" title={value}>
           {value}
         </div>
       )}
@@ -309,9 +327,9 @@ function Kbd({ children }: { children: ReactNode }) {
 }
 
 /** 快捷键一览 —— 面板里唯一「真的有用」的一组信息，所以它不叫占位 */
-function Shortcuts() {
+function Shortcuts({ native }: { native: boolean }) {
   const keys: Array<[string, string]> = [
-    ['⌘⇧\\', '打开快速面板'],
+    ...(native ? [['⌘⇧\\', '打开快速面板'] as [string, string]] : []),
     ['⌘F', '搜索条目'],
     ['⌘N', '新建条目'],
     ['⌘L', '锁定保险库'],

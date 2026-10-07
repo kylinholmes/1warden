@@ -1,4 +1,4 @@
-import { StrictMode } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, ErrorBoundary } from './App';
 import { webAssemblyAvailable } from './capabilities';
@@ -6,6 +6,10 @@ import { initPlatform } from './platform';
 import { installDesktopHost } from './host-impl';
 import { initNativeFeel } from './native';
 import { initTheme } from './theme';
+import { IS_DESKTOP } from '@coffer/ui';
+import { listen } from '@tauri-apps/api/event';
+import { useQuickBridge } from './use-quick-bridge';
+import { createDesktopApplication } from './application/desktop';
 import './styles.css';
 
 // 宿主要**最先**装：后面所有代码都可能用到它（发请求、读存储）
@@ -20,12 +24,28 @@ initPlatform();
 initNativeFeel();
 initTheme();
 
+const runtime = createDesktopApplication();
+
+function DesktopEvents() {
+  useQuickBridge(runtime.getActiveVault, runtime.subscribeActiveVault);
+  useEffect(() => {
+    let disposed = false;
+    let unlisten: (() => void) | undefined;
+    void listen('coffer:tray-lock', () => { void runtime.client.lock(); }).then((off) => {
+      if (disposed) off(); else unlisten = off;
+    });
+    return () => { disposed = true; unlisten?.(); };
+  }, []);
+  return null;
+}
+
 createRoot(root).render(
   <StrictMode>
     {/* 边界要在 StrictMode 内层：它兜的是 App 的渲染异常 */}
     {webAssemblyAvailable() ? (
       <ErrorBoundary>
-        <App />
+        {IS_DESKTOP && <DesktopEvents />}
+        <App client={runtime.client} />
       </ErrorBoundary>
     ) : (
       <Unsupported />
@@ -44,7 +64,7 @@ function Unsupported() {
       <div className="max-w-md">
         <h1 className="mb-2 text-lg font-semibold text-[var(--risk)]">无法启动</h1>
         <p className="mb-3 text-sm leading-relaxed text-[var(--ink-secondary)]">
-          Coffer 需要 WebAssembly 来处理主密码，而这台机器上的 WebView 不支持它
+          1Warden 需要 WebAssembly 来处理主密码，而这台机器上的 WebView 不支持它
           （或是被安全策略禁用了）。
         </p>
         <p className="text-xs leading-relaxed text-[var(--ink-tertiary)]">

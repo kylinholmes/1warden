@@ -92,7 +92,7 @@ export function GeneratorBody({ className = '' }: { className?: string }) {
       />
 
       {/* 结果在最上面 —— 它是用户来这儿要的东西，不该等他调完参数才看见 */}
-      <div className="card-well mt-4 p-3">
+      <div className="generator-result card-well mt-4 p-3">
         <p className="secret min-h-[46px] break-all text-lg leading-[var(--lh-snug)]">
           {value}
         </p>

@@ -1,6 +1,6 @@
 {
   "manifest_version": 3,
-  "name": "Coffer",
+  "name": "1Warden",
   "version": "0.0.0",
   "description": "个人密码管理器 —— 自动填充、密码生成、自建 Vaultwarden",
   "minimum_chrome_version": "116",
@@ -12,13 +12,15 @@
     "type": "module"
   },
   "action": {
-    "default_title": "Coffer",
+    "default_title": "1Warden",
     "default_popup": "popup.html"
   },
   "permissions": [
     "storage",
     "scripting",
     "activeTab",
+    "alarms",
+    "downloads",
     "offscreen",
     "clipboardWrite",
     "clipboardRead"

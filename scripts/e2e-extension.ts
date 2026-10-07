@@ -22,6 +22,7 @@ import { createHash } from 'node:crypto';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import type { ApplicationService } from '../apps/desktop/src/application/types';
 
 const EDGE = '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge';
 const DIST = join(import.meta.dir, '..', 'apps', 'desktop', 'dist-extension');
@@ -55,7 +56,9 @@ const USERNAME = 'e2e-user@example.com';
 const SITE_PASSWORD = `E2E-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}!`;
 
 let failures = 0;
+let checks = 0;
 function check(name: string, ok: boolean, detail = ''): void {
+  checks++;
   console.log(`${ok ? '  ✓' : '  ✗'} ${name}${ok || !detail ? '' : `\n      ${detail}`}`);
   if (!ok) failures++;
 }
@@ -241,8 +244,7 @@ function extensionIdFor(path: string): string {
 /**
  * 直接用 API 删掉测试造的条目。
  *
- * 走 API 而不是扩展的消息 —— 扩展还没提供删除能力，而且清理是测试的事，
- * 不该为了它给产品加接口。
+ * 清理独立于被测试的扩展运行时，避免产品操作失败后留下测试记录。
  */
 async function cleanupItems(ids: string[]): Promise<number> {
   if (ids.length === 0) return 0;
@@ -592,25 +594,80 @@ async function main(): Promise<void> {
     check('用户名填进了用户名框', values.email === USERNAME, JSON.stringify(values));
     check('密码填进了密码框', values.pw === SITE_PASSWORD);
 
+    // 共享 PC 界面使用的同一条 RPC，实际写入并读回 Vaultwarden。
+    console.log('\n4.5 共享应用的编辑、文件夹与删除');
+    async function application<K extends keyof ApplicationService>(
+      method: K, ...args: Parameters<ApplicationService[K]>
+    ): Promise<Awaited<ReturnType<ApplicationService[K]>>> {
+      const reply = await ext!.eval<{ ok: boolean; result?: unknown; error?: { message: string } }>(
+        `chrome.runtime.sendMessage(${JSON.stringify({ type: 'coffer:application', method, args })})`,
+      );
+      if (!reply.ok) throw new Error(reply.error?.message ?? `${method} failed`);
+      return reply.result as Awaited<ReturnType<ApplicationService[K]>>;
+    }
+    const capturedId = matches[0]!.id;
+    const draft = await application('getDraft', capturedId);
+    check('显式编辑取得密码且不包含后台密钥', draft.login?.password === SITE_PASSWORD && draft.wrappedKey === null);
+    draft.name = 'Coffer E2E edited login';
+    const savedSummary = await application('saveItem', draft);
+    check('编辑通过服务端保存并返回安全摘要', savedSummary.name === draft.name && !('login' in savedSummary));
+    const detail = await application('getItem', capturedId);
+    check('详情正确但不提前返回密码', detail.summary.name === draft.name && detail.login?.hasPassword === true && !('password' in detail.login));
+    check('显式读取仍得到原密码', await application('reveal', capturedId, { kind: 'password' }) === SITE_PASSWORD);
+    await application('toggleFavorite', capturedId);
+    check('收藏在最新快照中生效', (await application('snapshot')).items.find((i) => i.id === capturedId)?.favorite === true);
+    let testFolder: string | undefined;
+    let testItem: string | undefined;
+    try {
+      const folderName = `Coffer E2E ${Date.now()}`;
+      await application('createFolder', folderName);
+      testFolder = (await application('snapshot')).folders.find((f) => f.name === folderName)?.id;
+      check('新建文件夹保存到服务端', typeof testFolder === 'string');
+      if (testFolder) {
+        await application('renameFolder', testFolder, `${folderName} renamed`);
+        check('文件夹重命名后可读回', (await application('snapshot')).folders.find((f) => f.id === testFolder)?.name.endsWith(' renamed') === true);
+      }
+      const newDraft = await application('getDraft', capturedId);
+      newDraft.id = '';
+      newDraft.name = 'Coffer E2E temporary item';
+      newDraft.folderId = testFolder ?? null;
+      testItem = (await application('saveItem', newDraft)).id;
+      check('共享编辑器的新建路径保存成功', testItem !== capturedId && (await application('getItem', testItem)).summary.name === newDraft.name);
+      await application('moveToTrash', testItem);
+      const afterDelete = await application('snapshot');
+      check('删除一条后其他记录仍在', afterDelete.items.some((i) => i.id === capturedId) && !afterDelete.items.some((i) => i.id === testItem));
+    } finally {
+      if (testItem) await cleanupItems([testItem]);
+      if (testFolder) await application('deleteFolder', testFolder);
+    }
+    check('删除文件夹后最新快照一致', !(await application('snapshot')).folders.some((f) => f.id === testFolder));
+
     // ── 5. 复制 ──
     console.log('\n5. 复制到剪贴板');
 
-    // 按弹窗的真实流程走：background 取明文并安排清理 → 弹窗写剪贴板。
+    // 按共享界面的真实流程走：按需读取 → 写入剪贴板 → 通知后台安排清理。
     // 直接断言 background 返回 ok 是不够的 —— 那不证明值真的到了剪贴板。
-    const copied = await ext.eval<{ value?: string; clearAfterSeconds?: number; error?: string }>(`
+    const copied = await ext.eval<{ value?: string; error?: string }>(`
       chrome.runtime.sendMessage({
         type: 'coffer:copy', itemId: ${JSON.stringify(matches[0]!.id)}, field: 'password',
       })
     `);
     check('background 取出了要复制的密码', copied?.value === SITE_PASSWORD,
       copied?.error ?? `拿到 "${String(copied?.value).slice(0, 16)}…"`);
-    check('并告知会在 30 秒后清理', copied?.clearAfterSeconds === 30);
 
     const wrote = await ext.eval<string>(`
       navigator.clipboard.writeText(${JSON.stringify(SITE_PASSWORD)})
         .then(() => 'ok').catch((e) => 'ERR ' + e.message)
     `);
     check('剪贴板写入成功', wrote === 'ok', wrote);
+
+    const scheduled = await ext.eval<{ ok?: boolean }>(`
+      chrome.runtime.sendMessage({
+        type: 'coffer:clipboard-copied', value: ${JSON.stringify(SITE_PASSWORD)},
+      })
+    `);
+    check('写入成功后后台接受清理安排', scheduled?.ok === true);
+    const clipboardDeadline = Date.now() + 31_000;
 
     /**
      * ⚠️ 从**弹窗页面**读剪贴板。这一步是在验真：只看 `copy` 返回 ok 是不够的 ——
@@ -622,21 +679,6 @@ async function main(): Promise<void> {
     `);
     check('剪贴板里确实是那条密码', clip === SITE_PASSWORD,
       clip.startsWith('ERR') ? clip : `读到 "${clip.slice(0, 24)}…"`);
-
-    // 离屏文档收到清理安排了吗？它没有界面，出错也没人告诉 —— 只能看它的日志
-    const offLogs = await (async () => {
-      const t = (await listTargets()).find((x) => x.url.includes('offscreen'));
-      if (!t?.webSocketDebuggerUrl) return [];
-      const off = await Cdp.connect(t.webSocketDebuggerUrl);
-      await off.enableRuntime();
-      await new Promise((r) => setTimeout(r, 300));
-      const logs = [...off.logs];
-      off.close();
-      return logs;
-    })();
-    check('离屏文档收到了清理安排',
-      offLogs.some((l) => l.includes('schedule-clear')) || offLogs.length >= 0,
-      `离屏日志 ${offLogs.length} 条`);
 
     const ctx = await ext.eval<string>(`
       chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] })
@@ -873,6 +915,15 @@ async function main(): Promise<void> {
       for (const line of tr) console.log(`  ${line}`);
     }
 
+    // 读真实剪贴板验收定时清理，不能以离屏文档存在或日志数量代替。
+    await new Promise((resolve) => setTimeout(resolve, Math.max(0, clipboardDeadline - Date.now())));
+    const clearedClipboard = await ext.eval<string>(`
+      navigator.clipboard.readText().then((t) => t).catch((e) => 'ERR ' + e.message)
+    `);
+    check('30 秒后真实剪贴板已清空', clearedClipboard === '',
+      clearedClipboard.startsWith('ERR') ? clearedClipboard
+        : clearedClipboard === SITE_PASSWORD ? '复制的密码仍在剪贴板中' : '剪贴板内容已被其他程序替换');
+
     // ── 7. 收尾：删掉这次造的条目 ──
     console.log('\n7. 清理');
     const created = (await ext.eval<{ items: { id: string; name: string }[] }>(
@@ -950,8 +1001,8 @@ async function main(): Promise<void> {
 
   console.log(
     failures === 0
-      ? '\n✅ 扩展端到端全部通过 —— 填充与保存捕获在真实浏览器里是通的\n'
-      : `\n❌ 有 ${failures} 项未通过\n`,
+      ? `\n✅ 扩展端到端 ${checks} 项全部通过\n`
+      : `\n❌ ${checks} 项中有 ${failures} 项未通过\n`,
   );
   process.exit(failures === 0 ? 0 : 1);
 }

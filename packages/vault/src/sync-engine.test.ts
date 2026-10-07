@@ -135,6 +135,39 @@ describe('SyncEngine — 只把活跃条目写进会话', () => {
 });
 
 describe('SyncEngine — 单条失败不拖垮整体', () => {
+  for (const phase of ['fetch', 'decrypt'] as const) {
+    it(`discards old ${phase} results after a lock and new unlock`, async () => {
+      let started!: () => void;
+      const reached = new Promise<void>((resolve) => { started = resolve; });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => { release = resolve; });
+      const d = deps({
+        sync: async () => {
+          if (phase === 'fetch') { started(); await gate; }
+          return { profile: PROFILE, folders: [], collections: [],
+            ciphers: [{ id: 'old', deletedDate: null, archivedDate: null }] as never };
+        },
+        decryptCipher: async () => {
+          if (phase === 'decrypt') { started(); await gate; }
+          return item('old');
+        },
+      });
+      const s = session();
+      const engine = new SyncEngine({ deps: d, session: s });
+      const syncing = engine.sync({ unlockedKey: s.getKey()! });
+      await reached;
+      s.lock();
+      s.beginUnlock();
+      s.completeUnlock(makeUserKey());
+      s.replaceData([item('fresh')], []);
+      release();
+      await syncing;
+      expect(s.items.map((record) => record.id)).toEqual(['fresh']);
+      expect(engine.lastSyncedAt).toBeNull();
+      s.logout();
+    });
+  }
+
   it('keeps syncing when one item fails to decrypt', async () => {
     const d = deps({
       sync: vi.fn(async () => ({

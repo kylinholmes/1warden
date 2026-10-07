@@ -10,7 +10,7 @@ configs:
 settingGroups:
   app:
     base:
-      PRODUCT_NAME: Coffer
+      PRODUCT_NAME: 1Warden
       PRODUCT_BUNDLE_IDENTIFIER: app.coffer.desktop
 targetTemplates:
   app:

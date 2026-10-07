@@ -1,9 +1,12 @@
+import { ProfileAvatar } from '../components/ProfileAvatar';
 import { useState, useEffect, useRef, type FormEvent } from 'react';
-import type { VaultClient } from '@coffer/vault';
-import { IconAlert, IconGlobe, IconSpinner } from '@coffer/ui';
+import type { ApplicationClient } from '../application/types';
+import type { TwoFactorChallenge } from '@coffer/vault';
+import { IconAlert, IconGlobe, IconSpinner, TwoFactorForm } from '@coffer/ui';
+import { twoFactorChallenge } from './auth-error';
 
 interface Props {
-  client: VaultClient;
+  client: ApplicationClient;
   onUnlocked: () => void;
   onDisconnect: () => void;
 }
@@ -32,7 +35,8 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
   const [password, setPassword] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const account = client.getSession().account;
+  const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
+  const { account, profile } = client.getSnapshot();
   const inputRef = useRef<HTMLInputElement>(null);
 
   // 解锁屏一出现就聚焦输入框 —— 用户按下快捷键后应该能直接开始打字
@@ -47,7 +51,9 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
       setPassword(''); // 成功后立刻从组件状态里清掉
       onUnlocked();
     } catch (err) {
-      setError(messageOf(err));
+      const nextChallenge = twoFactorChallenge(err);
+      if (nextChallenge) setChallenge(nextChallenge);
+      else setError(messageOf(err));
       setPassword('');
       // 失败后把焦点还给输入框：用户下一步一定是重输
       inputRef.current?.focus();
@@ -56,29 +62,35 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
     }
   }
 
+  async function submitCode(code: string, provider: number, remember: boolean): Promise<void> {
+    setBusy(true);
+    setError(null);
+    try {
+      await client.connectWithTwoFactor(code, provider, remember);
+      onUnlocked();
+    } catch (err) {
+      if ((err as { kind?: string } | null)?.kind === 'authRestartRequired') setChallenge(null);
+      setError(messageOf(err));
+    } finally { setBusy(false); }
+  }
+
   return (
     /* 整块背景可拖 —— 和连接屏同理，这一屏没有顶部带子（见 Connect.tsx） */
     <div className="below-titlebar flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
       <div className="screen-in w-full max-w-[380px]">
         <div className="flex flex-col items-center text-center">
-          {/* 头像位 —— 用邮箱首字母，不引入外部图片 */}
-          <div
-            className={`mb-4 grid h-16 w-16 place-items-center rounded-full bg-[var(--accent-tint)] text-xl font-semibold text-[var(--accent)] ${
-              busy ? 'breathe' : ''
-            }`}
-            aria-hidden
-          >
-            {(account?.email ?? '?').slice(0, 1).toUpperCase()}
-          </div>
-
-          <p className="text-md font-medium">{account?.email}</p>
+          <ProfileAvatar profile={profile} fallback={account?.email ?? ''} className={`mb-4 h-16 w-16 text-xl ${busy ? 'breathe' : ''}`} />
+          <p className="text-md font-medium">{profile?.displayName || account?.email}</p>
+          {profile?.displayName && <p className="mt-1 text-xs text-[var(--ink-secondary)]">{account?.email}</p>}
           <p className="mt-1 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
             <IconGlobe size={12} className="shrink-0" />
             <span className="truncate">{hostOf(account?.serverUrl ?? '')}</span>
           </p>
         </div>
 
-        <form onSubmit={submit} className="mt-7 space-y-3">
+        {challenge ? <div className="mt-7"><TwoFactorForm providers={challenge.providers} busy={busy}
+          onSubmit={({ code, provider, remember }) => { void submitCode(code, provider, remember); }} /></div>
+          : <form onSubmit={submit} className="mt-7 space-y-3">
           <input
             ref={inputRef}
             id="unlock-password"
@@ -95,7 +107,7 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
             {busy && <IconSpinner size={15} />}
             {busy ? '解锁中…' : '解锁'}
           </button>
-        </form>
+        </form>}
 
         {error && (
           <p role="alert" className="mt-4 flex items-start justify-center gap-2 text-sm text-[var(--risk)]">

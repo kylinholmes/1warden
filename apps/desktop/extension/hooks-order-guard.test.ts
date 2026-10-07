@@ -123,7 +123,8 @@ describe('hook 不在提前返回之后调用', () => {
   it('确实扫到了 .tsx（不是扫了个空列表）', () => {
     const keys = Object.keys(SOURCES).filter((k) => !/\.test\.tsx?$/.test(k));
     expect(keys.length).toBeGreaterThan(10);
-    expect(keys).toContain('./popup/Popup.tsx');
+    expect(keys).toContain('./popup/main.tsx');
+    expect(keys.some((key) => key.endsWith('screens/VaultView.tsx'))).toBe(true);
   });
 
   it('守卫确实认得出来（正例抓、反例放过）', () => {

@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { VaultClient } from './client';
 import { createFakeServer, fakeJwt } from './testing/fake-server';
 import {
@@ -142,5 +142,126 @@ describe('VaultClient.connect —— 完整编排', () => {
     await expect(
       client.connect({ serverUrl: SERVER, email: EMAIL, masterPassword: PASSWORD }),
     ).rejects.toMatchObject({ kind: 'certUntrusted', fingerprint: 'AB:CD' });
+  });
+});
+
+describe('authentication lifetime', () => {
+  it('starts a fresh sync after lock instead of waiting for the previous login', async () => {
+    const { server } = await serverWithAccount();
+    let started!: () => void;
+    const firstSyncStarted = new Promise<void>((resolve) => { started = resolve; });
+    let release!: () => void;
+    const firstSyncReady = new Promise<void>((resolve) => { release = resolve; });
+    let syncRequests = 0;
+    const client = new VaultClient({
+      deviceStore: memoryDeviceStore(),
+      fetchImpl: async (input, init) => {
+        if (new URL(String(input)).pathname === '/api/sync' && ++syncRequests === 1) { started(); await firstSyncReady; }
+        return server.fetchImpl(input, init);
+      },
+    });
+    const oldLogin = client.connect({ serverUrl: SERVER, email: EMAIL, masterPassword: PASSWORD });
+    const oldRejection = expect(oldLogin).rejects.toThrow(/过期|锁定/);
+    await firstSyncStarted;
+    client.lock();
+    const unlocking = client.unlock(PASSWORD);
+    try {
+      await vi.waitFor(() => expect(syncRequests).toBe(2), { timeout: 500 });
+      await unlocking;
+      expect(client.isUnlocked()).toBe(true);
+    } finally {
+      release();
+      await Promise.all([oldRejection, unlocking]);
+      client.logout();
+    }
+  });
+
+  for (const operation of ['connect', 'unlock'] as const) {
+  it(`completes an actual API two-factor ${operation} challenge and drops the completed credentials`, async () => {
+    const { server, userKey } = await serverWithAccount();
+    const client = new VaultClient({
+      deviceStore: memoryDeviceStore(),
+      fetchImpl: async (input, init) => {
+        if (String(input).endsWith('/identity/connect/token')) {
+          const form = new URLSearchParams(String(init?.body));
+          if (form.get('twoFactorToken') !== '123456') {
+            return Response.json({ TwoFactorProviders: [0], TwoFactorProviders2: { '0': null } }, { status: 400 });
+          }
+          expect(form.get('twoFactorProvider')).toBe('0');
+          expect(form.get('twoFactorRemember')).toBe('1');
+        }
+        return server.fetchImpl(input, init);
+      },
+    });
+    if (operation === 'unlock') client.getSession().setAccount({ serverUrl: SERVER, email: EMAIL, userId: 'test-user', kdf: KDF });
+    await expect(operation === 'connect' ? client.connect({ serverUrl: SERVER, email: EMAIL, masterPassword: PASSWORD }) : client.unlock(PASSWORD))
+      .rejects.toMatchObject({ kind: 'twoFactorRequired', providers: [0] });
+    await expect(client.connectWithTwoFactor('incorrect', 0, false)).rejects.toMatchObject({ kind: 'twoFactorRequired' });
+    await client.connectWithTwoFactor('123456', 0, true);
+    expect(client.isUnlocked()).toBe(true);
+    expect(client.getSession().getKey()?.encKey).toEqual(userKey.encKey);
+    await expect(client.connectWithTwoFactor('123456', 0, false)).rejects.toThrow(/没有待完成/);
+    expect(JSON.stringify(client)).not.toContain(PASSWORD);
+    client.logout();
+  });
+  }
+
+  for (const boundary of ['lock', 'logout'] as const) {
+    it(`${boundary} discards an unfinished OTP challenge`, async () => {
+      const client = new VaultClient({
+        deviceStore: memoryDeviceStore(),
+        fetchImpl: async (input) => String(input).includes('/prelogin')
+          ? Response.json({ Kdf: 0, KdfIterations: ITERATIONS })
+          : Response.json({ TwoFactorProviders: [0], TwoFactorProviders2: { '0': null } }, { status: 400 }),
+      });
+      await expect(client.connect({ serverUrl: SERVER, email: EMAIL, masterPassword: PASSWORD }))
+        .rejects.toMatchObject({ kind: 'twoFactorRequired' });
+      client[boundary]();
+      await expect(client.connectWithTwoFactor('123456', 0, false)).rejects.toMatchObject({ kind: 'authRestartRequired' });
+      expect(JSON.stringify(client)).not.toContain(PASSWORD);
+    });
+  }
+
+  for (const operation of ['connect', 'unlock'] as const) {
+    for (const boundary of ['lock', 'logout'] as const) {
+      it(`${boundary} prevents a late ${operation} response from reopening the vault`, async () => {
+        const { server } = await serverWithAccount();
+        let started!: () => void;
+        const tokenStarted = new Promise<void>((resolve) => { started = resolve; });
+        let release!: () => void;
+        const tokenReady = new Promise<void>((resolve) => { release = resolve; });
+        const client = new VaultClient({
+          deviceStore: memoryDeviceStore(),
+          fetchImpl: async (input, init) => {
+            if (String(input).endsWith('/identity/connect/token')) { started(); await tokenReady; }
+            return server.fetchImpl(input, init);
+          },
+        });
+        client.getSession().setAccount({ serverUrl: SERVER, email: EMAIL, userId: 'test-user', kdf: KDF });
+        const attempt = operation === 'connect'
+          ? client.connect({ serverUrl: SERVER, email: EMAIL, masterPassword: PASSWORD })
+          : client.unlock(PASSWORD);
+        const rejection = expect(attempt).rejects.toThrow(/过期|锁定/);
+        await tokenStarted;
+        client[boundary]();
+        release();
+        await rejection;
+        expect(client.getSession().status).toBe(boundary === 'lock' ? 'locked' : 'loggedOut');
+        expect(client.getSession().getKey()).toBeNull();
+        expect(JSON.stringify(client)).not.toContain(PASSWORD);
+      });
+    }
+  }
+
+  it('keeps an incorrect unlock on the locked screen', async () => {
+    const client = new VaultClient({
+      deviceStore: memoryDeviceStore(),
+      fetchImpl: async (input) => String(input).includes('/prelogin')
+        ? Response.json({ Kdf: 0, KdfIterations: ITERATIONS })
+        : Response.json({ error: 'invalid_grant' }, { status: 400 }),
+    });
+    client.getSession().setAccount({ serverUrl: SERVER, email: EMAIL, userId: 'test-user', kdf: KDF });
+    await expect(client.unlock(PASSWORD)).rejects.toThrow();
+    expect(client.getSession().status).toBe('locked');
   });
 });

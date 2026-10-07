@@ -12,6 +12,7 @@
  */
 import { ext } from './ext-api';
 import { isLikelyLoginForm, type FieldDescriptor } from '@coffer/vault';
+import { installInlinePicker } from './inline-picker';
 
 /** 与 background / popup 约定的消息形状 */
 interface FieldsReport {
@@ -276,6 +277,7 @@ function safeReport(): void {
   }
 }
 
+installInlinePicker(readFields);
 safeReport();
 safeReportDelayed();
 

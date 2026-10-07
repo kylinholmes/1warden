@@ -27,9 +27,8 @@ import { CLIPBOARD_CLEAR_MS } from './clipboard';
  * ## 这个组件只管界面与反馈
  *
  * 取值走 `getValue`、收尾走 `onCopied`，因为这两件事两端确实不同：
- * - 桌面端手里就有明文，`getValue` 直接返回
- * - 弹窗**没有**明文，要去后台取一次（`coffer:copy`），明文因此只在
- *   复制那一刻过手，不会躺在组件里
+ * - 条目字段经 `ApplicationClient.reveal` 按需读取，平台适配器决定本地
+ *   调用还是发消息；复制不需要提前把整条记录的密码放进组件。
  * - 剪贴板清空在弹窗那边由**后台的离屏文档**负责 —— 弹窗一关它的定时器
  *   就没了，而这正是「复制完忘了剪贴板里还有密码」最常见的场景
  */
@@ -43,11 +42,10 @@ export interface CopyButtonProps {
    */
   getValue: () => Promise<string>;
   /**
-   * 值已写进剪贴板之后。收尾动作（如「30 秒后清空」）由调用方决定 ——
-   * 桌面端传 `copyWithAutoClear` 之外的那半段，弹窗什么都不用传
-   * （后台已经安排好了）。
+   * 值已写进剪贴板之后。共享页面传 `scheduleClipboardClear`，由入口
+   * 安装的平台实现选择本地定时器或扩展后台，写入失败时不安排清理。
    */
-  onCopied?: (value: string) => void;
+  onCopied?: (value: string) => void | Promise<void>;
   /** 失败时。**不传就静默** —— 但调用方通常应该传，不然用户不知道没复制上 */
   onError?: (e: unknown) => void;
   /** 外观由使用处决定 —— 详情里是安静的小按钮，生成器里它是主操作 */
@@ -82,7 +80,7 @@ export function CopyButton({
     try {
       const value = await getValue();
       await navigator.clipboard.writeText(value);
-      onCopied?.(value);
+      await onCopied?.(value);
       setCopied(true);
       if (timer.current) clearTimeout(timer.current);
       timer.current = setTimeout(() => setCopied(false), 2000);

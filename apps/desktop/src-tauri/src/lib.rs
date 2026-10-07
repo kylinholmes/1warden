@@ -1,4 +1,4 @@
-//! Coffer 桌面端的外壳。
+//! 1Warden 桌面端的外壳。
 //!
 //! 目前这一层刻意保持**极薄**：界面与密码学都在 Web 侧。
 //! 后续会往这里搬三样东西，都有明确的理由：
@@ -159,7 +159,7 @@ pub fn run() {
                 eprintln!("[coffer] 菜单栏图标不可用：{e}");
             }
 
-            // 全局快捷键（⌘⇧\）：在别的应用里也能呼出 Coffer。
+            // 全局快捷键（⌘⇧\）：在别的应用里也能呼出 1Warden。
             // 注册失败**不影响启动** —— 组合键被占用是很常见的情况，
             // 为了这个让应用起不来是本末倒置。
             #[cfg(target_os = "macos")]
@@ -186,5 +186,5 @@ pub fn run() {
 
     builder
         .run(tauri::generate_context!())
-        .expect("启动 Coffer 失败");
+        .expect("启动 1Warden 失败");
 }

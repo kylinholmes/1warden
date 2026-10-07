@@ -1,277 +1,119 @@
-# 交接：Coffer（个人密码管理器）
+# 1Warden 项目交接
 
-> 写给接手的人（或 AI）。重点在**没做完的部分**和**会浪费你时间的坑**。
-> 已完成的部分在 `docs/restructure-plan.md` 里有更细的过程记录。
+更新：2026-10-08。个人密码管理器，后端对接 Vaultwarden；Bun workspace、React/TypeScript、Tauri/Rust。当前浏览器适配工作的设计与验收记录见 [共享 PC 界面设计](superpowers/specs/2026-10-07-pc-extension-design.md) 和 [实施计划](superpowers/plans/2026-10-07-pc-extension.md)。
 
-## 一、这是什么 / 目标
+## 当前产品方向
 
-一个**面向普通个人用户**的密码管理器：
+用户要求删除独立扩展界面，直接使用 PC 版本，并适配 Chrome、Firefox。多端应有几乎一致的操作体验。窄窗口、浏览器弹窗和移动端通过同一套响应式布局工作，不能再各写一套保险库界面。
 
-- **UI 和功能上参考或复刻 1Password**（不是 Bitwarden 那种企业向的界面）
-- **后端对接 Vaultwarden**（自建服务器）
-- 仓库是空项目起步，**主要由 AI 驱动**
+## 代码入口
 
-## 二、需求（用户原话，优先级按出现顺序）
-
-| 原话 | 含义 |
-|---|---|
-| 「PC版我调整窗口大小成 竖向的, 是否可以自动对于调整UI和布局… 这个逻辑直接应用到拓展和移动端上, 他们就是从横屏 调整到了竖屏的 PC端」 | **验收判据**：布局靠容器查询自适应；扩展和移动端是同一套逻辑的另外两个宽度档 |
-| 「不同端的UI本质上是一个东西」 | 三端**渲染同一份代码**，不是三份长得像的代码 |
-| 「拓展端不是单独的UI, 就是同一套」 | 同上，用户对当前状态**不满意**（见第六节） |
-| 「不是重写来的」 | 要**抽取**，不要重写。把已有的那份搬进共享包，两端都用它 |
-| 「UI要完全一致, 我看你改半天也没改好」 | 端之间的可见差异 = bug |
-| 「全部做，有区别吗? 还先做哪个?」 | 都要做，不要挑 |
-
-## 三、硬约束（违反了就是错的）
-
-| 约束 | 出处 |
-|---|---|
-| **主密码必须服务端校验**，没有离线解锁路径 | 删过一次本地 `wrappedUserKey`：服务端改了密码，本地缓存仍能用旧密码打开 |
-| **明文密钥/密码绝不落盘**（spec 不变量 S1）；**扩展弹窗只收摘要** | 这是共享列表按「摘要」而不是 `VaultItem` 设计的**原因** |
-| **不用 Tauri 插件**，自己写 | 「他们问题更大」 |
-| **吃性能/调用频繁的地方用 Rust，不用 TS** | |
-| 提交署名 `DeepSeek-Flash <deepseek@deepseek.com>` | 绝不署 Claude |
-| 「1Password 那套」是设计参照，但要**走出自己的特色** | 借鉴不克隆 |
-
-## 四、架构现状
-
-```
+```text
 packages/
-  crypto/   WebAssembly 密钥派生、加解密
-  vault/    领域层：DTO↔领域模型、会话状态机、同步、搜索、Watchtower、TOTP
-  ui/       共享组件 + theme.css + components.css   ← 三端共用的是这里
-apps/desktop/            ← **只有一个 app 目录**（旧的 apps/extension 已删）
-  src/                   桌面端（Tauri 壳，也是三端共享源码的所在）
-  extension/             扩展端专属运行时（background / content / popup）
-  preview/               桌面预览仪器
-  preview-extension/     扩展预览仪器（假 chrome.*）
-  src-tauri/             Rust 壳
-  vite*.config.ts        5 个构建配置 + mobile
+  crypto/                 密钥派生与加解密
+  api/                    Vaultwarden API
+  vault/                  会话、领域模型、同步、搜索、导入、Passkey、TOTP
+  ui/                     共享组件、主题、容器查询布局
+apps/desktop/
+  src/App.tsx             三端共享应用树
+  src/screens/            PC 原有页面，现由三端直接复用
+  src/application/        操作契约、安全投影、客户端状态与桌面适配器
+  extension/              浏览器后台、内容脚本、消息适配器
+  extension/popup/main.tsx 安装浏览器能力并渲染共享 App
+  preview/                共享页面的人工数据预览
+  preview-extension/      复用同一预览入口，仅固定弹窗尺寸
+  src-tauri/              原生桌面/移动壳
 ```
 
-- **`__PLATFORM__`** 是**编译期**常量（`'desktop' | 'extension' | 'mobile'`），
-  各构建配置各自 `define`。它管**能力分支**，不管「构建哪份代码」。
-  实测过：桌面专属代码**不进**移动端产物。
-- **`Host` 接口**（`fetch` + `storage`）是仅有的两处真实平台差异。
-  桌面：`tauriFetch` + `localStorage`；扩展：直连 `fetch` + `chrome.storage.local`。
-- **已经三端/两端共用的**：`icons` / `ItemIcon` / `ItemRow` / `NavRail` /
-  `NavDrawer` / `NavTrigger` / `SecretField` / `Section` / `CopyButton` /
-  `ConnectScreen` / `ItemEditor` / `GeneratorBody` / `ImportView` /
-  `SecurityReportView` / `TwoFactorForm` / `Segmented` / `FloatingPanel` /
-  `summary`（`ItemSummary` + `summarise`）
+旧的 `extension/popup/Popup.tsx`、`ItemDetail.tsx` 和假 `chrome.*` 预览已删除。之前未接入的 `VaultListColumn` 草稿也已由整棵共享应用替代，不要继续接回旧 Popup。扩展 CSS 直接导入 PC CSS，只规定弹窗 440×600 的外部尺寸。
 
-## 五、做完了什么
+`__PLATFORM__` 是编译期能力标识。`ApplicationClient` 统一连接、解锁、查询、编辑、文件夹、导入、报告和附件操作；PC 在本地调用服务，扩展通过显式 RPC 调用后台。`Host` 提供各平台的网络和非敏感设置存储。Tauri 的托盘、自动输入、证书确认和快速面板只在原生端接入。浏览器的当前网站、填充及保存提示是共享页面中的能力分支。
 
-`git log --oneline` 共 202 个提交。最近这一轮（移动端 + 一致性）：
+## 安全与维护约束
 
-| 提交 | 内容 |
-|---|---|
-| `642ddec` | 摘要有三份 → 合一（`packages/ui/src/summary.ts`） |
-| `5ab6f2d` | 生成 Xcode 工程 + 修 `gen/` 被整个 gitignore 的问题 |
-| `6d02217` | 抽屉一拉开是「214px 宽、没有标签的图标条」 |
-| `603b115` | 第一个 mobile 构建目标 |
-| `02fb6a4` | iPhone 被判成 macOS → 顶上白空 28px |
-| `8ca3afb` | Rust 第一次对着 iOS target 编过 |
-| `8eb707c` | 每台 iPhone 都被判成 macOS（UA 里含 `like Mac OS X`） |
+- 解锁必须经服务端验证，不恢复旧的离线主密码校验路径。
+- 密钥和整库明文只能留在内存。扩展用 `storage.session` 恢复后台状态，不能写进 `storage.local`。
+- 用户明确授权的 Profile 展示缓存是单独的例外：持久化只含校验后的头像与显示名称，按服务器/邮箱隔离。完整记录、任意备注和未知 Profile 字段不进入缓存。
+- 列表只收到 `ItemSummary`；详情按需获取并排除密码/私钥等字段，显式显示或复制时再请求。编辑只取单条可编辑字段。
+- 保存时由应用服务合并后台持有的 item key、Passkey、附件和历史，不能信任编辑器原样传回这些元数据。
+- 内容脚本不得调用 UI 的敏感 RPC；消息按发送方、操作和参数验证。
+- 扩展的会话期限为解锁后的绝对 15 分钟，弹窗重开/后台重启不能延长。锁定后清除解锁状态，保留非敏感账户信息。
+- 剪贴板清理必须在写入成功后安排，由后台承担。到期只清空仍等于本次复制值的内容。Chrome 离屏页不能使用要求文档焦点的 async Clipboard API，需用获扩展权限的 DOM copy/paste 命令。
+- 不使用 Tauri 插件；原生能力在现有 Rust 壳实现。
 
-**当前状态**：`bun run typecheck` 干净，**850 个测试全过**。工作区干净。
-
-## 六、⚠️ 没做完的（重点）
-
-### ① 列表栏两端仍是两份 —— **用户正在为这个不满意**
-
-用户画了个红框：桌面端那一栏是
-`[汉堡] [搜索] [排序▾] [＋]`，而扩展弹窗是
-`[站点条]` 然后 `[汉堡] [搜索] [＋]` —— **整个排序控件不存在**。
-
-| | 文件 | 行数 | 形态 |
-|---|---|---|---|
-| 桌面端 | `apps/desktop/src/screens/VaultView.tsx` | 1202 | `band` 里一排控件 + 扁平 `<ul>`，数据是 **`VaultItem`** |
-| 扩展端 | `apps/desktop/extension/popup/Popup.tsx` | 989 | 站点条 + 一排控件（**无排序**）+ `ListSection` 分组列表，数据是 **`ItemSummary`** |
-
-**下一步**：抽一个 `VaultListColumn` 进 `@coffer/ui`：
-
-```tsx
-interface ListSection { label: string | null; items: ItemSummary[] }
-
-<VaultListColumn
-  query / onQueryChange
-  sortBy / onSortChange        // SORT_BY / SORT_LABEL 在 @coffer/vault，现成的
-  onNew
-  sections={ListSection[]}     // 分组由调用方算 —— 它才知道自己的数据源
-  selectedId / onSelect
-  empty={ReactNode}            // 「为什么空」只有调用方知道
-  dragRegion                   // 桌面端顶部带子能拖窗口
-/>
-```
-
-⚠️ 桌面端要**先降到摘要**（`summarise(item)` 已经在共享包里了）。
-这是这个改动唯一有风险的地方 —— `VaultView` 的详情栏仍需要整条
-`VaultItem`，别把它一起降级了。
-
-**⚠️ 工作树里有一份没提交的草稿**：`packages/ui/src/VaultListColumn.tsx`
-（约 200 行，按上面的接口写完了，`packages/ui/src/index.ts` 加了导出）。
-**但它两端都还没接进去** —— 也就是说它现在**什么都没做**，
-而且没跑过 typecheck。用户叫停时正做到这一步。
-
-接手的处理方式二选一：
-
-- **接着做**：把它接到 `VaultView` 和 `Popup` 上，然后按第七节截图核对两端
-- **丢掉**：`git checkout packages/ui/src/index.ts && rm packages/ui/src/VaultListColumn.tsx`，
-  按上面的接口重写。设计意图在草稿的注释里，丢掉的信息量不大
-
-⚠️ 别把它当成「已经做好的部分」—— 没被任何地方引用的组件，
-在「产物看起来是好的」那一族里算是最容易被误认的一种。
-
-### 已经做完的那半步：CSS 已经合一了（`8d08990`）
-
-`.band` / `.card` / `.btn*` / `.field*` 原来**扩展端手抄了一份**，
-而且抄歪了：`--band-h` 是 54px，扩展端写死 `52px` ——
-弹窗的顶部带子比桌面端矮 2px，两端各自看都正常。
-
-现在这一组在 `packages/ui/src/components.css` 里只有一份，
-`extension/styles.css` 里那块拷贝已删。`field-bare` 也因此在弹窗产物里有了
-（之前没有，而共享列表栏要用它）。
-
-### ② 移动端**一次都没在设备上跑过**
-
-编得过、构建得出来、能在手机视口下截图核对。但**没启动过**。
-
-卡在：`cargo-mobile2` 拿 **SDK 版本（27.0）** 和已装**运行时（26.5）**比，
-报「Xcode Simulator SDK 27.0 is not installed」—— **这句是错的**。
-要跑 `xcodebuild -downloadPlatform iOS`，**约 8GB**（用户 2026-10-06 决定先不下）。
-真机路线要签名证书，也走不通（`No code signing certificates found`）。
-
-### ③ 移动端：附件**取不回**
-
-`canSaveFiles()`（`apps/desktop/src/save.ts`）在移动端返回 false，
-「取回」按钮不渲染 —— `save_file` 命令在移动端是 `#[cfg(desktop)]`。
-iOS 的对应物是**分享面板**（「存到文件」），**还没写**。
-现状：移动端上附件**看得到、取不回**。
-
-### ④ 没有 CI
-
-根目录没有 `.github`、没有 `.gitlab-ci.yml`，**而且没有 git remote** ——
-纯本地仓库。所以加 CI 配置是写一个**不会运行**的文件。
-
-已经有的是不依赖 remote 的版本：
-```
-bun run check        # typecheck + 850 个测试，无前置
-bun run check:all    # 再加端到端（42 项，需先 e2e:extension:setup）
-```
-
-### ⑤ 摘要有**第四份**没合
-
-`apps/desktop/src/use-quick-bridge.ts:27` 里还有一个 `summarise`，
-返回 `QuickItem`（快速面板的另一个窗口用）。它**也把「无法解密」揉进了 `name`** ——
-和刚合掉的那三份是同一个毛病。要么合进 `summary.ts`，要么至少别再揉。
-
-### ⑥ 一条偶发失败的测试（没查清）
-
-`packages/crypto/src/keys.test.ts` 的
-`throws DecryptError (not DOMException) for a wrong-size key`
-失败过**一次**，之后 27 次运行一次都没复现。当时没抓到断言原文。
-
-这值得查而不是划掉：它守的是「MAC 校验失败时不能吐出一个像明文的串」。
-
-### ⑦ 小的遗留
-
-- `VaultView.tsx:495` 删除确认框直接显示 `item.name`，没管 `nameFailed`
-  （**改动前就是这样**，不是新引入的）
-- `apps/desktop/src/styles.css` 里 `.app-sidebar { --nav-w: var(--rail-w) }`
-  **从来没生效过**（`.vault-rail[data-expanded='true']` 更具体），
-  只是两处恰好都是 214px
-- 附件大小的 KB/MB 分支只在预览里核过，没在真数据上核
-
-## 七、怎么验证
+## 构建、载入与验证
 
 ```bash
-bun run check                 # typecheck + 850 测试
-bun run check:all             # 再加 42 项真实浏览器端到端
-bun run build:mobile          # 移动端产物
-bun run --cwd apps/desktop preview:build             # 桌面预览
-bun run --cwd apps/desktop preview:mobile:build      # ★ 移动端预览（__PLATFORM__: mobile）
-bun run --cwd apps/desktop preview:extension:build   # 扩展预览
+bun run check                                      # 类型检查和单元/集成测试
+bun run --cwd apps/desktop build                    # 桌面前端
+bun run build:mobile                               # 移动端前端
+bun run build:extension-firefox                    # 同时刷新 Chrome 与 Firefox 产物
+bun run --cwd apps/desktop preview:build            # 桌面人工数据预览
+bun run --cwd apps/desktop preview:extension:build  # 同源码的弹窗预览
+bun run e2e:extension:setup                         # 本地服务、测试账户与扩展构建
+bun run e2e:extension                              # Edge + 专用 Vaultwarden 账户的真实集成
 ```
 
-截图（**这是本项目最有价值的验证手段**）：
+Chrome 载入 `apps/desktop/dist-extension`；Firefox 在 `about:debugging#/runtime/this-firefox` 临时载入 `apps/desktop/dist-firefox/manifest.json`。正式分发仍需各浏览器发布/签名流程。
 
-```bash
-bun run scripts/ui-shot.ts <产物目录> '/?screen=vault' out.png 390 844
-COFFER_SHOT_TOUCH=1  bun run scripts/ui-shot.ts ...   # 触摸模拟（手机）
-COFFER_SHOT_TAP='.nav-trigger' bun run scripts/ui-shot.ts ...  # 触摸点一下再拍
-```
+真实 Chrome/Firefox smoke 的工具安装、命令和测试边界见 [扩展 README](../apps/desktop/extension/README.md)。它使用新 profile、人工会话和本地测试页面，验证实际构建及共享 UI；服务端写入另由 Edge E2E 验证，二者不能混称。截图需等动画稳定后再比较。
 
-### ⚠️ 为什么截图不可替代
+## 本轮已确认并修正的问题
 
-这一整个项目里，**有五个以上的 bug 是「typecheck + 全部测试 + 构建全绿」的
-情况下，只有截图能发现的**：弹窗缩成一条、导航按钮压在红绿灯上、浮层透明、
-生成器截断密码、抽屉拉开没有标签。
+- 删除单条记录后触发异步刷新，会先清空整库且可能把空状态持久化。现在服务端确认删除后只移除该条。
+- 扩展旧复制协议在写入前安排清理，且原 E2E 的离屏日志断言永远成立。现在写入后安排，并读真实剪贴板验证实际清空。
+- 编辑器对服务端持有元数据的覆盖、过期草稿和无法解密记录的保存已有防护。
+- 窄屏的详情返回、报告/导入导航、设置页溢出已修正。
+- 独立审查发现并修正了慢请求拖延锁定、真实两步验证失败、锁定途中加密写入、旧同步覆盖新会话等问题，均有回归测试。
 
-**而且有两次，是「故意把代码改坏，看测试红不红」才发现测试本身是空转的**
-（`safe-area.test.ts` 第一版匹配到了文档注释；`drawer-css.test.ts` 因此
-自带一条自检）。写守卫时**必须**验它会红。
+共享界面初轮验证为 919 项测试；后续修正后类型检查及 954 项测试通过（73 个文件）。Edge + Vaultwarden 的 52 项集成检查、Edge/Zen 各 26 项核心交互检查通过。PC/移动前端、两浏览器扩展与预览构建通过。详细证据与边界记录在实施计划中。
 
-## 八、会浪费你时间的坑（都已踩过）
+工具栏弹窗后续修复：初轮浏览器交互检查使用固定视口的标签页，漏掉了 Zen 原生弹窗缩成 0×0 的问题。扩展现在在 `body` 上直接设置 440×600，移除了依赖尚未确定视口的尺寸限制。早期曾在用户原来的 Zen 中重载，确认完整登录弹窗显示；后续统一使用无界面的临时 profile。原生工具栏脚本在 Edge/Zen 的连接页及解锁页均量得 440×600，无溢出，也没有覆盖弹窗视口。Edge 无界面模式需要设置虚拟屏幕尺寸，单独放大窗口不够。
 
-### 1. `cargo`/`rustc` 是 Homebrew 的，不是 rustup 的
+## 10 月 8 日后续交互
 
-`which rustc` → `/opt/homebrew/bin/rustc`。rustup 装的目标对它**不可见**，
-跨目标构建报 `can't find crate for 'core'` + 一句**错误的**提示
-（「用 rustup target add 装一下」—— 装了也没用）。
+- 失败连接的地址、邮箱、错误提示和未提交修改在 `storage.session` 中保留；主密码不保存，关闭弹窗后清除，重新打开不自动登录。账户选择页不会替用户选中并保存首个账户。Edge/Zen 各 10 项真实扩展检查通过。
+- 当前网站匹配项稳定排在列表前面，保留搜索、分类和所选排序。网页登录输入框提供账户选择及解锁入口；后台按实际发送方网址、标签页和文档重新校验填充。Edge/Zen 各 16 项真实扩展检查通过，包含真实点击打开的解锁弹窗。
+- 小于 620px 的生成器、设置、编辑、删除确认等面板铺满窗口，右侧滑入及反向滑出；详情退出保留内容直至动画结束，列表状态不重置。
+- 快照读取不再被慢登录排队阻塞；恢复合并、认证期间状态保护及会话到期取消避免旧请求污染新状态。快照有 5 秒错误恢复入口，不自动重试登录。Zen 的 PBKDF2/Argon2、本地服务真正 30 秒超时、关闭全部扩展页面后 35 秒重开及显式重试均验证通过。
+- 原截图的 `Receiving end does not exist` 没有复现，不能断言根因已找到；当前提供中文提示及重试。最新构建尚未在个人 Zen 中重载。
+- 用户要求先调查再决定归并：代码是一条 VaultItem 对应一行，单条支持多个 `login.uris`，详情展示全部网址。用户自行解锁后，已在原来的 Zen 中只读核对三条 Bilibili 记录：不同记录 ID，每条各一个网址，用户名/密码完全相同，均无 TOTP、备注、自定义字段、附件和密码历史，文件夹/收藏/主密码重询设置一致。比较在浏览器内完成，只输出相等性和非敏感摘要，未显示或保存密码。建议这组可整理为一条多网址登录记录；尚未归并、删除或更改个人记录，也未实现全局自动归并。
 
-```bash
-PATH="$HOME/.cargo/bin:$PATH" cargo check --target aarch64-apple-ios-sim
-```
+## 10 月 8 日 Profile、配色与账户菜单
 
-`tauri ios build` 同样中招（它自己调 cargo，继承调用者的 PATH）。
+设计与验证见 [Profile 设计](superpowers/specs/2026-10-08-profile-design.md) 和 [实施计划](superpowers/plans/2026-10-08-profile.md)。
 
-### 2. `dist-firefox` 会**静默过期**
+- 共享主题改为蓝色主操作、白色/浅蓝底或深蓝底，分类、收藏、生成器、安全及导入使用紫色、青色、粉色、琥珀色。保留窄屏全屏卡片与右侧进出动画，网页内账户选择器也同步配色。
+- 侧栏顶部只显示头像和名称；二级菜单统一放置当前身份、其他已记住账户、添加账户、更新头像与资料、设置及登出。菜单支持键盘、操作错误恢复和长列表滚动，不再有底部邮箱及重复操作。
+- Profile 是标记为 `coffer:record-type=user-profile` 的普通加密安全备注；JSON 保留未知字段，带版本和修改冲突检查。1Warden 普通列表、搜索、报告不显示它，其他 Bitwarden 客户端仍可看到这条安全备注。仅用户保存时创建，不自动清理重复项。头像在本机裁切、压缩，连同 Base64/加密膨胀预算控制大小。
+- 解锁后从服务端解密 Profile 并缓存显示名称/头像。锁定保留，登出清除；删除记录只有在权威同步成功后才清缓存。首次/失败同步及旧恢复会话不能创建 Profile 或覆盖已有资料，需完成同步或重新解锁。
+- 用户选择本轮接通多账户切换。相同/不同后端和邮箱以完整身份区分；用户后续改为：已解锁账户直接切换，不重复输入密码；锁定、登出或过期才重新验证。各账户密钥、记录、Profile 和到期期限独立，切换取消旧账户待处理敏感请求。浏览器会话只在受保护的 storage.session，原生会话只在内存；添加账户打开空表单，可返回原账户，失败及弹窗重开后仍保留返回路径。
+- Profile 初轮 `bun run check`：987 项测试、77 个文件及类型检查通过。实际菜单 20 项检查，Edge 真实扩展 + 本地 Vaultwarden 24 项，Zen 实际扩展 + 人工服务 25 项，Profile 真实服务 7 项，两个真实后端账户隔离 40 项检查均通过。窄屏/宽屏动画、焦点、安全区域及减少动态效果检查通过；两主题各 46 组对比度达标，桌面/扩展/移动预览无横向溢出和运行错误。
+- 桌面/移动前端、Edge 扩展及 Firefox/Zen 产物已构建。全部测试使用无界面临时浏览器、人工数据或明确提供的本地测试账户；临时 Profile、独立后端进程及数据已清理。没有改动个人保险库或重载个人浏览器；用户需要在扩展管理页重载最新产物后再解锁。
+- 独立审查提出的首次同步清缓存、同步期间创建重复 Profile 两处风险均已修复并添加回归覆盖。Zen 的 privileged extension 页面受 BiDi 限制，头像选择采用 DOM 事件，实际图片解码和消息链仍运行于 Zen；真实指针上传及截图由 Edge 覆盖。移动真机限制仍如下。
 
-`bun run build:extension` 只产出 `dist-extension`。
-Firefox 那份要另外跑 `bun run build:extension-firefox`，而它**只在你记得跑的时候**才更新。
+## 仍属既有范围限制
 
-用户就撞上了：他载入的 `dist-firefox` 比 `dist-extension` 旧一个多小时，
-**少了汉堡按钮和「＋」**，看起来像「扩展端 UI 不一样」——而代码是对的。
-文档还写着「载入 `dist-firefox/manifest.json`」，等于把人往这个坑里引。
+- 移动端尚未在真机/模拟器完整运行。之前 iOS SDK 27.0 与已装运行时 26.5 不匹配；用户此前决定暂不下载约 8GB 运行时，真机也缺签名证书。
+- 移动端尚无附件保存的分享面板；`canSaveFiles()` 返回 false。浏览器附件通过 downloads API，桌面通过 Rust 保存。
+- 仓库已创建为 GitHub 私有仓库 `kylinholmes/1warden`；浏览器插件及 Apple Silicon macOS 构建/发布流程见 [构建说明](builds.md)。
+- 快速面板 `use-quick-bridge.ts` 仍有自己的 QuickItem 投影，属于另一窗口协议。
+- 原 `keys.test.ts` 的错误尺寸密钥测试曾有一次未复现的失败；不能凭旧记录断言原因。
 
-**建议**：加一条守卫 —— `dist-firefox/` 除 `manifest.json` 外每个文件
-都应和 `dist-extension/` **逐字节相同**（脚本只改 manifest）。
-两者都不存在时跳过。
+## 开发环境的已知细节
 
-### 3. 块注释里不要写 glob
+- Homebrew `rustc` 看不到 rustup 安装的交叉目标。iOS 检查可使用 `PATH="$HOME/.cargo/bin:$PATH" cargo check --target aarch64-apple-ios-sim`。
+- `bun run build:extension` 只更新 Chrome；需要两浏览器产物时运行 `build:extension-firefox`，它先构建 Chrome 再转换 manifest，其余产物直接复制。
+- `.vault-shell` 的容器和尺寸规则影响弹窗实际宽度。不要只看 DOM class；必须检查生成的 CSS 和真实窗口。
+- 预览的 viewport meta 必须与产品一致，否则移动截图会变成 980px 布局视口。
+- content script 必须输出独立 IIFE，不能含顶层 ES module import。
+- 扩展的 fetch 受浏览器证书校验约束；Tauri 的证书确认能力不适用于扩展。
 
-`*/` 会把块注释提前闭合，报的是「Unexpected token」这种**指错方向**的错。
-在这个仓库里犯过**三次**。
 
-### 4. Vite 会把 `import.meta.glob` 的键规范化成最短形式
+## 后续定名与账户切换修正
 
-而最短形式**取决于测试文件住在哪**。用**后缀**查，或者干脆用根绝对路径
-（`/apps/desktop/src/...`）。踩过两次。
+项目定名 **1Warden**，所有产品名称、插件提示和应用标题已更新。内部存储键、RPC、Profile 标记及 bundle identifier 保持兼容，不迁移或清空用户数据。仓库入口见 [README](../README.md)。构建产物（包括此前误跟踪的移动预览）不再提交。
 
-### 5. `cfg(desktop)` 在 `Cargo.toml` 里**不能用**
+添加账户的返回按钮覆盖普通登录、两步验证和证书流程；返回会取消旧请求，避免迟到的失败提示或草稿污染原账户。账户菜单只显示“登出”，其他账户标明“已解锁”或“需要验证”；自动到期锁定和原生快捷锁定仍工作。
 
-那两个 cfg 是 `tauri-build` 通过 build script 发给 **rustc** 的
-（`cfg_alias`，读过源码确认），Cargo 解析 `Cargo.toml` 时还没有 build script。
-依赖表里只能写 `target.'cfg(not(any(target_os = "android", target_os = "ios")))'`。
-
-### 6. `.vault-shell` 不能是 `container-type: inline-size`
-
-弹窗按内容撑开，加了它整个弹窗会塌成 0 宽（踩过两次）。
-守卫在 `extension/shared-css-wiring.test.ts`。
-
-### 7. 预览页的 viewport meta 必须和产品那份一致
-
-`preview/index.html` 一度完全不写 viewport。桌面浏览器上毫无影响，
-但一开移动模拟，**布局视口变成 980px 默认值** —— 截出来是桌面三栏布局，
-而它会被当成「390px 下的手机界面」看。**仪器骗人比没有仪器更糟。**
-
-## 九、这个项目的做事方式
-
-用户反复表达过的、体现在这个仓库里的：
-
-- **产物看起来是好的 ≠ 它是对的。** 「类名在 DOM 上、规则不在产物里」
-  「桩和真实类型脱节」「永远绿的守卫」都是同一族
-- **注释写「为什么」，尤其是「这里差点错成什么样」** —— 上面这些坑
-  基本都在代码注释里记着
-- **两端各写一份 = 迟早漂，而且不报错。** 这是本项目最常见的一类 bug
+当前验证：类型检查和 **1,030 项测试 / 80 个文件**通过；两个真实 Vaultwarden 后端 **70 项检查**；实际扩展双账户 Edge/Zen 各 **66 项检查**，直接切换无认证请求；连接返回 Edge/Zen 各 **21 项检查**，Zen Profile **30 项检查**。桌面/移动前端和两浏览器插件构建通过。独立审查确认并修复了切换期间选错清理账户、过期请求抢占新选择、旧 WebAuthn 写入、worker 重启后首条登出未清除会话的问题。详细证据在 Profile 实施计划中。

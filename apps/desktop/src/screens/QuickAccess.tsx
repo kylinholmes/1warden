@@ -96,7 +96,7 @@ export function QuickAccess({ items, icons, locked, busy, notice, onQueryChange,
           </span>
           <p className="text-sm text-[var(--ink-secondary)]">保险库已锁定，无法搜索</p>
           <p className="text-xs text-[var(--ink-tertiary)]">
-            打开 Coffer 解锁后按 ⌘⇧\
+            打开 1Warden 解锁后按 ⌘⇧\
           </p>
         </div>
       ) : (

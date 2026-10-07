@@ -137,10 +137,11 @@ export class SyncEngine {
    */
   async hydrateFromCache(key: SymmetricKey): Promise<void> {
     const account = this.session.account;
+    const sessionKey = this.session.getKey();
     if (!this.deps.cache || !account) return;
     try {
       const cached = await this.deps.cache.load(account);
-      if (cached) await this.apply(cached, key);
+      if (cached) await this.apply(cached, key, sessionKey);
     } catch (e) {
       this.onError?.(e);
     }
@@ -152,7 +153,12 @@ export class SyncEngine {
    * ⚠️ 抽出来是必须的：两份实现迟早会在「单条解不开怎么办」这类细节上分叉，
    * 而那种分叉的表现是「用缓存打开时少几条」—— 极难联想到。
    */
-  private async apply(raw: ApiSyncResult, key: SymmetricKey): Promise<number> {
+  private currentSession(key: SymmetricKey | null): boolean {
+    return key !== null && this.session.getKey() === key && this.session.isUnlocked();
+  }
+
+  private async apply(raw: ApiSyncResult, key: SymmetricKey, sessionKey: SymmetricKey | null): Promise<number> {
+    if (!this.currentSession(sessionKey)) return 0;
     // ⚠️ 服务端不做过滤 —— 分区必须在这里做，否则已删除的密码会进列表
     const { active } = partitionCiphers(raw.ciphers ?? []);
 
@@ -178,12 +184,14 @@ export class SyncEngine {
       }
     }
 
-    // replaceData 内部会在非解锁态时忽略 —— 防止迟到的响应写回已锁定的会话
-    this.session.replaceData(items, folders);
+    // Status alone is insufficient: a new unlock can finish while old decryption is pending.
+    if (this.currentSession(sessionKey)) this.session.replaceData(items, folders);
     return failedCount;
   }
 
   private async run(opts: { unlockedKey: SymmetricKey; force?: boolean }): Promise<SyncOutcome> {
+    const sessionKey = this.session.getKey();
+    const skipped = (): SyncOutcome => ({ skipped: true, itemCount: this.session.items.length, failedCount: 0 });
     /*
      * ⚠️ 缓存**排在 revision 检查之前**。
      *
@@ -204,20 +212,23 @@ export class SyncEngine {
     if (this.deps.cache && account) {
       try {
         const cached = await this.deps.cache.load(account);
-        if (cached) await this.apply(cached, opts.unlockedKey);
+        if (cached) await this.apply(cached, opts.unlockedKey, sessionKey);
       } catch (e) {
         // 缓存坏了不该让同步失败 —— 下面还会去拉真的
         this.onError?.(e);
       }
     }
 
+    if (!this.currentSession(sessionKey)) return skipped();
     const revision = await this.deps.getRevisionDate();
+    if (!this.currentSession(sessionKey)) return skipped();
     if (opts.force !== true && this.lastRevision !== null && revision <= this.lastRevision) {
       return { skipped: true, itemCount: this.session.items.length, failedCount: 0 };
     }
 
     const raw = await this.deps.sync();
-    const failedCount = await this.apply(raw, opts.unlockedKey);
+    const failedCount = await this.apply(raw, opts.unlockedKey, sessionKey);
+    if (!this.currentSession(sessionKey)) return skipped();
 
     // 拿到新的才写缓存。写失败不影响本次同步 —— 只是下次还得全量拉
     try {
@@ -227,6 +238,7 @@ export class SyncEngine {
     }
 
     // 只有成功才推进；失败时保持原值，下次仍会真的去同步
+    if (!this.currentSession(sessionKey)) return skipped();
     this.lastRevision = revision;
     return { skipped: false, itemCount: this.session.items.length, failedCount };
   }

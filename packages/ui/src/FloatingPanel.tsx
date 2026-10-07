@@ -1,4 +1,6 @@
-import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { useRetainedPresence } from './use-presence';
+export { useRetainedPresence } from './use-presence';
 
 /**
  * 浮在主界面之上的一层 —— 设置面板、删除确认、将来的任何对话框都走这里。
@@ -27,54 +29,6 @@ import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
  * OS 窗口里，窗口边界本身就是它的遮罩，焦点也出不去 —— 焦点陷阱和点外部
  * 关闭对它没有意义，硬套只会多一层空转。它复用 `.panel` 那组样式类。
  */
-
-/** 退场动画的兜底时长。取 3 档动效里最长的那档 —— 动画没跑起来也不卡住。 */
-const EXIT_FALLBACK_MS = 400;
-
-/**
- * 让一个节点在「已关闭」之后再多留一会儿，把退场动画播完。
- *
- * `onAnimationEnd` 是主路径；定时器是兜底 —— `prefers-reduced-motion` 下
- * 时长被压到 0.01ms，某些情况下 animationend 仍会触发，但万一浏览器
- * 因为别的原因没派发（元素被 `display:none` 的祖先盖住等），
- * 定时器保证这个节点一定会被卸掉，不会永远挂在 DOM 里。
- */
-function usePresence(open: boolean): { mounted: boolean; leaving: boolean; onExited: () => void } {
-  const [mounted, setMounted] = useState(open);
-  const [leaving, setLeaving] = useState(false);
-
-  /*
-   * ⚠️ 「打开」必须在这一帧就把面板挂上去，不能等 effect 里再 setMounted。
-   *
-   * 等 effect 的写法有个安静的后果：open 翻成 true 的那一次渲染，面板
-   * **还没有 DOM**（ref 是 null），而焦点那段代码的依赖是 `open` ——
-   * 它只在那一次提交后跑一遍，于是 `panelRef.current?.focus()` 什么也没抓到。
-   * 焦点留在触发它的按钮上，Tab 从那个按钮继续往**背后的界面**里走：
-   * 焦点陷阱等于不存在。
-   *
-   * 之所以一直没被发现：面板一挂载就是开着的时候（比如预览里写死 open）
-   * 首次渲染 mounted 就是 true，跑得通。**只有「先挂载、后打开」才漏** ——
-   * 而那正是设置面板（⌘,）、生成器、编辑器的真实路径。
-   *
-   * 渲染期直接改状态是 React 对「由 props 推状态」给的正规写法：
-   * 它在提交前就重渲染，面板于是和 open 出现在同一帧里。
-   */
-  if (open && !mounted) {
-    setMounted(true);
-    setLeaving(false);
-  }
-
-  useEffect(() => {
-    if (open) return;
-    if (!mounted) return;
-    setLeaving(true);
-    const t = setTimeout(() => { setLeaving(false); setMounted(false); }, EXIT_FALLBACK_MS);
-    return () => clearTimeout(t);
-  }, [open, mounted]);
-
-  const onExited = useCallback(() => { setLeaving(false); setMounted(false); }, []);
-  return { mounted, leaving, onExited };
-}
 
 /**
  * 面板里能拿到焦点的元素。和浏览器自己的 Tab 顺序规则一致。
@@ -105,7 +59,7 @@ export function FloatingPanel({
   children: ReactNode;
   footer?: ReactNode;
 }) {
-  const { mounted, leaving, onExited } = usePresence(open);
+  const { mounted, leaving, onExited } = useRetainedPresence(open ? true : null);
   const panelRef = useRef<HTMLDivElement>(null);
   /** 打开之前焦点在谁身上 —— 关闭时还给它 */
   const restoreRef = useRef<HTMLElement | null>(null);
@@ -116,13 +70,13 @@ export function FloatingPanel({
     restoreRef.current = document.activeElement as HTMLElement | null;
     // 焦点给面板**本身**而不是第一个控件：这样屏幕阅读器先念标题，
     // 也不会有一个控件莫名其妙地带着焦点环（用户还没做任何操作）
-    panelRef.current?.focus();
+    panelRef.current?.focus({ preventScroll: true });
     return () => {
       const target = restoreRef.current;
       restoreRef.current = null;
       // 触发按钮可能已经不在了（比如它所在的视图被换掉）——
       // isConnected 挡一下，否则 focus() 会把焦点丢给 body
-      if (target?.isConnected) target.focus();
+      if (target?.isConnected && !target.closest('[inert]')) target.focus({ preventScroll: true });
     };
   }, [open]);
 
@@ -130,6 +84,8 @@ export function FloatingPanel({
   useEffect(() => {
     if (!open) return;
     function onKeyDown(e: KeyboardEvent) {
+      const activePanels = document.querySelectorAll('.floating-layer[data-open="true"] .panel');
+      if (activePanels[activePanels.length - 1] !== panelRef.current) return;
       if (e.key === 'Escape') {
         // 阻止冒泡：背后的界面（比如保险库里的 ⌘F/⌘L 监听）不该同时响应
         e.preventDefault();
@@ -162,22 +118,22 @@ export function FloatingPanel({
   if (!mounted) return null;
 
   return (
-    <div className="fixed inset-0 z-50 grid place-items-center p-4">
+    <div className="floating-layer" data-open={open} inert={!open} aria-hidden={!open || undefined}>
       {/* 遮罩只负责「点它关闭」。用 onMouseDown 而不是 onClick：
           在面板里按下、拖到遮罩上再松手不该把窗口关掉 */}
       <div
         className={`scrim ${leaving ? 'scrim-out' : 'scrim-in'}`}
-        onMouseDown={(e) => { e.preventDefault(); onClose(); }}
+        onMouseDown={(e) => { e.preventDefault(); if (open) onClose(); }}
         aria-hidden
       />
       <div
         ref={panelRef}
         role="dialog"
-        aria-modal="true"
+        aria-modal={open || undefined}
         aria-labelledby={labelledBy}
         tabIndex={-1}
         onAnimationEnd={(e) => { if (leaving && e.target === e.currentTarget) onExited(); }}
-        className={`panel relative flex max-h-[min(680px,calc(100vh-32px))] w-full flex-col outline-none ${leaving ? 'panel-out' : 'panel-in'} ${className}`}
+        className={`panel relative flex flex-col outline-none ${leaving ? 'panel-out' : 'panel-in'} ${className}`}
       >
         {children}
         {footer && <div className="panel-foot">{footer}</div>}

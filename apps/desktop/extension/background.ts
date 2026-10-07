@@ -1,3 +1,4 @@
+import { accountKey, lockedAccount } from '../src/application/account-target';
 /**
  * MV3 service worker —— 扩展的大脑。
  *
@@ -22,25 +23,30 @@ import { ext } from './ext-api';
 import { installExtensionHost } from './host-impl';
 import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
-  summaryOf, iconDomainOf, avatarOf, searchItems, buildReport, checkBreaches,
-  parseImport, detectImportFormat, IMPORT_FORMATS, type ImportFormatId,
-  type AccountInfo, type FieldDescriptor, type VaultItem,
-  type CaptureDecision, type TwoFactorChallenge,
+    type AccountInfo, type FieldDescriptor, type VaultItem, type CaptureDecision,
   totpCode,
 } from '@coffer/vault';
-import { fromBase64 } from '@coffer/crypto';
 import { host } from '@coffer/ui';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
 import { syncCache, kdfCache, summarise } from '@coffer/ui';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
 import { handleWebauthn, type WebauthnPayload } from './webauthn';
+import { createProfileCache } from '../src/application/profile-cache';
+import { createVaultService } from '../src/application/service';
+import type { ApplicationMethod, ApplicationRequest, SiteContext } from '../src/application/types';
+import { authorizeRequest, createApplicationDispatcher, createSerialRunner, serializeError } from './application-rpc';
+import { createClipboardStore } from './clipboard-store';
+import { CONNECTION_DRAFT_KEY } from './connection-draft';
+import { CLIPBOARD_CLEAR_MS } from '@coffer/ui/clipboard';
+import type { InlineAccounts, InlineRequest } from './inline-accounts';
 
 /** 会话区：只在内存、浏览器重启即清空 */
+const storageWrites = createSerialRunner();
 const sessionArea: StorageArea = {
   get: (keys) => ext.storage.session.get(keys as string | string[]),
-  set: (items) => ext.storage.session.set(items),
-  remove: (keys) => ext.storage.session.remove(keys as string | string[]),
-  clear: () => ext.storage.session.clear(),
+  set: (items) => storageWrites(() => ext.storage.session.set(items)),
+  remove: (keys) => storageWrites(() => ext.storage.session.remove(keys as string | string[])),
+  clear: () => storageWrites(() => ext.storage.session.clear()),
 };
 
 const sessions = new SessionStore(sessionArea);
@@ -108,17 +114,30 @@ const deviceStore = {
 };
 
 let client: VaultClient | null = null;
+let lockCleanup: Promise<void> = Promise.resolve();
+let restoration: { client: VaultClient; promise: Promise<VaultClient> } | null = null;
+const authenticating = new WeakSet<VaultClient>();
+// A new worker has no selected identity yet; an explicit Add Account selection has a known null identity.
+const resolvedClients = new WeakSet<VaultClient>();
 
 function newClient(): VaultClient {
-  return new VaultClient({
+  const c = new VaultClient({
     /*
      * 走宿主。扩展端这一步是直接 `fetch`（有 host permission，不受 CORS 限制），
      * 桌面端走 Rust —— 差异只在这一行，见 `@coffer/ui/host`。
      */
     fetchImpl: host().fetch,
     deviceStore,
-    autoLockMs: 15 * 60 * 1000,
-    onLock: () => { void sessions.clear(); },
+    // Browser alarms own the absolute deadline; an in-memory timer would reset on every worker restore.
+    autoLockMs: 0,
+    onSync: (syncing) => {
+      if (!syncing && c === client) void runSerialized(async () => {
+        if (c !== client) return;
+        await persistState();
+        if (c !== client) return;
+        notifyChanged();
+      }).catch(reportFailure);
+    },
     /*
      * 上次同步的密文缓存 —— 解锁后先拿它把界面填上，再去问服务端。
      * 桌面端早就有，扩展端一直缺（每次解锁都要等一整轮网络）。
@@ -127,6 +146,7 @@ function newClient(): VaultClient {
     /* 省掉解锁时的那次 prelogin —— 桌面端一直有，扩展端以前没有 */
     kdfCache,
   });
+  return c;
 }
 
 /**
@@ -141,41 +161,135 @@ function newClient(): VaultClient {
  * 恰恰是最难查的那种。
  */
 async function restoreFromStorage(): Promise<VaultClient> {
+  await lockCleanup.catch(() => {});
   const c = getClient();
-  if (c.getSession().getKey() !== null) return c;   // 已经解锁，别动它
+  // Authentication owns the live session until its first durable snapshot exists.
+  // Re-reading storage meanwhile could overwrite it or mistake its absent deadline for expiry.
+  if (authenticating.has(c)) return c;
+  if (restoration?.client === c) return restoration.promise;
+  const pending = { client: c, promise: restoreClientFromStorage(c) };
+  restoration = pending;
+  try { return await pending.promise; }
+  finally { if (restoration === pending) restoration = null; }
+}
+
+async function restoreClientFromStorage(c: VaultClient): Promise<VaultClient> {
+  if (c.getSession().isUnlocked()) {
+    const deadline = await sessions.expiresAt();
+    if (c !== client) return getClient();
+    if (deadline === null || deadline <= Date.now()) {
+      // Expiry is a lock boundary too: retire pending requests and their queue.
+      await dispatchApplication({ method: 'lock', args: [] });
+    }
+    return getClient();
+  }
   const stored = await sessions.load();
-  // ⚠️ 走 `restore()` 而不是只灌会话 —— 它会把传输层（baseUrl + token）
-  // 一起接回去。只灌会话的话读操作正常、写操作全部报「连不上服务器」
-  if (stored) c.restore(stored);
+  if (c !== client) return getClient();
+  if (stored) {
+    c.restore(stored);
+    resolvedClients.add(c);
+    await scheduleAutoLock();
+  } else {
+    await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY]);
+    const account = await sessions.loadAccount();
+    if (c !== client) return getClient();
+    if (account && !c.getSession().account) c.getSession().setAccount(account);
+    resolvedClients.add(c);
+  }
   return c;
 }
 
-/**
- * ⚠️ 恢复必须发生在**用到的那一刻**，而不是模块加载时。
- *
- * 早先这里是一个在模块顶层求值一次的 `ready` promise，然后 `handle()` 里
- * await 它。那个写法有个致命的时间窗：模块可能**在用户解锁之前**就加载完了
- * （SW 被提前唤醒、或者同一份代码在不止一个上下文里跑），于是 `ready` 读到的
- * 是「存储里还没有会话」，之后再也不会重试 —— 用户明明解锁了，
- * 请求却报「保险库未解锁」，而且刷新一下就好、过一会儿又坏。
- *
- * 改成每次用到时先看一眼：已解锁就直接走，没有就去存储里捞。
- * 这是个幂等的检查，比「赌恢复已经完成」可靠得多。
- */
 async function unlockedClient(): Promise<VaultClient> {
-  try {
-    return await restoreFromStorage();
-  } catch (e) {
-    // 恢复失败当作没登录，让用户重新解锁 —— 但不能静默，否则
-    // 「解锁了却用不了」会变成一个查不出原因的幽灵问题
-    console.error('[coffer] 恢复会话失败：', e);
-    return getClient();
-  }
+  return restoreFromStorage();
 }
 
 function getClient(): VaultClient {
   client ??= newClient();
   return client;
+}
+
+function requireCurrentClient(c: VaultClient): void {
+  if (c !== client || !c.getSession().isUnlocked()) throw new Error('请求已取消，保险库已锁定');
+}
+
+let profileCache: ReturnType<typeof createProfileCache> | undefined;
+
+function serviceFor(c: VaultClient) {
+  profileCache ??= createProfileCache(host().storage);
+  const application = createVaultService(c, profileCache);
+  const authenticate = async (operation: () => Promise<void>) => {
+    authenticating.add(c);
+    try { await operation(); }
+    catch (error) { authenticating.delete(c); throw error; }
+    // Success remains protected until persistState establishes the session deadline.
+  };
+  return {
+    ...application,
+    snapshot: async () => {
+      const snapshot = await application.snapshot();
+      const unlockedAccounts = await sessions.unlockedAccounts();
+      if (snapshot.status === 'unlocked' && snapshot.account) {
+        const key = accountKey(snapshot.account);
+        if (!unlockedAccounts.includes(key)) unlockedAccounts.push(key);
+      }
+      return { ...snapshot, unlockedAccounts };
+    },
+    connect: (...args: Parameters<typeof application.connect>) => authenticate(() => application.connect(...args)),
+    connectWithTwoFactor: (...args: Parameters<typeof application.connectWithTwoFactor>) => authenticate(() => application.connectWithTwoFactor(...args)),
+    unlock: (...args: Parameters<typeof application.unlock>) => authenticate(() => application.unlock(...args)),
+    switchAccount: (target: Parameters<typeof application.switchAccount>[0]) => {
+      const selected = target ? lockedAccount(target) : null;
+      const previousAccount = c.getSession().account;
+      // Retire pending work and the live key, preserving the independent trusted-memory slot.
+      c.logout();
+      authenticating.delete(c);
+      client = newClient(); restoration = null;
+      const selectedClient = getClient();
+      if (selected) selectedClient.getSession().setAccount(selected);
+      resolvedClients.add(selectedClient);
+      service = serviceFor(selectedClient);
+      lockCleanup = lockCleanup.catch(() => {}).then(async () => {
+        if (selectedClient !== client) return;
+        const restored = await sessions.select(selected);
+        if (selectedClient !== client) return;
+        if (restored) selectedClient.restore(restored);
+        await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY]);
+        if (selected) await sessionArea.remove(CONNECTION_DRAFT_KEY);
+        else if (previousAccount) await sessionArea.set({ [CONNECTION_DRAFT_KEY]: { serverUrl: '', email: '', error: null,
+          returnAccount: { serverUrl: previousAccount.serverUrl, email: previousAccount.email },
+        } });
+        else await sessionArea.remove(CONNECTION_DRAFT_KEY);
+        await scheduleAutoLock();
+        if (restored) await refreshBadges(); else await clearBadges();
+      });
+      return lockCleanup;
+    },
+    lock: () => retireClient(c, false),
+    logout: () => retireClient(c, true),
+  };
+}
+
+/** Pending network/authentication continuations retain only this retired client. */
+function retireClient(c: VaultClient, forgetAccount: boolean, clearPresentation = forgetAccount): Promise<void> {
+  const previousAccount = c.getSession().account;
+  const resolved = previousAccount !== null || resolvedClients.has(c);
+  // Undefined asks storage to identify its active slot; null deliberately preserves all parked slots.
+  const owner = resolved ? previousAccount : undefined;
+  const account = forgetAccount ? null : previousAccount;
+  let clearProfile: Promise<void | undefined> | undefined;
+  if (clearPresentation) {
+    if (previousAccount) clearProfile = profileCache?.clear(previousAccount);
+    else if (!resolved) clearProfile = sessions.loadAccount().then((stored) => stored ? profileCache?.clear(stored) : undefined);
+  }
+  if (forgetAccount) c.logout(); else c.lock();
+  if (c !== client) return lockCleanup;
+  client = newClient();
+  if (account) client.getSession().setAccount(account);
+  if (resolved) resolvedClients.add(client);
+  service = serviceFor(client);
+  // clear() invalidates restoration synchronously, then drains already-started storage writes.
+  lockCleanup = Promise.all([clearSession(forgetAccount, owner), clearProfile]).then(() => {});
+  return lockCleanup;
 }
 
 // ── 消息 ──
@@ -206,7 +320,7 @@ interface PendingCapture {
   decision: CaptureDecision;
 }
 
-async function setPending(p: PendingCapture | null, tabId?: number): Promise<void> {
+async function setPending(p: PendingCapture | null, tabId?: number, owner = getClient()): Promise<void> {
   const got = await ext.storage.session.get(PENDING_KEY);
   const map = (got[PENDING_KEY] ?? {}) as Record<string, PendingCapture>;
   if (p === null) {
@@ -214,7 +328,8 @@ async function setPending(p: PendingCapture | null, tabId?: number): Promise<voi
   } else {
     map[String(p.tabId)] = p;
   }
-  await ext.storage.session.set({ [PENDING_KEY]: map });
+  requireCurrentClient(owner);
+  await sessionArea.set({ [PENDING_KEY]: map });
 }
 
 async function getPending(tabId: number): Promise<PendingCapture | null> {
@@ -224,91 +339,154 @@ async function getPending(tabId: number): Promise<PendingCapture | null> {
 }
 
 type Request =
-  | { type: 'coffer:status' }
+  | ApplicationRequest
+  | InlineRequest
   | { type: 'coffer:connect'; serverUrl: string; email: string; masterPassword: string }
-  | { type: 'coffer:connect-2fa'; code: string; provider: number; remember: boolean }
   | { type: 'coffer:lock' }
   | { type: 'coffer:list' }
   | { type: 'coffer:matches'; url: string }
-  | { type: 'coffer:search'; query: string }
-  | { type: 'coffer:folders' }
-  | { type: 'coffer:security' }
-  | { type: 'coffer:breach-check' }
-  | { type: 'coffer:save-item'; draft: VaultItem }
-  | { type: 'coffer:item'; itemId: string }
-  | { type: 'coffer:item-draft'; itemId: string }
-  | { type: 'coffer:import-parse'; dataBase64: string; format?: string }
-  | { type: 'coffer:import-commit'; dataBase64: string; format?: string }
-  | { type: 'coffer:fill'; itemId: string; tabId: number }
-  | { type: 'coffer:generate'; length?: number; digits?: boolean; symbols?: boolean }
+  | { type: 'coffer:context' }
+  | { type: 'coffer:fill'; itemId: string; tabId: number; application?: boolean }
   | { type: 'coffer:pending'; tabId?: number }
   | { type: 'coffer:save-capture'; tabId?: number }
   | { type: 'coffer:dismiss-capture'; tabId?: number }
-  | { type: 'coffer:reveal'; itemId: string; field: 'username' | 'password' | 'totp' }
-  | { type: 'coffer:reveal-custom'; itemId: string; index: number }
-  | { type: 'coffer:reveal-history'; itemId: string; index: number }
-  | { type: 'coffer:download-attachment'; itemId: string; attachmentId: string }
   | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
+  | { type: 'coffer:clipboard-copied'; value: string }
   | { type: 'coffer:webauthn'; payload: unknown };
 
-/**
- * 服务器要求两步验证 —— `client.connect` 抛这个，调用方要给用户看输入框，
- * 然后走 `connectWithTwoFactor`。
- *
- * 判据是 `twoFactorRequired` 这个标记，和桌面端 `Connect.tsx` 里那份一致
- * （`packages/vault/src/client.ts` 打上的）。
- */
-function isTwoFactor(e: unknown): e is TwoFactorChallenge & { providers: number[]; providersInfo?: unknown } {
-  return typeof e === 'object' && e !== null
-    && (e as { twoFactorRequired?: boolean }).twoFactorRequired === true;
+const AUTO_LOCK_ALARM = 'coffer:auto-lock';
+const CLIPBOARD_ALARM = 'coffer:clipboard-clear';
+const runSerialized = createSerialRunner();
+let service = serviceFor(getClient());
+const dispatchApplication = createApplicationDispatcher(() => service, {
+  run: runSerialized,
+  beforeRequest: async () => { await restoreFromStorage(); },
+  afterMutation: persistState,
+  onChanged: notifyChanged,
+});
+
+function reportFailure(error: unknown): void {
+  console.error('[coffer] 后台操作失败：', error);
 }
 
-/**
- * 连接成功之后的收尾。
- *
- * 抽出来是因为**两条路都要走一遍**：直接 `connect` 成功，以及
- * `connect` → 两步验证 → `connectWithTwoFactor` 成功。写两遍的话，
- * 以后加一步（比如刷新某种缓存）只会加到其中一条上。
- */
-async function finishConnect(c: VaultClient) {
-  const session = c.getSession();
-  const key = session.getKey();
-  if (!key) throw new Error('解锁后拿不到密钥');
-  await sessions.save(getClient().exportState());
-  // 解锁之后要把角标补上 —— 见 refreshBadges 的说明
-  await refreshBadges();
-  return { ok: true, itemCount: session.items.length };
+function notifyChanged(): void {
+  void ext.runtime.sendMessage({ type: 'coffer-internal:changed' }).catch(() => {});
 }
+
+async function scheduleAutoLock(): Promise<void> {
+  const deadline = await sessions.nextExpiry();
+  if (deadline !== null) await ext.alarms.create(AUTO_LOCK_ALARM, { when: deadline });
+  else await ext.alarms.clear(AUTO_LOCK_ALARM);
+}
+
+async function clearSession(forgetAccount = false, account?: AccountInfo | null): Promise<void> {
+  await sessions.clear({ forgetAccount, ...(account !== undefined ? { account } : {}) });
+  await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY]);
+  await scheduleAutoLock();
+  await clearBadges();
+}
+
+async function persistState(method?: ApplicationMethod, succeeded = true): Promise<void> {
+  if (method === 'lock' || method === 'logout' || method === 'switchAccount') { await lockCleanup; return; }
+  const c = getClient();
+  const authentication = method === 'connect' || method === 'connectWithTwoFactor' || method === 'unlock';
+  try {
+    if (c.getSession().isUnlocked()) {
+      try {
+        if (succeeded && authentication) {
+          await sessions.start(c.exportState());
+          await sessionArea.remove(CONNECTION_DRAFT_KEY);
+        } else {
+          await sessions.save(c.exportState());
+        }
+        await scheduleAutoLock();
+        if (c !== client) return;
+        await refreshBadges();
+      } catch (error) {
+        // Never leave an acknowledged write with an older recoverable plaintext snapshot.
+        if (c === client) await retireClient(c, false);
+        throw error;
+      }
+    } else {
+      await clearSession(c.getSession().status === 'loggedOut');
+    }
+  } finally {
+    if (authentication) authenticating.delete(c);
+  }
+}
+
+ext.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === AUTO_LOCK_ALARM) {
+    void (async () => {
+      const c = client;
+      const activeExpired = await sessions.expire();
+      if (c !== client) return;
+      if (activeExpired) await dispatchApplication({ method: 'lock', args: [] });
+      else await scheduleAutoLock();
+    })().catch(reportFailure);
+  }
+  if (alarm.name === CLIPBOARD_ALARM) void firefoxClipboard.resume().catch(reportFailure);
+});
 
 ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
-  const req = msg as { type?: string };
+  const req = msg as { type?: unknown; application?: boolean } | null;
+  if (typeof req?.type !== 'string' || !req.type.startsWith('coffer:')) return undefined;
+  const application = req.type === 'coffer:application' || req.type === 'coffer:context'
+    || req.type === 'coffer:clipboard-copied' || req.application === true;
+  const fail = (error: unknown) => {
+    const serialized = serializeError(error);
+    respond(application ? { ok: false, error: serialized } : { error: serialized.message, ...serialized });
+  };
+  try { authorizeRequest(req.type, sender, ext.runtime); } catch (error) { fail(error); return undefined; }
 
-  // content script 的字段上报：记下来，顺手回一个空响应
-  if (req?.type === 'coffer:fields') {
-    const from = sender.tab?.id;
-    if (from !== undefined) {
-      const m = msg as { url: string; fields: FieldDescriptor[]; isLoginForm: boolean };
-      tabFields.set(from, { url: m.url, fields: m.fields, isLoginForm: m.isLoginForm });
-      void updateBadge(from, m.isLoginForm);
+  // Preserve the originating button's gesture on browsers that require it.
+  // Unlock happens only in the trusted extension popup, never in page DOM.
+  if (req.type === 'coffer:inline-unlock') {
+    try {
+      if (!ext.action.openPopup) throw new Error('unsupported');
+      void ext.action.openPopup().then(() => respond({ ok: true })).catch(() =>
+        respond({ error: '请点击浏览器工具栏中的 1Warden 图标解锁，然后回到此输入框选择账号。' }));
+    } catch {
+      respond({ error: '请点击浏览器工具栏中的 1Warden 图标解锁，然后回到此输入框选择账号。' });
+    }
+    return true;
+  }
+
+  if (req.type === 'coffer:fields') {
+    const m = msg as { fields?: FieldDescriptor[]; isLoginForm?: boolean };
+    const from = sender.tab!.id!;
+    if (Array.isArray(m.fields) && typeof m.isLoginForm === 'boolean') {
+      tabFields.set(from, { url: sender.url!, fields: m.fields, isLoginForm: m.isLoginForm });
+      void updateBadge(from, m.isLoginForm).catch(reportFailure);
     }
     return undefined;
   }
-
-  // 表单提交：异步处理，不需要回包
-  if (req?.type === 'coffer:submitted') {
-    void onSubmitted(sender.tab?.id, (msg as { url?: string }).url)
-      // 捕获失败确实不该影响页面，但**必须留下痕迹** —— 静默吞掉的错误
-      // 会让「点了保存没反应」变成一个查不出原因的幽灵问题
-      .catch((e: unknown) => console.error('[coffer] 捕获失败：', e));
+  if (req.type === 'coffer:submitted') {
+    void runSerialized(async () => {
+      const owner = getClient();
+      await restoreFromStorage();
+      if (owner !== client) throw new Error('请求已取消，保险库已锁定');
+      await onSubmitted(sender.tab?.id, sender.url);
+      notifyChanged();
+    }).catch(reportFailure);
     return undefined;
   }
 
-  if (!req?.type?.startsWith('coffer:')) return undefined;
-
-  void handle(req as Request, sender)
-    .then((r) => respond(r))
-    .catch((e: unknown) => respond({ error: e instanceof Error ? e.message : String(e) }));
-  return true;   // 异步响应
+  // Vault mutations share a queue; lock retires the current generation immediately.
+  const result = req.type === 'coffer:application'
+    ? dispatchApplication(msg)
+    : req.type === 'coffer:clipboard-copied'
+    ? handle(msg as Request, sender)
+    : req.type === 'coffer:lock'
+    ? dispatchApplication({ method: 'lock', args: [] }).then(() => ({ ok: true }))
+    : runSerialized(async () => {
+      const owner = getClient();
+      await restoreFromStorage();
+      if (owner !== client) throw new Error('请求已取消，保险库已锁定');
+      return handle(msg as Request, sender);
+    });
+  void result.then((value) => respond(application ? { ok: true, result: value } : value)).catch(fail);
+  return true;
 });
 
 /**
@@ -333,13 +511,15 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
  */
 const WA_DONE_KEY = 'coffer.webauthnDone';
 
-/** ⚠️ 请求 id 只是页面内的自增计数 —— 不带标签页会跨标签页串号 */
+/** Request counters restart on navigation; include the browser's document identity and origin. */
 function waKey(sender: chrome.runtime.MessageSender, id: number): string {
-  return `${sender.tab?.id ?? -1}:${sender.frameId ?? 0}:${id}`;
+  return JSON.stringify([sender.tab?.id ?? -1, sender.frameId ?? 0,
+    sender.origin ?? new URL(sender.url!).origin, sender.documentId ?? sender.url, id]);
 }
 
-async function readDone(key: string): Promise<Record<string, unknown> | null> {
+async function readDone(key: string, owner: VaultClient): Promise<Record<string, unknown> | null> {
   const got = await ext.storage.session.get(WA_DONE_KEY);
+  requireCurrentClient(owner);
   const map = (got[WA_DONE_KEY] ?? {}) as Record<string, Record<string, unknown>>;
   return map[key] ?? null;
 }
@@ -351,8 +531,9 @@ async function readDone(key: string): Promise<Record<string, unknown> | null> {
  * 所以**写完再读回来确认赢的是自己**。两个实例同时写时后写的赢，
  * 先写的那次读回来会发现不是自己，于是让位。
  */
-async function claim(key: string): Promise<boolean> {
+async function claim(key: string, owner: VaultClient): Promise<boolean> {
   const got = await ext.storage.session.get(WA_CLAIM_KEY);
+  requireCurrentClient(owner);
   const map = (got[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
 
   // ⚠️ 认领**必须会过期**。持有它的实例可能半路被杀（这正是我们面对的那个
@@ -363,7 +544,12 @@ async function claim(key: string): Promise<boolean> {
   // 只留最近几十个，别让这张表无限长
   for (const k of Object.keys(map).slice(0, Math.max(0, Object.keys(map).length - 32))) delete map[k];
   map[key] = Date.now();
-  await ext.storage.session.set({ [WA_CLAIM_KEY]: map });
+  // Account cleanup drains this queue; ownership may change while a write waits its turn.
+  await storageWrites(async () => {
+    requireCurrentClient(owner);
+    await ext.storage.session.set({ [WA_CLAIM_KEY]: map });
+  });
+  requireCurrentClient(owner);
 
   // ⚠️ 写完要**等一小段随机时间再读回来**。
   //
@@ -374,18 +560,25 @@ async function claim(key: string): Promise<boolean> {
   // 这是最后一道保险：实测过没有它时好时坏（同一份代码连着跑两次，
   // 一次全绿一次红），而这种「偶尔丢凭据」的 bug 正是最难被用户说清楚的。
   await new Promise((r) => setTimeout(r, 30 + Math.floor(Math.random() * 70)));
+  requireCurrentClient(owner);
 
   const back = await ext.storage.session.get(WA_CLAIM_KEY);
+  requireCurrentClient(owner);
   const after = (back[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
   // 不是自己写的 → 有人抢先。两个实例同时写时后写的赢，先写的读到不是自己就让位
   return after[key] === map[key];
 }
 
-async function releaseClaim(key: string): Promise<void> {
+async function releaseClaim(key: string, owner: VaultClient): Promise<void> {
   const got = await ext.storage.session.get(WA_CLAIM_KEY);
+  requireCurrentClient(owner);
   const map = (got[WA_CLAIM_KEY] ?? {}) as Record<string, number>;
   delete map[key];
-  await ext.storage.session.set({ [WA_CLAIM_KEY]: map });
+  await storageWrites(async () => {
+    requireCurrentClient(owner);
+    await ext.storage.session.set({ [WA_CLAIM_KEY]: map });
+  });
+  requireCurrentClient(owner);
 }
 
 const WA_CLAIM_KEY = 'coffer.webauthnClaim';
@@ -393,37 +586,44 @@ const WA_CLAIM_KEY = 'coffer.webauthnClaim';
 /** 认领的有效期。超过它视为持有者已死，后来者可以接管 */
 const CLAIM_TTL_MS = 30_000;
 
-async function writeDone(key: string, reply: Record<string, unknown>): Promise<void> {
+async function writeDone(key: string, reply: Record<string, unknown>, owner: VaultClient): Promise<void> {
   const got = await ext.storage.session.get(WA_DONE_KEY);
+  requireCurrentClient(owner);
   const map = (got[WA_DONE_KEY] ?? {}) as Record<string, Record<string, unknown>>;
   map[key] = reply;
   // 只留最近几十条 —— 页面开一整天的话这个表不该无限长下去
   const keys = Object.keys(map);
   for (const k of keys.slice(0, Math.max(0, keys.length - 32))) delete map[k];
-  await ext.storage.session.set({ [WA_DONE_KEY]: map });
+  await storageWrites(async () => {
+    requireCurrentClient(owner);
+    await ext.storage.session.set({ [WA_DONE_KEY]: map });
+  });
+  requireCurrentClient(owner);
 }
 
-async function runWebauthn(payload: unknown, senderOrigin: string | undefined): Promise<Record<string, unknown>> {
+async function runWebauthn(payload: unknown, senderOrigin: string | undefined, c: VaultClient): Promise<Record<string, unknown>> {
   // ⚠️ 只认客户端这一份状态。
   // 原先这里还额外读了 `sessions.load()` 来判断「解锁了没有」，
   // 于是同一个事实有了两个来源 —— 而它们会不一致（存储里没有、
   // 但客户端刚被 connect 解锁过），表现为用户刚解锁却报「保险库未解锁」。
   // 密钥在不在，`getKey()` 说了算。
-  const c = await unlockedClient();
+  requireCurrentClient(c);
   const key = c.getSession().getKey();
   if (!key) return { ok: false, error: `保险库未解锁（${c.getSession().status}）` };
 
   const result = await handleWebauthn(payload as WebauthnPayload, senderOrigin, {
     items: () => c.getSession().items,
     userKey: () => key,
-    refresh: () => c.refresh(),
-    isUnlocked: () => c.getSession().isUnlocked(),
+    refresh: async () => { requireCurrentClient(c); await c.refresh(); requireCurrentClient(c); },
+    isUnlocked: () => c === client && c.getSession().isUnlocked(),
     trace,
     persist: async (changed) => {
-      for (const item of changed) await c.saveItem(item);
+      for (const item of changed) { requireCurrentClient(c); await c.saveItem(item); }
+      requireCurrentClient(c);
       // 和 save-capture 一样：存完必须刷一次会话快照，
       // 否则下一次读到的还是旧的，第二次断言会拿着过期的计数去存
-      if (c.getSession().getKey()) await sessions.save(c.exportState());
+      await persistState();
+      notifyChanged();
     },
   });
   // passkey 失败在页面上只会表现成一句「NotAllowedError」，
@@ -434,365 +634,91 @@ async function runWebauthn(payload: unknown, senderOrigin: string | undefined): 
 }
 
 async function handle(req: Request, sender: chrome.runtime.MessageSender): Promise<unknown> {
+  const activeClient = getClient();
   switch (req.type) {
-    case 'coffer:status': {
-      const session = await sessions.load();
+    case 'coffer:inline-accounts': {
+      await requireInlineDocument(sender);
+      const session = activeClient.getSession();
+      requireInlineOwner(activeClient);
       return {
-        unlocked: session !== null,
-        account: session?.account ?? null,
-        itemCount: session?.items.length ?? 0,
-      };
+        unlocked: session.isUnlocked(),
+        accounts: session.isUnlocked() ? matchItemsByUrl(session.items, sender.url!)
+          .filter((item) => item.type === 'login' && item.login !== null)
+          .map((item) => ({ id: item.id, title: item.name, username: item.login!.username ?? '' })) : [],
+      } satisfies InlineAccounts;
     }
-
-    /*
-     * 解锁。
-     *
-     * ⚠️ **服务器要求两步验证时，这里必须把 challenge 回给弹窗，而不是抛错。**
-     *
-     * 抛出去的话消息层会把它当成一般错误，弹窗显示 `apiMessageOf(e)` ——
-     * 而 challenge 没有 `kind`，于是**直接把英文原文显示给用户**，
-     * 而且他永远没有输入验证码的机会。开了两步验证的人因此
-     * **完全登不进扩展**。见 `@coffer/ui` 的 `TwoFactorForm` 顶部。
-     */
-    case 'coffer:connect': {
-      const c = await unlockedClient();
-      try {
-        await c.connect({
-          serverUrl: req.serverUrl, email: req.email, masterPassword: req.masterPassword,
-        });
-      } catch (e) {
-        if (isTwoFactor(e)) {
-          /*
-           * ⚠️ 这一步之后客户端**必须保持存活**，直到 `coffer:connect-2fa`
-           * 回来 —— `connectWithTwoFactor` 用的是 `connect` 存下来的中间状态。
-           *
-           * MV3 的 service worker 空闲约 30 秒会被杀。用户去手机上取验证码
-           * 完全可能超过这个时间，那时中间状态就没了，他只能从头再来一遍。
-           * 这是**降级**（重试一次即可），不是死路 —— 比现在「永远登不进」好得多。
-           */
-          return {
-            ok: false,
-            twoFactor: { providers: e.providers, providersInfo: e.providersInfo },
-          };
-        }
-        throw e;
+    case 'coffer:inline-fill': {
+      await requireInlineDocument(sender);
+      requireCurrentClient(activeClient);
+      if (typeof req.itemId !== 'string') throw new Error('无效的账号选择');
+      const item = matchItemsByUrl(activeClient.getSession().items, sender.url!)
+        .find((candidate) => candidate.id === req.itemId && candidate.type === 'login');
+      if (!item?.login) throw new Error('这个账号与当前网站不匹配，请重新选择');
+      const tabId = sender.tab!.id!;
+      const fields = await readFieldsFrom(tabId);
+      const entries = await buildEntries(classifyFields(fields), item);
+      await requireInlineDocument(sender);
+      requireCurrentClient(activeClient);
+      if (entries.length === 0) throw new Error('这个页面上找不到可以填的字段');
+      const [injection] = await ext.scripting.executeScript({
+        target: sender.documentId ? { tabId, documentIds: [sender.documentId] } : { tabId, frameIds: [0] },
+        func: fillFields,
+        args: [entries, sender.url!],
+      });
+      const outcomes = (injection?.result ?? []) as FillOutcome[];
+      if (outcomes.length !== entries.length || outcomes.some((outcome) => !outcome.ok || !outcome.verified)) {
+        throw new Error('未能填充，请检查页面后重新选择账号');
       }
-      return await finishConnect(c);
-    }
-
-    case 'coffer:connect-2fa': {
-      const c = await unlockedClient();
-      await c.connectWithTwoFactor(req.code, req.provider, req.remember);
-      return await finishConnect(c);
-    }
-
-    case 'coffer:lock': {
-      getClient().lock();
-      await sessions.clear();
-      await clearBadges();
+      // Do not echo entries, item details, or page values to the content script.
       return { ok: true };
     }
-
+    case 'coffer:connect':
+      await service.connect({ serverUrl: req.serverUrl, email: req.email, masterPassword: req.masterPassword });
+      requireCurrentClient(activeClient);
+      await persistState('connect');
+      notifyChanged();
+      return { ok: true, itemCount: getClient().getSession().items.length };
+    case 'coffer:lock':
+      await service.lock();
+      await persistState('lock');
+      notifyChanged();
+      return { ok: true };
     case 'coffer:list': {
-      const session = await sessions.load();
-      if (!session) return { unlocked: false, items: [] };
-      return { unlocked: true, account: session.account, items: session.items.map(summarise) };
+      const snapshot = await service.snapshot();
+      return { unlocked: snapshot.status === 'unlocked', account: snapshot.account, items: snapshot.items };
     }
-
     case 'coffer:matches': {
-      const session = await sessions.load();
-      if (!session) return { unlocked: false, items: [] };
-      // 匹配跑在这里 —— 只有这里同时握有完整的 uris 与站点地址
-      return { unlocked: true, items: matchItemsByUrl(session.items, req.url).map(summarise) };
+      const session = getClient().getSession();
+      return { unlocked: session.isUnlocked(), items: matchItemsByUrl(session.items, req.url).map(summarise) };
     }
-
-    /**
-     * 搜索 —— **空 query 是「浏览整个保险库」**（收藏优先、然后按最近更新）。
-     *
-     * ⚠️ 和 `coffer:matches` 同一个理由放在后台：完整条目（含每个网址、
-     * 备注、自定义字段）只在后台这一份。把全量条目送去弹窗让它本地搜，
-     * 等于为了省一次消息把攻击面扩大一圈 —— 而弹窗是唯一跑在页面旁边、
-     * 和其它扩展共处一个进程的上下文。
-     *
-     * ⚠️ 用 `searchItems` 而不是在这里写个 `filter`：它带打分（精确 > 前缀 >
-     * 词首 > 包含 > 次要字段），而且**过滤掉已删除/已归档**的条目。
-     * 各写一份的话，「搜到了已删除的密码」这种事迟早会发生。
-     */
-    /**
-     * 文件夹列表 —— 给导航栏用。
-     *
-     * ⚠️ 和 `coffer:search` 分开而不是塞进每条摘要里：文件夹是**整个库**的
-     * 一份（几十个），条目是几百上千条。跟着摘要重复传会让消息大出一个量级，
-     * 而它们的变化频率完全不同（改文件夹名不该让整份列表失效）。
-     */
-    case 'coffer:folders': {
-      const session = await sessions.load();
-      if (!session) return { unlocked: false, folders: [] };
+    case 'coffer:context': {
+      const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
+      const tabId = tab?.id ?? null;
+      const url = tab?.url ?? '';
+      const session = getClient().getSession();
+      const capture = tabId !== null && session.isUnlocked() ? await getPending(tabId) : null;
       return {
-        unlocked: true,
-        folders: session.folders.map((f) => ({
-          id: f.id,
-          name: f.nameFailed ? '无法解密' : f.name,
-        })),
-      };
+        tabId, url,
+        matchedIds: session.isUnlocked() ? matchItemsByUrl(session.items, url).map((i) => i.id) : [],
+        pending: capture && capture.decision.kind !== 'none' ? {
+          url: capture.url, username: capture.username, action: capture.decision.kind,
+          itemId: capture.decision.kind === 'update' ? capture.decision.itemId : null,
+        } : null,
+      } satisfies SiteContext;
     }
-
-    /**
-     * 安全报告 —— 和桌面端**同一份逻辑**（`@coffer/vault` 的 `buildReport`）。
-     *
-     * ⚠️ **`unsecured` 必须降级成摘要再回**。报告的其它部分只有 `itemId`
-     * （没有条目本体），只有它是 `VaultItem[]`（完整条目、带明文密码）——
-     * 直接送回弹窗就破了「弹窗只拿摘要」那条边界，而那条边界正是
-     * `coffer:matches` 刻意把匹配放在后台的原因。
-     *
-     * `breached`（HIBP 查询）**不在这里触发** —— 它是网络请求、需要用户
-     * 明确开启，而且是这个应用唯一会联系第三方的功能。默认空。
-     */
-    /**
-     * **单条**条目的详情字段 —— 按需取一条，不是把整库送过去。
-     *
-     * ⚠️ 列表接口刻意只回摘要（见 `coffer:matches` 的说明），所以摘要里
-     * 没有卡片号、身份信息、SSH 密钥这些。详情要显示它们，就得单独取 ——
-     * 但取的是**这一条**，而且是用户点开哪条取哪条。
-     *
-     * ⚠️ **仍然只回展示用的字段，不回明文密码。** 密码照旧只在点「复制」
-     * 那一刻由 `coffer:copy` 取一次。详情屏没有理由看到它。
-     */
-    case 'coffer:item': {
-      const session = await sessions.load();
-      if (!session) throw new Error('保险库未解锁');
-      const i = session.items.find((x) => x.id === req.itemId);
-      if (!i) throw new Error('找不到这条记录');
-      return {
-        notes: i.notes,
-        card: i.card,
-        identity: i.identity,
-        sshKey: i.sshKey,
-        secureNote: i.secureNote,
-        /*
-         * 自定义字段 —— ⚠️ **隐藏字段（type 1）的值不回**，只回名字。
-         * 人们恰恰把密钥、PIN 这种东西放进隐藏字段，所以它必须走
-         * `coffer:reveal-custom` 一个一个要，和密码同一个规矩。
-         */
-        customFields: i.customFields.map((f) => ({
-          name: f.name,
-          type: f.type,
-          value: f.type === 1 ? null : f.value,
-        })),
-        /*
-         * 历史密码 —— ⚠️ **只回日期，不回值**。
-         * 那是一串**明文旧密码**，没有任何理由主动送进浏览器扩展。
-         * 要看某一条就走 `coffer:reveal-history`，和密码同一个规矩：
-         * 明文只在用户点开那一刻过一次手。
-         */
-        passwordHistory: i.passwordHistory.map((h) => ({ lastUsedDate: h.lastUsedDate })),
-        /* 附件的**元数据** —— 名字和大小是安全的，字节要单独要（见下面那条） */
-        attachments: i.attachments.map((a) => ({
-          id: a.id, fileName: a.fileName, size: a.size,
-        })),
-      };
+    case 'coffer:clipboard-copied':
+      if (typeof req.value !== 'string') throw new Error('无效的剪贴板内容');
+      await scheduleClipboard(req.value);
+      return;
+    case 'coffer:copy': {
+      // Compatibility for browser regression scripts. Shared UI reveals then copies locally.
+      const detail = await service.getItem(req.itemId);
+      const value = req.field === 'username' ? detail.login?.username
+        : req.field === 'totp' ? (await service.totp(req.itemId))?.code
+        : await service.reveal(req.itemId, { kind: 'password' });
+      if (value == null) throw new Error('找不到这个字段');
+      return { value, clearAfterSeconds: CLIPBOARD_CLEAR_MS / 1000 };
     }
-
-    /**
-     * **导入的第一步：只解析、不上传。**
-     *
-     * 用户选完文件先看到「会导入多少条、有哪些文件夹」，确认了才真写。
-     * 直接写的话，选错文件（比如把一个无关的 csv 拖进来）会让库里多出
-     * 一堆垃圾，而删除比导入麻烦得多。
-     *
-     * ⚠️ 文件走 base64 过消息通道：`parseImport` 要的是 `Uint8Array`，
-     * 而扩展的消息通道只保证结构化克隆 —— 直接传 `Uint8Array` 在
-     * 某些浏览器上会被转成 `{0:..,1:..}` 那种普通对象。
-     */
-    /**
-     * 编辑用的草稿 —— **整条，但密码是 `null`**。
-     *
-     * ⚠️ 这是「编辑」和「查看」的分界。
-     *
-     * 查看那条路（`coffer:item`）只给 notes / card / identity / sshKey /
-     * secureNote，密码要 `coffer:reveal` 一个字段一个字段地要 ——
-     * 弹窗**刻意**拿不到明文（spec 不变量 S1）。
-     *
-     * 编辑要的是「表单能填满」，而表单里**除了密码**都是可以给弹窗的东西：
-     * 用户名、网址、验证码、备注、卡号……它们本来就在详情里显示得出来。
-     * 密码留 `null`，界面上显示成占位符，用户**留空 = 不改**
-     * （见 `coffer:save-item` 里那段回填）。
-     *
-     * 所以这一条**没有**在读那条不变量上开口子：出去的仍然没有明文密码。
-     */
-    case 'coffer:item-draft': {
-      const session = await sessions.load();
-      if (!session) throw new Error('保险库未解锁');
-      const i = session.items.find((x) => x.id === req.itemId);
-      if (!i) throw new Error('找不到这条记录');
-      return {
-        item: { ...i, login: i.login === null ? null : { ...i.login, password: null } },
-        hasPassword: i.login?.password !== null && i.login?.password !== undefined,
-      };
-    }
-
-    /*
-     * 保存一条（新建或编辑）。
-     *
-     * ⚠️ 这一条**是**明文过消息通道 —— 和读那一条路**相反**。
-     *
-     * 读那条路上弹窗只收摘要（spec 不变量 S1）；而这里是用户在表单里
-     * 打的字，明文本来就在弹窗里，拦下来没有任何意义。**加密和落盘都在
-     * 后台**（`saveItem` → `client.ts`），弹窗不碰密钥。
-     */
-    case 'coffer:save-item': {
-      const c = await unlockedClient();
-      const draft = req.draft;
-
-      /*
-       * ⚠️ **密码是 `null` 表示「用户没动它」，不是「清空」。**
-       *
-       * 弹窗走的是 `coffer:item-draft`，那条路不给明文密码 —— 所以它交回来
-       * 的草稿里那一栏本来就是空的。不回填的话，用户只改了个名字就会
-       * **把密码抹掉**，而他不会知道，直到下次登录。
-       *
-       * 回填放在**后台**：只有这里同时握有旧值和要写的新值。
-       * 代价是用户没法把密码清空 —— 那是很罕见的需求，而「改个名字
-       * 顺手删掉密码」是必现的。
-       */
-      if (draft.id && draft.login !== null && draft.login.password === null) {
-        const old = (await sessions.load())?.items.find((x) => x.id === draft.id);
-        if (old?.login?.password != null) draft.login.password = old.login.password;
-      }
-
-      const saved = await c.saveItem(draft);
-      await refreshBadges();
-      return { item: saved };
-    }
-
-    case 'coffer:import-parse': {
-      const bytes = fromBase64(req.dataBase64);
-      /*
-       * ⚠️ **用户显式选的格式要压过自动识别**，不是反过来。
-       *
-       * 原来写的是 `detectImportFormat(bytes) ?? req.format` —— 自动识别先手。
-       * 于是手动换格式时，只要自动识别还能认出来，用户的选择就被**静静忽略**，
-       * 界面看起来像「改了没反应」。而这一段存在的全部理由就是
-       * 「自动识别不可靠时用户能自己指定」（1Password 和 Chrome 的 CSV
-       * 列名一样，光看列名分不开）。
-       */
-      const requested = req.format && req.format !== 'auto'
-        ? (req.format as ImportFormatId)
-        : null;
-      const format = requested ?? detectImportFormat(bytes);
-      if (format === null) {
-        throw new Error('认不出这个文件的格式（支持 1PUX / Bitwarden / KeePass / CSV）');
-      }
-      const parsed = await parseImport(bytes, format);
-      return {
-        format,
-        formatLabel: IMPORT_FORMATS.find((f) => f.id === format)?.label ?? format,
-        /* 文件夹只有名字（`ImportResult` 不单独给一份），按名字去重 */
-        folders: new Set(parsed.items.map((i) => i.folderName).filter((n) => n !== null)).size,
-        total: parsed.items.length,
-        /*
-         * ⚠️ 被跳过的行**逐条回**（行号 + 原因），不是只回个数。
-         *
-         * 只回个数的话界面只能显示「跳过 3 行」—— 而导入是**一次性、不可重来**
-         * 的操作，用户既不知道是哪三行、也无从补救。这条是
-         * `@coffer/ui/ImportView` 顶部那三条硬要求里的第二条。
-         */
-        skipped: parsed.skipped,
-        /* 按类型分一下，让用户在确认前知道「里面有 3 张卡」这种 */
-        byType: parsed.items.reduce<Record<string, number>>((m, i) => {
-          m[i.type] = (m[i.type] ?? 0) + 1;
-          return m;
-        }, {}),
-      };
-    }
-
-    /**
-     * **导入的第二步：真写入。**
-     *
-     * 重新解析一遍（不用把条目从界面传回来）—— 解析是确定性的，而让界面
-     * 持有几百条明文再传回来，等于把整份数据多过一道手。
-     *
-     * `importItems` 自己负责建文件夹、按名字复用、逐条报失败（见那边的说明）。
-     * 这里只把它跑起来并把结果原样带回。
-     */
-    case 'coffer:import-commit': {
-      const c = await unlockedClient();
-      const bytes = fromBase64(req.dataBase64);
-      const format = detectImportFormat(bytes) ?? (req.format as ImportFormatId | undefined) ?? null;
-      if (format === null) throw new Error('认不出这个文件的格式');
-      const parsed = await parseImport(bytes, format);
-      const result = await c.importItems(parsed.items);
-      return result;
-    }
-
-    case 'coffer:security': {
-      const session = await sessions.load();
-      if (!session) return { unlocked: false, report: null };
-      const r = buildReport(session.items, Date.now());
-      return {
-        unlocked: true,
-        /*
-         * 返回的形状是 `@coffer/ui` 的 `ReportBrief` —— **和桌面端同一个类型**，
-         * 渲染的也是同一个组件。这里只负责把领域对象降级成它。
-         */
-        report: {
-          total: r.total,
-          score: r.score,
-          grade: r.grade,
-          // 绝大多数发现本来就只有 `itemId`（没有条目本体）—— 原样回
-          reused: r.reused,
-          weak: r.weak,
-          expiring: r.expiring,
-          /*
-           * ⚠️ `breached` 恒为空 —— 它要联网查 Have I Been Pwned，必须由用户
-           * 显式开启。这里填一个空数组**不是**「查过了、干净」，而是
-           * 「还没查」；两者的区别由界面上的 `BreachState` 表达（那一栏会
-           * 显示「未检查」而不是「没问题」）。填了结果的是
-           * `coffer:breach-check`，见下面。
-           */
-          breached: [],
-          // ⚠️ 只有 `unsecured` 是 `VaultItem[]`（完整条目、带明文密码）。
-          // 它是这里**唯一**需要降级成摘要的东西 —— 直接回就破了
-          // 「弹窗拿不到完整条目」那条边界。`uris` 只留 http:// 的，
-          // 那一栏的全部意义就是那个不安全的网址。
-          unsecured: r.unsecured.map((i) => ({
-            id: i.id,
-            name: i.nameFailed ? '无法解密' : i.name,
-            uris: (i.login?.uris ?? [])
-              .map((u) => u.uri)
-              .filter((u) => u.toLowerCase().startsWith('http://')),
-          })),
-        },
-      };
-    }
-
-    /*
-     * 已泄露密码的检查。
-     *
-     * ⚠️ 这是本应用**唯一**会联系第三方的功能（Have I Been Pwned），
-     * 所以它**只能**由用户在报告页显式点「开启检查」触发 —— 不在解锁时跑、
-     * 不在同步时跑、不在这里做任何自动重试。离开设备的是密码 SHA-1 的
-     * 前 5 个字符，候选在本地比对。
-     *
-     * 放在后台而不是弹窗里跑：全库扫描要拿明文密码，而弹窗**刻意**拿不到
-     * 完整条目（spec 不变量 S1），回来的只有 `itemId` + 次数。
-     */
-    case 'coffer:breach-check': {
-      const session = await sessions.load();
-      if (!session) throw new Error('保险库未解锁');
-      const found = await checkBreaches(session.items);
-      return { breached: found.map((f) => ({ itemId: f.itemId, count: f.count })) };
-    }
-
-    case 'coffer:search': {
-      const session = await sessions.load();
-      if (!session) return { unlocked: false, items: [] };
-      return {
-        unlocked: true,
-        items: searchItems(session.items, session.folders, req.query).map((h) => summarise(h.item)),
-      };
-    }
-
     case 'coffer:fill': {
       const session = await sessions.load();
       if (!session) throw new Error('保险库未解锁');
@@ -807,6 +733,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const fields = await readFieldsFrom(tabId);
       const plan = classifyFields(fields);
       const entries = await buildEntries(plan, item);
+      requireCurrentClient(activeClient);
       if (entries.length === 0) throw new Error('这个页面上找不到可以填的字段');
 
       const [injection] = await ext.scripting.executeScript({
@@ -817,18 +744,8 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
 
       const outcomes = (injection?.result ?? []) as FillOutcome[];
       const failed = outcomes.filter((o) => !o.ok || !o.verified);
+      if (req.application && failed.length > 0) throw new Error('部分字段未能填充，请检查页面');
       return { ok: failed.length === 0, outcomes, failed };
-    }
-
-    case 'coffer:generate': {
-      const { generatePassword } = await import('@coffer/crypto');
-      return {
-        password: generatePassword({
-          length: req.length ?? 20,
-          ...(req.digits === undefined ? {} : { digits: req.digits }),
-          ...(req.symbols === undefined ? {} : { symbols: req.symbols }),
-        }),
-      };
     }
 
     case 'coffer:pending': {
@@ -859,6 +776,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       if (!session) throw new Error('保险库未解锁');
 
       const c = await unlockedClient();
+      requireCurrentClient(activeClient);
       const decision = p.decision;
       if (decision.kind === 'update') {
         const existing = session.items.find((i) => i.id === decision.itemId);
@@ -883,27 +801,15 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       // 保存后同步一次会话快照，否则下次读到的还是旧的
       // ⚠️ 用客户端的 `exportState()`，不是自己照着字段列表拼一份 ——
       // 拼的时候漏掉传输层，恢复出来就是一个「读得了、写不了」的客户端
-      if (c.getSession().getKey()) await sessions.save(c.exportState());
+      requireCurrentClient(activeClient);
+      await persistState();
 
-      await setPending(null, tabId);
+      await setPending(null, tabId, activeClient);
       await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
+      notifyChanged();
       return { ok: true };
     }
 
-    /**
-     * 取出一个字段的明文，供弹窗复制。
-     *
-     * ⚠️ 这是**唯一**会把明文交给弹窗的接口，而且只在用户明确点了「复制」时调用。
-     * 列表接口刻意只回摘要 —— 弹窗平时没有任何理由看到密码。
-     *
-     * `totp` 是算出来的而不是存下来的：种子存在条目里，验证码每次现算。
-     */
-    /**
-     * passkey。
-     *
-     * ⚠️ `sender.origin` 是这里唯一的信任根 —— 消息的载荷全部由页面控制，
-     * 包括它自称的 origin。用载荷里的 origin 去做 rpId 校验，等于没有校验。
-     */
     case 'coffer:webauthn': {
       /**
        * ⚠️ **幂等：同一个请求 id 只执行一次。**
@@ -919,11 +825,12 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const reqId = (req.payload as { id?: number } | null)?.id;
       const op = (req.payload as { op?: string } | null)?.op ?? '?';
       await trace(`收到 ${op} id=${String(reqId)}`);
-      if (typeof reqId !== 'number') return await runWebauthn(req.payload, sender.origin);
+      if (typeof reqId !== 'number') return await runWebauthn(req.payload, sender.origin ?? new URL(sender.url!).origin, activeClient);
 
       const key = waKey(sender, reqId);
 
-      const done = await readDone(key);
+      const done = await readDone(key, activeClient);
+      requireCurrentClient(activeClient);
       if (done) return done;
 
       /**
@@ -937,154 +844,47 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
        * 内存里的锁（`createLocks`）跨不了实例，所以「认领」也必须放进存储。
        * 抢不到的那个**等**对方的结果，而不是自己也跑一遍。
        */
-      if (!(await claim(key))) {
+      if (!(await claim(key, activeClient))) {
         // 抢不到就等对方 —— 不自己也跑一遍
         for (let i = 0; i < 40; i++) {
           await new Promise((r) => setTimeout(r, 250));
-          const r = await readDone(key);
+          const r = await readDone(key, activeClient);
+          requireCurrentClient(activeClient);
           if (r) return r;
         }
         return { ok: false, error: '另一个 passkey 请求还在处理中，请重试' };
       }
 
-      const result = await runWebauthn(req.payload, sender.origin);
+      const result = await runWebauthn(req.payload, sender.origin ?? new URL(sender.url!).origin, activeClient);
+      requireCurrentClient(activeClient);
       // ⚠️ 失败**不**记缓存：让页面能重试。成功的才记 ——
       // 而成功的结果不记的话，SW 重启后同一个请求会再跑一遍并覆盖。
-      if (result['ok'] === true) await writeDone(key, result);
-      else await releaseClaim(key);
+      if (result['ok'] === true) await writeDone(key, result, activeClient);
+      else await releaseClaim(key, activeClient);
       return result;
-    }
-
-    /*
-     * 自定义字段的揭示。
-     *
-     * ⚠️ 单独一条消息，**不并进 `coffer:reveal`** —— 那个 handler 开头就
-     * `if (!item?.login) throw`，而自定义字段和 login 无关：一条安全笔记
-     * 照样可以有隐藏字段。
-     */
-    case 'coffer:reveal-custom': {
-      const session = await sessions.load();
-      if (!session) throw new Error('保险库未解锁');
-      const item = session.items.find((i) => i.id === req.itemId);
-      const field = item?.customFields[req.index];
-      if (!field) throw new Error('找不到这个自定义字段');
-      return { value: field.value };
-    }
-
-    /**
-     * 下载一个附件。
-     *
-     * 字节必须过消息通道 —— 和导入那条路**相反**方向而已（那边是文件进来，
-     * 这里是文件出去）。都要 base64，因为结构化克隆不支持 `Uint8Array`
-     * 之外的东西，而消息层对二进制的处理各浏览器不一致。
-     *
-     * ⚠️ 解密在后台（`downloadAttachment` → `client.ts`）：附件是加密存的，
-     * 密钥要用会话里的。弹窗从头到尾只拿到**已经解开的字节**，
-     * 而且只在用户点了下载那一刻。
-     */
-    case 'coffer:download-attachment': {
-      const c = await unlockedClient();
-      const got = await c.downloadAttachment(req.itemId, req.attachmentId);
-      let bin = '';
-      for (const b of got.bytes) bin += String.fromCharCode(b);
-      return { fileName: got.fileName, base64: btoa(bin) };
-    }
-
-    /* 历史密码的揭示 —— 和自定义字段同一个理由：单独一条，不并进上面那个 */
-    case 'coffer:reveal-history': {
-      const session = await sessions.load();
-      if (!session) throw new Error('保险库未解锁');
-      const item = session.items.find((i) => i.id === req.itemId);
-      const entry = item?.passwordHistory[req.index];
-      if (!entry) throw new Error('找不到这条历史密码');
-      return { value: entry.password };
-    }
-
-    case 'coffer:reveal': {
-      const session = await sessions.load();
-      if (!session) throw new Error('保险库未解锁');
-
-      const item = session.items.find((i) => i.id === req.itemId);
-      if (!item?.login) throw new Error('这条记录没有可复制的登录信息');
-
-      switch (req.field) {
-        case 'username':
-          if (item.login.username === null) throw new Error('这条记录没有用户名');
-          return { value: item.login.username };
-        case 'password':
-          if (item.login.password === null) throw new Error('这条记录没有密码');
-          return { value: item.login.password };
-        case 'totp': {
-          const code = await totpCode(item);
-          if (code === null) throw new Error('这条记录没有验证码，或密钥不合法');
-          return { value: code.code, remaining: code.remaining };
-        }
-        default:
-          throw new Error(`未知字段：${String(req.field)}`);
-      }
-    }
-
-    /**
-     * 复制到剪贴板。
-     *
-     * ⚠️ 明文**不经过弹窗**：这里取出来直接交给离屏文档，弹窗只拿到
-     * 「复制好了没有」。而且清理定时器跑在离屏文档里 ——
-     * 弹窗关掉之后它还在，这正是「复制完忘了」那种情况所需要的。
-     */
-    case 'coffer:copy': {
-      const session = await sessions.load();
-      if (!session) throw new Error('保险库未解锁');
-      const item = session.items.find((i) => i.id === req.itemId);
-      if (!item?.login) throw new Error('这条记录没有可复制的登录信息');
-
-      let value: string;
-      switch (req.field) {
-        case 'username':
-          if (item.login.username === null) throw new Error('这条记录没有用户名');
-          value = item.login.username;
-          break;
-        case 'password':
-          if (item.login.password === null) throw new Error('这条记录没有密码');
-          value = item.login.password;
-          break;
-        case 'totp': {
-          const code = await totpCode(item);
-          if (code === null) throw new Error('这条记录没有验证码，或密钥不合法');
-          value = code.code;
-          break;
-        }
-        default:
-          throw new Error(`未知字段：${String(req.field)}`);
-      }
-
-      // 让离屏文档把清理定时器挂上。**发完不管** —— 它的应答回不来
-      // （见 offscreen.ts 顶部）。清理失败不影响这次复制本身。
-      void ensureOffscreen()
-        .then(() => ext.runtime.sendMessage({
-          type: 'coffer-internal:schedule-clear', value,
-        }))
-        .catch((e: unknown) => console.warn('[coffer] 剪贴板清理未能安排：', e));
-
-      // 值交回弹窗由它写剪贴板：弹窗有用户手势，而且写失败时它当场就知道，
-      // 可以如实告诉用户 —— 换成这里写就没人能报错了
-      return { value, clearAfterSeconds: 30 };
     }
 
     case 'coffer:dismiss-capture': {
       const tabId = req.tabId ?? sender.tab?.id;
       if (tabId === undefined) return { ok: true };
-      await setPending(null, tabId);
+      await setPending(null, tabId, activeClient);
       await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
       return { ok: true };
     }
 
-    default: {
-      // 走到这里说明 Request 加了新成员却没加 case。上面的 switch 是穷尽的，
-      // 所以 TypeScript 把 req 收窄成了 never —— 正是我们想要的提醒
-      const unknown = req as { type: string };
-      throw new Error(`未知请求：${unknown.type}`);
-    }
+    default: throw new Error(`未知请求：${req.type}`);
   }
+}
+
+/** Browser-supplied sender identity is the authority; request payload URLs are never used. */
+async function requireInlineDocument(sender: chrome.runtime.MessageSender): Promise<void> {
+  if (sender.frameId !== 0 || sender.tab?.id === undefined || !sender.url) throw new Error('找不到目标网页');
+  const tab = await ext.tabs.get(sender.tab.id);
+  if (tab.url !== sender.url) throw new Error('网页地址已改变，请重新选择账号');
+}
+
+function requireInlineOwner(owner: VaultClient): void {
+  if (owner !== client) throw new Error('保险库状态已改变，请重新选择账号');
 }
 
 /**
@@ -1163,6 +963,7 @@ async function readFieldsFrom(tabId: number): Promise<FieldDescriptor[]> {
  * 而它正是最容易被打字机/XSS 够到的地方。
  */
 async function onSubmitted(tabId: number | undefined, url: string | undefined): Promise<void> {
+  const owner = getClient();
   // 这条链路上每一步都可能「合理地」放弃，而每一个放弃都必须是**可诊断的** ——
   // 否则用户那边表现为「提交了但没提示保存」，我们这边什么都看不到。
   if (tabId === undefined || url === undefined) {
@@ -1190,6 +991,7 @@ async function onSubmitted(tabId: number | undefined, url: string | undefined): 
     args: [indices],
   });
   const values = (injection?.result ?? []) as (string | null)[];
+  requireCurrentClient(owner);
   if (values.length === 0) {
     console.debug('[coffer] 捕获跳过：注入读取没有返回结果');
     return;
@@ -1206,12 +1008,12 @@ async function onSubmitted(tabId: number | undefined, url: string | undefined): 
   const decision = decideCapture({ url, username, password }, session.items);
   if (decision.kind === 'none') {
     // 没变化就清掉上一次的提示 —— 用户可能刚手动改好了
-    await setPending(null, tabId);
+    await setPending(null, tabId, owner);
     await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
     return;
   }
 
-  await setPending({ tabId, url, username, password, decision });
+  await setPending({ tabId, url, username, password, decision }, undefined, owner);
   // 角标只提示「有事可做」，不放数字 —— 数字会让人以为是待办事项
   await ext.action.setBadgeText({ tabId, text: '●' }).catch(() => {});
   await ext.action.setBadgeBackgroundColor({ color: '#3E7C8C' }).catch(() => {});
@@ -1257,44 +1059,45 @@ let offscreenReady: Promise<void> | null = null;
 
 function ensureOffscreen(): Promise<void> {
   offscreenReady ??= (async () => {
-    /*
-     * ⚠️ **Firefox 系没有 offscreen API。**
-     *
-     * 没有它 = 复制密码之后**没有地方活一个「30 秒后清空剪贴板」的定时器**。
-     * 直接调会抛 `Cannot read properties of undefined`，而那会让
-     * **整个复制流程失败** —— 一个「清理得不及时」的问题升级成「复制用不了」。
-     *
-     * 所以这里降级：复制照常，只是不安排自动清理。
-     * 用户拿到的密码仍在剪贴板里，直到他自己覆盖 —— 和大多数密码管理器
-     * 在没有 offscreen 时的行为一致。
-     *
-     * ⚠️ 这是**已知的缺口**，不是解。真正的解要么用 `alarms`（最小 30 秒，
-     * 正好），要么改成「下次唤醒时清理」。两条都要改行为，得单独决定。
-     */
-    if (!ext.offscreen || !ext.runtime.getContexts) {
-      console.warn('[offscreen] 这个浏览器没有 offscreen API —— 复制可用，但不会自动清空剪贴板');
-      return;
-    }
-    const contexts = await ext.runtime.getContexts({
-      contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType],
-    });
+    const contexts = await ext.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT' as chrome.runtime.ContextType] });
     if (contexts.length === 0) {
       await ext.offscreen.createDocument({
-        url: 'offscreen.html',
-        reasons: ['CLIPBOARD' as chrome.offscreen.Reason],
-        justification: '复制密码后需要在弹窗关闭的情况下也能按时清空剪贴板',
+        url: 'offscreen.html', reasons: ['CLIPBOARD' as chrome.offscreen.Reason],
+        justification: '弹窗关闭后按时清空仍未被覆盖的密码',
       });
     }
-
-    // 不等它应答 —— 离屏文档的 sendResponse 到不了调用方（见 offscreen.ts 顶部）。
-    // 给一小段时间让它的脚本跑起来注册好监听器即可。
-    await new Promise((r) => setTimeout(r, 200));
-  })().catch((e: unknown) => {
-    offscreenReady = null;   // 失败就允许下次重试
-    throw e;
-  });
+  })().finally(() => { offscreenReady = null; });
   return offscreenReady;
 }
+
+let clipboardTimer: ReturnType<typeof setTimeout> | null = null;
+const firefoxClipboard = createClipboardStore({
+  area: sessionArea,
+  clipboard: {
+    readText: () => navigator.clipboard.readText(),
+    writeText: (value) => navigator.clipboard.writeText(value),
+  },
+  async schedule(deadline) {
+    await ext.alarms.create(CLIPBOARD_ALARM, { when: deadline });
+    if (clipboardTimer !== null) clearTimeout(clipboardTimer);
+    clipboardTimer = setTimeout(() => {
+      clipboardTimer = null;
+      void firefoxClipboard.resume().catch(reportFailure);
+    }, Math.max(0, deadline - Date.now()));
+  },
+});
+
+async function scheduleClipboard(value: string): Promise<void> {
+  if (!ext.offscreen || !ext.runtime.getContexts) {
+    await firefoxClipboard.schedule(value);
+    return;
+  }
+  await ensureOffscreen();
+  await ext.runtime.sendMessage({ type: 'coffer-internal:schedule-clear', value, deadline: Date.now() + CLIPBOARD_CLEAR_MS });
+}
+
+// Recreate a Firefox event page's timer from its absolute deadline when it wakes up.
+if (!ext.offscreen) void firefoxClipboard.resume().catch(reportFailure);
 
 // ── 角标 ──
 

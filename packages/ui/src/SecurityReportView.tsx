@@ -206,7 +206,7 @@ export function SecurityReportView({
 
           <p className="mt-7 border-t border-[var(--border-subtle)] pt-5 text-xs leading-[var(--lh-prose)] text-[var(--ink-tertiary)] @[640px]:mt-9">
             所有检查都在本地完成。「已泄露的密码」需要联网查询，默认关闭。
-            评分的权重由 Coffer 自己定义，与 1Password 的算法无关。
+            评分的权重由 1Warden 自己定义，与 1Password 的算法无关。
           </p>
         </div>
       </div>

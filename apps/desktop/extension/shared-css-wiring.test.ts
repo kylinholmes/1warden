@@ -28,7 +28,7 @@ import { describe, it, expect } from 'vitest';
 const FILES = import.meta.glob(
   [
     './styles.css',
-    './popup/Popup.tsx',
+    './popup/main.tsx',
     // ⚠️ 桌面端的 styles.css 就在**上一层**。合并成一个 app 之前，扩展在
     // `apps/extension/src/`，到这里要绕 `../../../apps/desktop/`；现在两边
     // 同住 `apps/desktop/`，最短形式塌缩成了 `../src/`。glob 里写长的那个
@@ -88,7 +88,7 @@ describe('@coffer/ui 的 CSS 在两个 app 里都接上了', () => {
     ['桌面端', 'src/styles.css'],
   ] as const) {
     it(`${label}引了共享包导出的每一份 CSS`, () => {
-      const css = sourceEndingWith(suffix)!;
+      const css = sourceEndingWith(suffix)! + (suffix === './styles.css' ? sourceEndingWith('src/styles.css')! : '');
       const missing = sharedCssEntries().filter((entry) => !css.includes(`@import '${entry}'`));
       expect(
         missing,
@@ -121,7 +121,7 @@ describe('两个 app 都告诉 Tailwind 去扫共享包', () => {
     ['桌面端', 'src/styles.css'],
   ] as const) {
     it(`${label}声明了指向 packages/ui 的 @source`, () => {
-      const css = sourceEndingWith(suffix)!;
+      const css = sourceEndingWith(suffix)! + (suffix === './styles.css' ? sourceEndingWith('src/styles.css')! : '');
       expect(
         css.includes("'../../../packages/ui/src'"),
         `${label}的 styles.css 没有 @source 指向 packages/ui ——\n` +
@@ -133,7 +133,7 @@ describe('两个 app 都告诉 Tailwind 去扫共享包', () => {
 });
 
 /**
- * 第三个守卫：**弹窗必须有显式宽度**。
+ * 第三个守卫：**弹窗的 body 必须有独立于视口的显式尺寸**。
  *
  * `.vault-shell` 上有 `container-type: inline-size`，而 inline-size 容器
  * **算宽度时假装自己没有内容**。浏览器弹窗恰恰是按内容撑开的 ——
@@ -144,8 +144,9 @@ describe('两个 app 都告诉 Tailwind 去扫共享包', () => {
  * 所以「弹窗撑不开」这件事在仪器里根本不出现。
  * 我是靠用户发来的截图才知道的。
  *
- * 所以这条守卫不测渲染，只测**这两件事必须同时成立**：
- * 外壳是 inline-size 容器 ⟹ 弹窗根元素有显式的宽度。
+ * 只检查 CSS 任意位置存在 width 仍然不够：Firefox 的标准模式量 body，
+ * 而 html 的 max-width: 100vw 会依赖尚未确定的弹窗视口，结果仍然塌缩。
+ * 这里守住声明约束；真实工具栏的尺寸由 scripts/toolbar-popup-smoke.ts 验收。
  */
 describe('弹窗外壳的尺寸约束', () => {
   it('⚠️ 外壳本身**不是** inline-size 容器', () => {
@@ -170,17 +171,15 @@ describe('弹窗外壳的尺寸约束', () => {
     expect(content).toContain('container-name: vault');
   });
 
-  it('弹窗根元素声明了显式宽度', () => {
-    const tsx = sourceEndingWith('popup/Popup.tsx')!;
-    const root = tsx.match(/<div className="screen-in vault-shell[^"]*"/)?.[0] ?? '';
-    expect(root, '没找到弹窗根元素 —— 选择器变了就要一起改').not.toBe('');
-    expect(
-      /w-\[\d+px\]/.test(root),
-      '弹窗根元素没有显式宽度。弹窗是个**稳定的窗口**：切分类、进详情、' +
-        '出错提示进出，都不该让它忽宽忽窄 —— 而长度不一的列表内容会让' +
-        '「按内容撑开」每次都给出不同的宽度。加一个 `w-[440px]`。\n' +
-        '根元素：' + root,
-    ).toBe(true);
+  it('弹窗由 body 声明尺寸，不依赖浏览器尚未确定的视口大小', () => {
+    const css = sourceEndingWith('./styles.css')!;
+    const rules = css.replace(/\/\*[\s\S]*?\*\//g, '');
+    const body = [...rules.matchAll(/(?:^|\n)body\s*\{([^}]*)\}/g)].map((m) => m[1]).join('\n');
+    expect(css).toContain("@import '../src/styles.css'");
+    // Firefox measures body in standards mode. A fixed-size tab hides errors here.
+    expect(body).toMatch(/(?:^|[;\s])width:\s*440px/);
+    expect(body).toMatch(/(?:^|[;\s])height:\s*600px/);
+    expect(rules).not.toMatch(/(?:max-)?(?:width|height):[^;}]*(?:vw|vh)/);
   });
 });
 
@@ -212,13 +211,12 @@ describe('弹窗外壳的尺寸约束', () => {
  */
 describe('抽屉必须有一个够得着的开关', () => {
   it('这两份文件确实读到了（否则下面是空转的）', () => {
-    expect(sourceEndingWith('popup/Popup.tsx')).toBeTypeOf('string');
+    expect(sourceEndingWith('popup/main.tsx')).toContain("from '../../src/App'");
     expect(sourceEndingWith('screens/VaultView.tsx')).toBeTypeOf('string');
   });
 
   for (const [label, suffix] of [
-    ['扩展端', 'popup/Popup.tsx'],
-    ['桌面端', 'screens/VaultView.tsx'],
+    ['共用 PC 页面', 'screens/VaultView.tsx'],
   ] as const) {
     it(`${label}渲染抽屉的同时渲染了开关`, () => {
       const tsx = sourceEndingWith(suffix)!;

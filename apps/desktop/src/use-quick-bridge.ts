@@ -40,36 +40,53 @@ function summarise(i: VaultItem): QuickItem {
   };
 }
 
-export function useQuickBridge(client: VaultClient): void {
+export function useQuickBridge(source: VaultClient | (() => VaultClient), subscribeActive?: (listener: () => void) => () => void): void {
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
+    const getClient = typeof source === 'function' ? source : () => source;
+    let disposed = false;
+    let selection = 0;
+    let query = { query: '', seq: 0 };
+    const rememberUnlisten = (unlisten: () => void) => {
+      if (disposed) unlisten(); else unlisteners.push(unlisten);
+    };
 
-    // ── 面板要搜索结果 ──
-    void listen<{ query: string; seq: number }>('coffer:query', (e) => {
-      const session = client.getSession();
+    function sendResults() {
+      const session = getClient().getSession();
       const locked = !session.isUnlocked();
 
-      const items = locked ? [] : searchItems(session.items, session.folders, e.payload.query)
+      const items = locked ? [] : searchItems(session.items, session.folders, query.query)
         .map((h) => h.item)
         .slice(0, MAX_RESULTS);
 
       void emitTo(QUICK_WINDOW, 'coffer:results', {
-        seq: e.payload.seq,
+        seq: query.seq,
         locked,
         items: items.map(summarise),
         serverUrl: session.account?.serverUrl ?? null,
       });
-    }).then((un) => unlisteners.push(un));
+    }
+    if (subscribeActive) unlisteners.push(subscribeActive(() => { selection++; sendResults(); }));
+
+    // ── 面板要搜索结果 ──
+    void listen<{ query: string; seq: number }>('coffer:query', (e) => {
+      query = e.payload; sendResults();
+    }).then(rememberUnlisten);
 
     // ── 面板要执行动作 ──
     void listen<{ itemId: string; action: QuickAction }>('coffer:action', (e) => {
       void (async () => {
         const reply = async (ok: boolean, message: string): Promise<void> => {
-          await emitTo(QUICK_WINDOW, 'coffer-action-result', { ok, message });
+          await emitTo(QUICK_WINDOW, 'coffer:action-result', { ok, message });
         };
 
+        const client = getClient();
         const session = client.getSession();
         if (!session.isUnlocked()) { await reply(false, '保险库已锁定'); return; }
+        const key = session.getKey();
+        const version = selection;
+        const stillSelected = () => !disposed && version === selection && getClient() === client
+          && session.isUnlocked() && session.getKey() === key;
 
         const item = session.items.find((i) => i.id === e.payload.itemId);
         if (!item?.login) { await reply(false, '这条记录没有可复制的内容'); return; }
@@ -90,6 +107,7 @@ export function useQuickBridge(client: VaultClient): void {
             }
             case 'copy-totp': {
               const code = await totpCode(item);
+              if (!stillSelected()) { await reply(false, '账户已切换或保险库已锁定'); return; }
               if (code === null) { await reply(false, '这条记录没有验证码'); return; }
               await copyWithAutoClear(code.code);
               await reply(true, '验证码已复制');
@@ -102,8 +120,8 @@ export function useQuickBridge(client: VaultClient): void {
           await reply(false, err instanceof Error ? err.message : '操作失败');
         }
       })();
-    }).then((un) => unlisteners.push(un));
+    }).then(rememberUnlisten);
 
-    return () => { for (const un of unlisteners) un(); };
-  }, [client]);
+    return () => { disposed = true; for (const un of unlisteners) un(); };
+  }, [source, subscribeActive]);
 }

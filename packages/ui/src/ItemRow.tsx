@@ -77,7 +77,7 @@ export function ItemRow({
           </span>
         )}
       </span>
-      {favorite && <IconStar size={13} filled className="mt-1.5 shrink-0 text-[var(--caution)]" />}
+      {favorite && <IconStar size={13} filled className="mt-1.5 shrink-0 text-[var(--favorite)]" />}
       {trailing}
     </button>
   );

@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { searchItems, totpCode, hasTotp, summaryOf, sortItems, SORT_BY, SORT_LABEL, type SortBy, type VaultItem, type VaultFolder, type Attachment } from '@coffer/vault';
-import type { VaultClient, IconStore } from '@coffer/vault';
-import { saveFile } from '../save';
+import { ProfileAccountMenu } from '../components/ProfileAccountMenu';
+import { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
+import { SORT_BY, SORT_LABEL, type SortBy, type UserProfile, type VaultItem, type VaultFolder } from '@coffer/vault';
+import type { IconStore } from '@coffer/vault';
+import type { ApplicationClient, ItemDetailData, SiteContext, SecretRef } from '../application/types';
 /* `IS_DESKTOP` 是**编译期常量**（`__PLATFORM__`），打包时被替换成字面量 ——
    于是移动端的产物里根本不包含 `AutotypeAction` 那一段，而不只是「不执行」。
    见 packages/ui/src/platform.ts。 */
@@ -11,51 +12,41 @@ import { ItemIcon } from '@coffer/ui';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';
 import { ImportScreen } from './Import';
+import { visibleVaultItems, type VaultCategory as Category } from './vault-presentation';
 
 import { Settings } from './Settings';
 import { Generator } from './Generator';
-import { FloatingPanel } from '@coffer/ui';
+import { FloatingPanel, useRetainedPresence } from '@coffer/ui';
 
 import { useToast } from '../components/Toast';
 import {
-  IconAlert, IconDice, IconFolder, IconGear, IconImport,
-  IconItems, IconKeyboard, IconLock, IconMore, IconPencil, IconPlus,
+  IconAlert, IconArrowLeft, IconDice, IconFolder, IconImport,
+  IconIdentity, IconItems, IconKeyboard, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  IDENTITY_LABEL, ItemEditor, ItemRow, NavDrawer, NavTrigger, SecretField, Section, iconPropsOf,
+  IDENTITY_LABEL, ItemEditor, ItemRow, NavDrawer, NavTrigger, SecretField, Section,
   TYPE_LABEL, TypeIcon, countByType,
-  scheduleClipboardClear, typeDestinations,
+  scheduleClipboardClear, typeDestinations, type ItemSummary,
 } from '@coffer/ui';
 
 interface Props {
-  client: VaultClient;
+  client: ApplicationClient;
   onLock: () => void;
 }
 
-type Category =
-  | { kind: 'all' }
-  | { kind: 'favorites' }
-  | { kind: 'folder'; id: string }
-  /*
-   * 按**条目类型**过滤（登录 / 信用卡 / 安全笔记 …）。
-   *
-   * 和「文件夹」是两个维度：文件夹是用户自己划的，类型是数据本身的属性。
-   * 它们回答的是不同的问题 ——「我把它放哪了」 vs 「这是什么东西」。
-   */
-  | { kind: 'type'; type: string }
-  | { kind: 'security' }
-  | { kind: 'import' };
-
-type Mode = { kind: 'browse' } | { kind: 'edit'; item: VaultItem } | { kind: 'new' };
+type Mode = { kind: 'browse' } | { kind: 'loading' } | { kind: 'edit'; item: VaultItem } | { kind: 'new' };
 
 export function VaultView({ client, onLock }: Props) {
-  const session = client.getSession();
+  const subscribe = useCallback((listener: () => void) => client.subscribe(listener), [client]);
+  const getSnapshot = useCallback(() => client.getSnapshot(), [client]);
+  const session = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
   const toast = useToast();
   const [query, setQuery] = useState('');
   const [category, setCategory] = useState<Category>({ kind: 'all' });
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [mode, setMode] = useState<Mode>({ kind: 'browse' });
-  const [confirmDelete, setConfirmDelete] = useState<VaultItem | null>(null);
-  const [bump, setBump] = useState(0); // 本地写入后强制重渲染 —— session 不是响应式的
+  const [confirmDelete, setConfirmDelete] = useState<ItemSummary | null>(null);
+  const editRequest = useRef(0);
+  useEffect(() => () => { editRequest.current++; }, []);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [generatorOpen, setGeneratorOpen] = useState(false);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -102,7 +93,6 @@ export function VaultView({ client, onLock }: Props) {
     setFolderError(null);
     try {
       await op();
-      setBump((n) => n + 1);
     } catch (e) {
       setFolderError(e instanceof Error ? e.message : '文件夹操作失败');
     }
@@ -110,6 +100,63 @@ export function VaultView({ client, onLock }: Props) {
 
   const items = session.items;
   const folders = session.folders;
+  const [site, setSite] = useState<SiteContext | null>(null);
+  const [siteError, setSiteError] = useState<string | null>(null);
+  const [contextAttempt, setContextAttempt] = useState(0);
+  useEffect(() => {
+    const browserActions = client.browser;
+    if (!browserActions) return;
+    let alive = true;
+    let request = 0;
+    const refresh = async () => {
+      const current = ++request;
+      try {
+        const context = await browserActions.context();
+        if (alive && current === request) { setSite(context); setSiteError(null); }
+      } catch (e) {
+        if (alive && current === request) { setSite(null); setSiteError(e instanceof Error ? e.message : '无法读取当前页面'); }
+      }
+    };
+    void refresh();
+    window.addEventListener('focus', refresh);
+    return () => { alive = false; window.removeEventListener('focus', refresh); };
+  }, [client, session.revision, contextAttempt]);
+
+  const [search, setSearch] = useState<{ query: string; revision: number; items: ItemSummary[] } | null>(null);
+  const [searchError, setSearchError] = useState<string | null>(null);
+  const [searchAttempt, setSearchAttempt] = useState(0);
+  const normalizedQuery = query.trim();
+  useEffect(() => {
+    let alive = true;
+    setSearchError(null);
+    if (!normalizedQuery) { setSearch(null); return; }
+    const timer = setTimeout(() => {
+      void client.search(normalizedQuery).then((found) => {
+        if (alive) setSearch({ query: normalizedQuery, revision: session.revision, items: found });
+      }).catch((e: unknown) => {
+        if (alive) setSearchError(e instanceof Error ? e.message : '搜索失败');
+      });
+    }, 120);
+    return () => { alive = false; clearTimeout(timer); };
+  }, [client, normalizedQuery, session.revision, searchAttempt]);
+  const searchReady = search?.query === normalizedQuery && search.revision === session.revision;
+  const searching = Boolean(normalizedQuery) && !searchReady && !searchError;
+  const searchItems = normalizedQuery ? searchReady ? search.items : [] : items;
+
+  function closeEditor(): void { editRequest.current++; setMode({ kind: 'browse' }); }
+  async function edit(id: string): Promise<void> {
+    const current = ++editRequest.current;
+    setMode({ kind: 'loading' });
+    try {
+      const draft = await client.getDraft(id);
+      if (current === editRequest.current && client.getSnapshot().status === 'unlocked') setMode({ kind: 'edit', item: draft });
+    } catch (e) {
+      if (current !== editRequest.current) return;
+      setMode({ kind: 'browse' });
+      toast.show({ tone: 'danger', message: e instanceof Error ? e.message : '无法编辑条目' });
+    }
+  }
+
 
   /*
    * 每个类别有多少条。
@@ -134,25 +181,40 @@ export function VaultView({ client, onLock }: Props) {
     }));
   }, [items]);
 
-  const filtered = useMemo(() => {
-    let pool = items;
-    if (category.kind === 'favorites') pool = pool.filter((i) => i.favorite);
-    else if (category.kind === 'folder') pool = pool.filter((i) => i.folderId === category.id);
-    else if (category.kind === 'type') pool = pool.filter((i) => i.type === category.type);
-    // 排序放在**搜索之后** —— 搜索结果也该是有序的，
-    // 而且这样只需要排命中的那几条，不是全部
-    return sortItems(searchItems(pool, folders, query).map((h) => h.item), sortBy);
-  }, [items, folders, query, category, sortBy]);
+  const filtered = useMemo(
+    () => visibleVaultItems(searchItems, category, sortBy, site?.matchedIds),
+    [searchItems, category, sortBy, site],
+  );
+  const matchedCount = useMemo(() => {
+    const matches = new Set(site?.matchedIds);
+    return filtered.filter((item) => matches.has(item.id)).length;
+  }, [filtered, site]);
 
   const selected = filtered.find((i) => i.id === selectedId) ?? null;
-
-  // 每 30 秒重新算一次验证码 —— 只在真的显示了验证码时才跑
-  const [, forceTick] = useState(0);
+  const detailPresence = useRetainedPresence(selected);
+  const contentRef = useRef<HTMLDivElement>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  const [narrow, setNarrow] = useState(false);
+  const fullWidth = category.kind === 'security' || category.kind === 'import';
   useEffect(() => {
-    if (!selected || !hasTotp(selected)) return;
-    const id = setInterval(() => forceTick((n) => n + 1), 1000);
-    return () => clearInterval(id);
-  }, [selected]);
+    const content = contentRef.current;
+    if (!content) return;
+    const observer = new ResizeObserver(([entry]) => {
+      if (entry) setNarrow(entry.contentRect.width < 620);
+    });
+    observer.observe(content);
+    return () => observer.disconnect();
+  }, [fullWidth]);
+  const shownSelected = selected ?? (narrow ? detailPresence.value : null);
+  const detailOpen = narrow && selected !== null;
+  useEffect(() => {
+    if (!detailOpen) return;
+    const opener = document.activeElement as HTMLElement | null;
+    detailRef.current?.focus({ preventScroll: true });
+    return () => {
+      if (opener?.isConnected && !opener.closest('[inert]')) opener.focus({ preventScroll: true });
+    };
+  }, [detailOpen]);
 
   /**
    * 有没有浮层压在上面。
@@ -164,6 +226,29 @@ export function VaultView({ client, onLock }: Props) {
    * 「浮层开着的时候，键盘属于浮层」是一条规则，不是每个面板一条。
    */
   const overlayOpen = settingsOpen || generatorOpen || confirmDelete !== null || mode.kind !== 'browse';
+  useEffect(() => {
+    if (!detailOpen || overlayOpen) return;
+    function onDetailKey(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        setSelectedId(null);
+      } else if (event.key === 'Tab') {
+        const panel = detailRef.current;
+        if (!panel) return;
+        const controls = Array.from(panel.querySelectorAll<HTMLElement>('button, a[href], input, select, textarea, [tabindex]'))
+          .filter((element) => element.tabIndex >= 0 && !element.matches(':disabled') && element.offsetParent !== null);
+        const first = controls[0];
+        const last = controls[controls.length - 1];
+        const active = document.activeElement;
+        if (active === panel || (!event.shiftKey && active === last) || (event.shiftKey && active === first)) {
+          event.preventDefault();
+          (event.shiftKey ? last : first)?.focus();
+        }
+      }
+    }
+    window.addEventListener('keydown', onDetailKey);
+    return () => window.removeEventListener('keydown', onDetailKey);
+  }, [detailOpen, overlayOpen]);
 
   // ⌘F 聚焦搜索；⌘L 锁定；⌘N 新建；⌘, 设置 —— 键盘优先是安全工具的基本要求
   useEffect(() => {
@@ -185,9 +270,11 @@ export function VaultView({ client, onLock }: Props) {
     <Sidebar
       folders={folders}
       category={category}
-      onSelect={(c) => { setCategory(c); setSelectedId(null); setMode({ kind: 'browse' }); }}
+      onSelect={(c) => { setCategory(c); setSelectedId(null); closeEditor(); }}
       counts={{ all: items.length, favorites: items.filter((i) => i.favorite).length }}
-      onLock={onLock}
+      profile={session.profile}
+      unlockedAccounts={session.unlockedAccounts ?? []}
+      serverUrl={session.account?.serverUrl ?? ''}
       account={session.account?.email ?? ''}
       onCreateFolder={(name) => folderOp(async () => { await client.createFolder(name); })}
       onRenameFolder={(id, name) => folderOp(async () => { await client.renameFolder(id, name); })}
@@ -197,6 +284,8 @@ export function VaultView({ client, onLock }: Props) {
         // 而用户不知道为什么
         if (category.kind === 'folder' && category.id === id) setCategory({ kind: 'all' });
       })}
+      onSwitchAccount={(account) => client.switchAccount(account)}
+      onLogout={() => client.logout()}
       onOpenSettings={() => setSettingsOpen(true)}
       syncing={session.syncing}
       typeCounts={typeCounts}
@@ -211,18 +300,16 @@ export function VaultView({ client, onLock }: Props) {
     报告讲的是「整个库的状态」，旁边杵着一个可点的列表会把注意力
     拉回单条记录，而且点哪一条都没有对应的详情可看。
   */
-  const fullWidth = category.kind === 'security' || category.kind === 'import';
-
   return (
-    <div className="screen-in vault-shell app-shell h-full" data-bump={bump}>
+    <div className="screen-in vault-shell app-shell h-full">
       {sidebar}
 
       {fullWidth ? (
         <div className="below-titlebar flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
           {category.kind === 'security' ? (
-            <SecurityReportView items={items} />
+            <SecurityReportView client={client} />
           ) : (
-            <ImportScreen client={client} onImported={() => setBump((n) => n + 1)} />
+            <ImportScreen client={client} onImported={() => {}} />
           )}
         </div>
       ) : (
@@ -231,8 +318,8 @@ export function VaultView({ client, onLock }: Props) {
           宽度由容器查询决定：宽时三栏并列，窄时详情盖住列表。
           这里不再写死 `w-[var(--list-w)]`，那是布局类的事。
         */
-        <div className="vault-content" data-detail={selected !== null}>
-          <div className="below-titlebar vault-list bg-[var(--surface-content)]">
+        <div ref={contentRef} className="vault-content" data-detail={selected !== null} data-detail-mounted={detailPresence.mounted}>
+          <div inert={detailOpen} className="below-titlebar vault-list bg-[var(--surface-content)]">
             {/* 这一条也是标题栏的一部分 —— 整条顶部带子都可以拖窗口 */}
             <div className="band" data-tauri-drag-region="deep">
               {/* 导航开关 —— 和扩展端同一条位置：顶栏最左、搜索框前面。
@@ -301,22 +388,34 @@ export function VaultView({ client, onLock }: Props) {
 </button>
             </div>
 
-            {folderError && (
+            {client.browser && <BrowserContext client={client} site={site} error={siteError}
+              onRefresh={() => setContextAttempt((n) => n + 1)}
+              onSelectSite={() => { setCategory({ kind: 'site' }); setSelectedId(null); }} />}
+
+            {(folderError || searchError) && (
               <div className="flex items-start gap-2 border-b border-[var(--border-subtle)] bg-[var(--surface-well)] px-3.5 py-2">
                 <IconAlert size={14} className="mt-0.5 shrink-0 text-[var(--risk)]" />
-                <p className="min-w-0 flex-1 text-xs text-[var(--risk)]">{folderError}</p>
-                <button onClick={() => setFolderError(null)} className="btn btn-ghost shrink-0">知道了</button>
+                <p className="min-w-0 flex-1 text-xs text-[var(--risk)]">{folderError || searchError}</p>
+                <button onClick={() => {
+                  setFolderError(null);
+                  if (searchError) { setSearchError(null); setSearchAttempt((n) => n + 1); }
+                }} className="btn btn-ghost shrink-0">{searchError ? '重试' : '知道了'}</button>
               </div>
             )}
 
             <ul className="flex-1 overflow-y-auto px-2 py-2">
-              {filtered.map((item) => (
+              {filtered.map((item, index) => (
                 <li key={item.id}>
+                  {matchedCount > 0 && (index === 0 || index === matchedCount) && (
+                    <p className="px-2 pb-1 pt-2 text-xs text-[var(--ink-tertiary)]">
+                      {index === 0 ? '当前网站' : '其他条目'}
+                    </p>
+                  )}
                   <ItemRow
-                    icon={<ItemIcon {...iconPropsOf(item)} store={icons} />}
+                    icon={<SummaryIcon item={item} store={icons} />}
                     name={item.name}
                     nameFailed={item.nameFailed}
-                    summary={summaryOf(item)}
+                    summary={item.summary}
                     favorite={item.favorite}
                     selected={item.id === selectedId}
                     onClick={() => setSelectedId(item.id)}
@@ -325,7 +424,7 @@ export function VaultView({ client, onLock }: Props) {
               ))}
               {filtered.length === 0 && (
                 <li className="px-4 py-10 text-center">
-                  {query ? (
+                  {searching ? <p role="status" className="text-sm text-[var(--ink-tertiary)]">正在搜索…</p> : searchError ? null : query ? (
                     <p className="text-sm text-[var(--ink-tertiary)]">
                       没有匹配「{query}」的条目
                     </p>
@@ -368,21 +467,27 @@ export function VaultView({ client, onLock }: Props) {
             全局默认是禁止选中的（去浏览器感），这里显式放开。
             少标这一处，用户就复制不了密码，而那种缺失会被当成「功能没做」。
           */}
-          <div data-selectable className="below-titlebar vault-detail bg-[var(--surface-paper)]">
-            {selected ? (
-              <ItemDetail
-                key={selected.id}
+          <div ref={detailRef} data-selectable className="below-titlebar vault-detail bg-[var(--surface-paper)]"
+            data-state={selected ? 'open' : detailPresence.leaving ? 'closing' : 'closed'}
+            tabIndex={-1} inert={narrow && !selected} aria-hidden={narrow && !selected || undefined}
+            onAnimationEnd={(event) => {
+              if (detailPresence.leaving && event.target === event.currentTarget) detailPresence.onExited();
+            }}>
+            {shownSelected ? (
+              <SelectedDetail
+                key={`${shownSelected.id}:${session.revision}`}
                 client={client}
-                item={selected}
+                item={shownSelected}
                 icons={icons}
-                onEdit={() => setMode({ kind: 'edit', item: selected })}
-                onDelete={() => setConfirmDelete(selected)}
+                onEdit={() => { void edit(shownSelected.id); }}
+                onBack={() => setSelectedId(null)}
+                site={site}
+                onDelete={() => setConfirmDelete(shownSelected)}
                 onToggleFavorite={() => {
                   // ⚠️ 这里原来没有 catch：收藏失败会变成一个没人看见的
                   // unhandled rejection，用户看到的是「点了没反应」。
                   // 收藏按钮就在他手指底下，失败时不会有任何别的地方告诉他
-                  void client.toggleFavorite(selected.id)
-                    .then(() => setBump((n) => n + 1))
+                  void client.toggleFavorite(shownSelected.id)
                     .catch((e: unknown) => {
                       toast.show({
                         tone: 'danger',
@@ -396,38 +501,39 @@ export function VaultView({ client, onLock }: Props) {
         </div>
       )}
 
-      {confirmDelete && (
-        <DeleteDialog
+      <DeleteDialog
           item={confirmDelete}
           onCancel={() => setConfirmDelete(null)}
           onTrash={async () => {
             const target = confirmDelete;
-            setConfirmDelete(null);
+            if (!target) return;
             await client.moveToTrash(target.id);
+            setConfirmDelete(null);
             setSelectedId(null);
-            setBump((n) => n + 1);
             toast.show({ tone: 'success', message: `已把「${target.name}」移到回收站` });
           }}
           onPermanent={async () => {
             const target = confirmDelete;
-            setConfirmDelete(null);
+            if (!target) return;
             await client.deletePermanently(target.id);
+            setConfirmDelete(null);
             setSelectedId(null);
-            setBump((n) => n + 1);
             toast.show({ tone: 'neutral', message: `已永久删除「${target.name}」` });
           }}
-        />
-      )}
+      />
 
       {/*
         设置面板挂在最外层 —— 它浮在三栏之上，和删除确认是同一层的东西。
         入口在侧栏顶端（.band 的右端），和另外两栏的头部在同一条水平线上。
       */}
       <Settings
+        client={client}
         open={settingsOpen}
         account={session.account?.email ?? ''}
         serverUrl={session.account?.serverUrl ?? ''}
         onClose={() => setSettingsOpen(false)}
+        capabilities={client.capabilities}
+        onDisconnect={() => client.logout()}
       />
 
       {/*
@@ -440,23 +546,23 @@ export function VaultView({ client, onLock }: Props) {
       {/*
         新建 / 编辑同一个浮层，只是标题与初始值不同。
         **一直挂着**，靠 `open` 开合 —— 条件挂载的话，关掉的一瞬间组件就
-        没了，退场动画根本没机会播（FloatingPanel 的 usePresence 要的是
-        「还在，但 open 是 false」）。删除确认框至今还是条件挂载的，
-        所以它关得比这两个「啪」一下；那是既有行为，这次没动它。
+        没了，退场动画根本没机会播。删除确认和载入状态也保持挂载，
+        让所有关闭路径都能完成退场。
       */}
+      <FloatingPanel open={mode.kind === 'loading'} onClose={closeEditor} labelledBy="edit-loading" className="max-w-sm p-5">
+        <p id="edit-loading" role="status" className="flex items-center gap-2"><IconSpinner size={15} />正在载入编辑内容…</p>
+        <button onClick={closeEditor} className="btn btn-quiet mt-4 self-start">取消</button>
+      </FloatingPanel>
       <ItemEditor
-        /* 桌面端在进程内：文件夹从会话拿、保存直接调 client。
-           扩展端走消息（`coffer:folders` / `coffer:save-item`）—— 见共享组件 */
-        folders={client.getSession().folders}
+        folders={folders}
         onSave={(d) => client.saveItem(d)}
-        open={mode.kind !== 'browse'}
+        open={mode.kind === 'edit' || mode.kind === 'new'}
         item={mode.kind === 'edit' ? mode.item : null}
-        onCancel={() => setMode({ kind: 'browse' })}
+        onCancel={closeEditor}
         onDone={(saved) => {
-          setMode({ kind: 'browse' });
+          closeEditor();
           if (saved) {
             setSelectedId(saved.id);
-            setBump((n) => n + 1);
             // 编辑器一关，界面上就没有「存了没有」的位置了 —— 提示条的典型场景
             toast.show({ tone: 'success', message: `已保存「${saved.name}」` });
           }
@@ -477,12 +583,23 @@ export function VaultView({ client, onLock }: Props) {
  * 不可逆的那个要勾选确认之后才亮起，而且是描边的红 —— 不做成默认顺手的位置。
  */
 function DeleteDialog(props: {
-  item: VaultItem;
+  item: ItemSummary | null;
   onCancel: () => void;
-  onTrash: () => void;
-  onPermanent: () => void;
+  onTrash: () => Promise<void>;
+  onPermanent: () => Promise<void>;
 }) {
   const [ack, setAck] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const retained = useRetainedPresence(props.item);
+  useEffect(() => {
+    if (props.item) { setAck(false); setBusy(false); setError(null); }
+  }, [props.item]);
+  async function run(action: () => Promise<void>): Promise<void> {
+    if (busy) return;
+    setBusy(true); setError(null);
+    try { await action(); } catch (e) { setError(e instanceof Error ? e.message : '删除失败'); setBusy(false); }
+  }
   /*
     走和设置面板同一个浮层外壳。
 
@@ -491,8 +608,8 @@ function DeleteDialog(props: {
     现在有了第二个浮层，两套各漏一点的交互只会让人怀疑哪一套才是对的。
   */
   return (
-    <FloatingPanel open onClose={props.onCancel} labelledBy="delete-title" className="max-w-sm p-5">
-      <h3 id="delete-title" className="text-lg font-semibold">删除「{props.item.name}」？</h3>
+    <FloatingPanel open={props.item !== null} onClose={() => { if (!busy) props.onCancel(); }} labelledBy="delete-title" className="max-w-sm p-5">
+      <h3 id="delete-title" className="text-lg font-semibold">删除「{retained.value?.name}」？</h3>
       <p className="mt-1.5 text-sm text-[var(--ink-secondary)]">
         移到回收站后仍可恢复。永久删除则<strong className="font-medium text-[var(--risk)]">无法撤销</strong>。
       </p>
@@ -502,12 +619,13 @@ function DeleteDialog(props: {
         我知道永久删除无法恢复
       </label>
 
+      {error && <p role="alert" className="mt-3 text-sm text-[var(--risk)]">{error}</p>}
       <div className="mt-4 flex flex-col gap-2">
-        <button onClick={props.onTrash} className="btn btn-primary w-full py-2.5">移到回收站</button>
-        <button onClick={props.onPermanent} disabled={!ack} className="btn btn-danger w-full py-2.5">
+        <button disabled={busy} onClick={() => { void run(props.onTrash); }} className="btn btn-primary w-full py-2.5">移到回收站</button>
+        <button onClick={() => { void run(props.onPermanent); }} disabled={!ack || busy} className="btn btn-danger w-full py-2.5">
           永久删除
         </button>
-        <button onClick={props.onCancel} className="btn w-full py-2.5 text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]">
+        <button onClick={props.onCancel} disabled={busy} className="btn w-full py-2.5 text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]">
           取消
         </button>
       </div>
@@ -531,8 +649,12 @@ function Sidebar(props: {
   category: Category;
   onSelect: (c: Category) => void;
   counts: { all: number; favorites: number };
-  onLock: () => void;
+  onLogout: () => Promise<void>;
+  onSwitchAccount: (account: { serverUrl: string; email: string } | null) => Promise<void>;
   account: string;
+  profile: UserProfile | null;
+  unlockedAccounts?: readonly string[];
+  serverUrl: string;
   onOpenSettings: () => void;
   /** 生成器是浮层，不是一屏 —— 侧栏只负责把它叫出来，选中态跟着它的开合走 */
   generatorOpen: boolean;
@@ -562,6 +684,7 @@ function Sidebar(props: {
   function onNavSelect(key: string): void {
     if (key.startsWith('type:')) props.onSelect({ kind: 'type', type: key.slice('type:'.length) });
     else if (key.startsWith('folder:')) props.onSelect({ kind: 'folder', id: key.slice('folder:'.length) });
+    else if (key === 'profile') props.onOpenSettings();
     else if (key === 'generator') props.onOpenGenerator();
     else props.onSelect({ kind: key as 'all' | 'favorites' | 'security' | 'import' });
   }
@@ -586,33 +709,22 @@ function Sidebar(props: {
     <NavDrawer
       className="app-sidebar below-titlebar"
       label="保险库导航"
-      brand={
-        <>
-          <span className="grid h-[22px] w-[22px] shrink-0 place-items-center rounded-[7px] bg-[var(--accent)] text-[var(--accent-ink)]">
-            <IconLock size={13} />
-          </span>
-          <span className="nav-brand-text min-w-0 flex-1 truncate text-lg font-semibold tracking-[-0.01em]">
-            Coffer
-          </span>
-        </>
-      }
-      brandAction={
-        /* 设置入口在顶栏右端。**不放进底部账户区**：那里是「你是谁 / 离开」，
-           设置是「这个应用怎么运作」，和账户不是一类东西 */
-        <button
-          onClick={props.onOpenSettings}
-          title="设置  ⌘,"
-          aria-label="设置"
-          className="shrink-0 rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
-        >
-          <IconGear size={15} />
-        </button>
-      }
+      brand={<ProfileAccountMenu
+        account={{ email: props.account, serverUrl: props.serverUrl, profile: props.profile }}
+        syncing={props.syncing}
+        unlockedAccounts={props.unlockedAccounts ?? []}
+        onProfile={props.onOpenSettings}
+        onSettings={props.onOpenSettings}
+        onLogout={props.onLogout}
+        onSwitch={props.onSwitchAccount}
+      />}
       current={currentKey}
       onSelect={onNavSelect}
       groups={[
+        { key: 'profile', entries: [{ key: 'profile', label: '资料', icon: <IconIdentity size={16} /> }] },
         {
           key: 'main',
+          title: '',
           entries: [
             { key: 'all', label: '全部', icon: <IconItems size={16} />, count: props.counts.all },
             { key: 'favorites', label: '收藏', icon: <IconStar size={16} />, count: props.counts.favorites },
@@ -738,39 +850,7 @@ function Sidebar(props: {
             }]
           : []),
       ]}
-      footer={
-        <>
-          <div className="nav-account mb-1 flex items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5">
-            <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-2xs font-semibold text-[var(--accent)]">
-              {props.account.slice(0, 1).toUpperCase() || '?'}
-            </span>
-            <span className="nav-label truncate text-xs text-[var(--ink-secondary)]" title={props.account}>
-              {props.account}
-            </span>
-            {/*
-              后台同步中的转圈。
-              ⚠️ 放在账户**后面**而不是盖住整个列表：列表此时是**可用的**
-              （缓存里那一版已经在显示），只是还在更新。盖一层遮罩会
-              把「可以用，正在更新」说成「不能用，等着」—— 那是两回事。
-            */}
-            {props.syncing && (
-              <IconSpinner
-                size={12}
-                className="shrink-0 text-[var(--ink-tertiary)]"
-                aria-label="正在同步"
-              />
-            )}
-          </div>
-          <button
-            onClick={props.onLock}
-            className="nav-item flex w-full items-center gap-2 rounded-[var(--radius-sm)] px-2 py-1.5 text-left text-sm text-[var(--ink-secondary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
-          >
-            <IconLock size={15} />
-            <span className="nav-label flex-1">锁定</span>
-            <kbd className="nav-kbd text-2xs text-[var(--ink-secondary)]">⌘L</kbd>
-          </button>
-        </>
-      }
+
     />
   );
 }
@@ -881,61 +961,173 @@ function EmptyDetail({ hasItems }: { hasItems: boolean }) {
   );
 }
 
-function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }: {
-  /** 图标缓存 —— 详情栏头部复用列表那套图标，不是再画一个类型图标 */
+function BrowserContext({ client, site, error, onRefresh, onSelectSite }: {
+  client: ApplicationClient;
+  site: SiteContext | null;
+  error: string | null;
+  onRefresh: () => void;
+  onSelectSite: () => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [actionError, setActionError] = useState<string | null>(null);
+  async function capture(save: boolean): Promise<void> {
+    if (!client.browser || site?.tabId == null || busy) return;
+    setBusy(true); setActionError(null);
+    try {
+      if (save) await client.browser.saveCapture(site.tabId);
+      else await client.browser.dismissCapture(site.tabId);
+      onRefresh();
+    } catch (e) { setActionError(e instanceof Error ? e.message : '保存提示处理失败'); }
+    finally { setBusy(false); }
+  }
+  if (!site && !error) return null;
+  return <div className="border-b border-[var(--border-subtle)] px-3.5 py-2.5">
+    {site?.url && <button onClick={onSelectSite} className="flex w-full items-center gap-2 text-left text-xs text-[var(--ink-secondary)]">
+      <span className="min-w-0 flex-1 truncate" title={site.url}>当前网站 · {siteHost(site.url)}</span>
+      <span className="shrink-0 text-[var(--accent)]">{site.matchedIds.length} 条匹配</span>
+    </button>}
+    {site?.pending && <div className="mt-2.5 rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-3">
+      <p className="text-sm">{site.pending.action === 'update' ? '更新已保存的登录？' : '保存这次登录？'}</p>
+      <p className="mt-1 truncate text-xs text-[var(--ink-secondary)]">{siteHost(site.pending.url)}{site.pending.username ? ` · ${site.pending.username}` : ''}</p>
+      <div className="mt-2 flex gap-2">
+        <button disabled={busy} onClick={() => { void capture(true); }} className="btn btn-primary">{busy ? '处理中…' : site.pending.action === 'update' ? '更新' : '保存'}</button>
+        <button disabled={busy} onClick={() => { void capture(false); }} className="btn btn-quiet">忽略</button>
+      </div>
+    </div>}
+    {(error || actionError) && <div role="alert" className="mt-2 text-xs text-[var(--risk)]"><p>{error || actionError}</p>
+      {error && <button className="btn btn-ghost mt-1" onClick={onRefresh}>重试</button>}</div>}
+  </div>;
+}
+
+function siteHost(url: string): string {
+  try { return new URL(url).host; } catch { return url; }
+}
+
+function BrowserFill({ client, itemId, tabId }: { client: ApplicationClient; itemId: string; tabId: number }) {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  async function fill(): Promise<void> {
+    if (!client.browser || busy) return;
+    setBusy(true); setResult(null);
+    try {
+      await client.browser.fill(itemId, tabId);
+      setResult({ ok: true, message: '已填充到当前页面' });
+    } catch (e) { setResult({ ok: false, message: e instanceof Error ? e.message : '填充失败' }); }
+    finally { setBusy(false); }
+  }
+  return <div className="mb-5">
+    <button onClick={() => { void fill(); }} disabled={busy} className="btn btn-primary gap-2"><IconKeyboard size={14} />{busy ? '正在填充…' : '填充到当前页面'}</button>
+    {result && <p role={result.ok ? 'status' : 'alert'} className={`mt-2 text-xs ${result.ok ? 'text-[var(--safe)]' : 'text-[var(--risk)]'}`}>{result.message}</p>}
+  </div>;
+}
+
+function SummaryIcon({ item, store, size }: { item: ItemSummary; store: IconStore | null; size?: number }) {
+  return <ItemIcon type={item.type} iconDomain={item.iconDomain} text={item.avatarText} hue={item.avatarHue}
+    store={store} {...(size === undefined ? {} : { size })} />;
+}
+
+interface DetailProps {
   icons: IconStore | null;
-  client: VaultClient;
-  item: VaultItem;
+  client: ApplicationClient;
+  item: ItemDetailData;
   onEdit: () => void;
   onDelete: () => void;
   onToggleFavorite: () => void;
-}) {
-  const [totp, setTotp] = useState<{ code: string; remaining: number; period: number } | null>(null);
+  onBack: () => void;
+  site?: SiteContext | null;
+}
 
-  const refreshTotp = useCallback(() => {
-    if (!hasTotp(item)) { setTotp(null); return; }
-    totpCode(item).then(setTotp).catch(() => setTotp(null));
-  }, [item]);
+function DetailBack({ onBack }: { onBack: () => void }) {
+  return <button onClick={onBack} aria-label="返回列表" className="detail-back btn btn-ghost shrink-0 p-1.5"><IconArrowLeft size={17} /></button>;
+}
 
+function SelectedDetail({ item, ...props }: Omit<DetailProps, 'item'> & { item: ItemSummary }) {
+  const [detail, setDetail] = useState<ItemDetailData | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [retry, setRetry] = useState(0);
   useEffect(() => {
-    refreshTotp();
-    const id = setInterval(refreshTotp, 1000);
-    return () => clearInterval(id);
-  }, [refreshTotp]);
+    let alive = true;
+    setError(null);
+    void props.client.getItem(item.id).then((value) => {
+      if (alive) setDetail(value);
+    }).catch((e: unknown) => {
+      if (alive) setError(e instanceof Error ? e.message : '无法载入条目');
+    });
+    return () => { alive = false; };
+  }, [props.client, item.id, retry]);
+  if (detail) return <ItemDetail {...props} item={detail} />;
+  return <div className="p-4">
+    <DetailBack onBack={props.onBack} />
+    {error ? <div role="alert" className="p-4 text-sm text-[var(--risk)]"><p>{error}</p>
+      <button className="btn btn-quiet mt-3" onClick={() => setRetry((n) => n + 1)}>重试</button></div>
+      : <p role="status" className="flex items-center gap-2 p-4 text-sm text-[var(--ink-secondary)]"><IconSpinner size={15} />正在载入…</p>}
+  </div>;
+}
+
+function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, onBack, site }: DetailProps) {
+  const summary = item.summary;
+  const [totp, setTotp] = useState<{ code: string; remaining: number; period: number } | null>(null);
+  const [totpError, setTotpError] = useState<string | null>(null);
+  const [secretError, setSecretError] = useState<string | null>(null);
+  useEffect(() => {
+    if (!item.login?.hasTotp) return;
+    let alive = true;
+    let timer: ReturnType<typeof setTimeout>;
+    async function refresh(): Promise<void> {
+      try {
+        const value = await client.totp(summary.id);
+        if (alive) { setTotp(value); setTotpError(null); }
+      } catch (e) {
+        if (alive) { setTotp(null); setTotpError(e instanceof Error ? e.message : '无法获取验证码'); }
+      } finally {
+        if (alive) timer = setTimeout(() => { void refresh(); }, 1000);
+      }
+    }
+    void refresh();
+    return () => { alive = false; clearTimeout(timer); };
+  }, [client, summary.id, item.login?.hasTotp]);
+
+  function secret(label: string, field: SecretRef, key?: number) {
+    return <SecretField key={key ?? label} label={label} value="••••••••" masked
+      getValue={() => client.reveal(summary.id, field)}
+      revealValue={() => client.reveal(summary.id, field)}
+      onCopyError={(e) => setSecretError(e instanceof Error ? e.message : '无法读取字段')} />;
+  }
 
   const uris = item.login?.uris ?? [];
 
   return (
     <article className="screen-in mx-auto w-full px-8 pb-12" style={{ maxWidth: 'calc(var(--detail-w) + 64px)' }}>
       {/* 头部跟着滚 —— 长条目滚到下面时，用户仍然看得到自己在看哪一条 */}
-      <header className="sticky top-0 z-10 -mx-8 flex items-start gap-3.5 border-b border-[var(--border-subtle)] bg-[var(--surface-paper)] px-8 pb-4 pt-5">
+      <header className="sticky top-0 z-10 -mx-8 flex flex-wrap items-start gap-3.5 border-b border-[var(--border-subtle)] bg-[var(--surface-paper)] px-8 pb-4 pt-5">
         {/*
           ⚠️ 和列表用**同一个** ItemIcon，不是再画一个类型图标。
           之前这里是按类型上色的旧写法，于是同一条记录在列表里显示站点图标、
           在详情栏里却是一把钥匙 —— 明明是同一条。
         */}
+        <DetailBack onBack={onBack} />
         <span className="mt-0.5">
-          <ItemIcon {...iconPropsOf(item)} store={icons} size={36} />
+          <SummaryIcon item={summary} store={icons} size={36} />
         </span>
         <div className="min-w-0 flex-1">
           <h2 className={`truncate text-xl font-semibold tracking-[-0.015em] ${
-            item.nameFailed ? 'italic text-[var(--ink-tertiary)]' : ''
+            summary.nameFailed ? 'italic text-[var(--ink-tertiary)]' : ''
           }`}>
-            {item.nameFailed ? '无法解密' : item.name}
+            {summary.nameFailed ? '无法解密' : summary.name}
           </h2>
           <p className="mt-0.5 text-xs text-[var(--ink-tertiary)]">
-            {TYPE_LABEL[item.type] ?? '未知类型'}
+            {TYPE_LABEL[summary.type] ?? '未知类型'}
             {item.rawType > 5 && '（此类型较新，暂只支持查看）'}
           </p>
         </div>
 
         <div className="flex shrink-0 items-center gap-1 pt-0.5">
-          <button onClick={onToggleFavorite} title={item.favorite ? '取消收藏' : '加入收藏'}
-            aria-label={item.favorite ? '取消收藏' : '加入收藏'}
+          <button onClick={onToggleFavorite} title={summary.favorite ? '取消收藏' : '加入收藏'}
+            aria-label={summary.favorite ? '取消收藏' : '加入收藏'}
             className={`rounded-[var(--radius-sm)] p-1.5 transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
-              item.favorite ? 'text-[var(--caution)]' : 'text-[var(--ink-tertiary)]'
+              summary.favorite ? 'text-[var(--caution)]' : 'text-[var(--ink-tertiary)]'
             }`}>
-            <IconStar size={16} filled={item.favorite} />
+            <IconStar size={16} filled={summary.favorite} />
           </button>
           {/* 未知类型不提供编辑 —— 保存会把它降级成别的类型，等于破坏数据 */}
           {item.rawType >= 1 && item.rawType <= 5 && (
@@ -952,11 +1144,14 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
       </header>
 
       <div className="pt-6">
+        {secretError && <p role="alert" className="mb-3 text-sm text-[var(--risk)]">{secretError}</p>}
+        {client.browser && site?.tabId != null && item.login && <BrowserFill client={client} itemId={summary.id} tabId={site.tabId} />}
         {item.login && (
           <Section title="登录">
             {item.login.username !== null && <SecretField label="用户名" value={item.login.username} />}
-            {item.login.password !== null && <SecretField label="密码" value={item.login.password} masked />}
+            {item.login.hasPassword && secret('密码', { kind: 'password' })}
             {totp && <TotpRow code={totp.code} remaining={totp.remaining} period={totp.period} />}
+            {totpError && <p role="alert" className="py-2 text-xs text-[var(--risk)]">{totpError}</p>}
             {/*
               原生窗口自动输入（spec §7.4）。放在登录字段这一组的末尾 ——
               它是「把凭据送出去」的动作，紧跟在被送出去的东西后面最合理。
@@ -966,9 +1161,9 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
               沙箱不允许，能做的是系统级自动填充（App Extension），
               那是**另一套东西**，不是这一套的移植。见 docs 里移动端那一节。
             */}
-            {IS_DESKTOP && (
+            {IS_DESKTOP && client.capabilities.native && item.login.hasPassword && (
               <div className="border-t border-[var(--border-subtle)] py-3 first:border-0">
-                <AutotypeAction username={item.login.username} password={item.login.password} />
+                <AutotypeAction username={item.login.username} getPassword={() => client.reveal(summary.id, { kind: 'password' })} />
               </div>
             )}
           </Section>
@@ -986,9 +1181,9 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
           <Section title="信用卡">
             {item.card.cardholderName && <SecretField label="持卡人" value={item.card.cardholderName} />}
             {item.card.brand && <SecretField label="卡组织" value={item.card.brand} />}
-            {item.card.number && <SecretField label="卡号" value={item.card.number} masked />}
+            {item.card.hasNumber && secret('卡号', { kind: 'cardNumber' })}
             {item.card.expMonth && <SecretField label="有效期" value={`${item.card.expMonth}/${item.card.expYear ?? ''}`} />}
-            {item.card.code && <SecretField label="安全码" value={item.card.code} masked />}
+            {item.card.hasCode && secret('安全码', { kind: 'cardCode' })}
           </Section>
         )}
 
@@ -1014,14 +1209,14 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
           <Section title="SSH 密钥">
             {item.sshKey.publicKey && <SecretField label="公钥" value={item.sshKey.publicKey} />}
             {item.sshKey.fingerprint && <SecretField label="指纹" value={item.sshKey.fingerprint} />}
-            {item.sshKey.privateKey && <SecretField label="私钥" value={item.sshKey.privateKey} masked />}
+            {item.sshKey.hasPrivateKey && secret('私钥', { kind: 'privateKey' })}
           </Section>
         )}
 
         {item.attachments.length > 0 && (
           <Section title="附件">
             {item.attachments.map((a) => (
-              <AttachmentRow key={a.id} client={client} item={item} attachment={a} />
+              <AttachmentRow key={a.id} client={client} itemId={summary.id} attachment={a} />
             ))}
           </Section>
         )}
@@ -1029,11 +1224,12 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
         {item.customFields.length > 0 && (
           <Section title="自定义字段">
             {item.customFields.map((f, i) => (
-              <SecretField key={i} label={f.name} value={f.value} masked={f.type === 1} />
+              f.type === 1 ? secret(f.name, { kind: 'custom', index: i }, i) : <SecretField key={i} label={f.name} value={f.value ?? ''} />
             ))}
           </Section>
         )}
 
+        {item.notesFailed && <p role="alert" className="mb-3 text-sm text-[var(--risk)]">无法解密备注</p>}
         {item.notes && (
           <Section title="备注">
             <p className="whitespace-pre-wrap break-words py-2.5 text-md leading-[var(--lh-prose)]">
@@ -1045,11 +1241,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite }:
         {item.passwordHistory.length > 0 && (
           <Section title="历史密码">
             {item.passwordHistory.map((h, i) => (
-              <SecretField
-                key={i}
-                label={new Date(h.lastUsedDate).toLocaleDateString('zh-CN')}
-                value={h.password} masked
-              />
+              secret(new Date(h.lastUsedDate).toLocaleDateString('zh-CN'), { kind: 'history', index: i }, i)
             ))}
           </Section>
         )}
@@ -1137,10 +1329,10 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
  *   - 保存成功       → 告诉他存到哪了
  *   - 取不回来       → 说清楚为什么（地址过期 / 密钥不对 / 服务端上没了）
  */
-function AttachmentRow({ client, item, attachment }: {
-  client: VaultClient;
-  item: VaultItem;
-  attachment: Attachment;
+function AttachmentRow({ client, itemId, attachment }: {
+  client: ApplicationClient;
+  itemId: string;
+  attachment: ItemDetailData['attachments'][number];
 }) {
   const [state, setState] = useState<'idle' | 'busy' | 'saved' | 'failed'>('idle');
   const [note, setNote] = useState('');
@@ -1149,8 +1341,8 @@ function AttachmentRow({ client, item, attachment }: {
     setState('busy');
     setNote('');
     try {
-      const got = await client.downloadAttachment(item.id, attachment.id);
-      const saved = await saveFile(got.fileName || attachment.fileName || 'attachment', got.bytes);
+      const got = await client.downloadAttachment(itemId, attachment.id);
+      const saved = await client.saveFile(got.fileName || attachment.fileName || 'attachment', got.dataBase64);
       if (saved.path === null) {
         // 用户取消 —— 回到可以再点的状态，不说任何话
         setState('idle');
@@ -1187,7 +1379,7 @@ function AttachmentRow({ client, item, attachment }: {
 
       <button
         onClick={() => { void fetchIt(); }}
-        disabled={state === 'busy'}
+        disabled={state === 'busy' || attachment.failed || !client.capabilities.saveAttachments}
         className="btn btn-quiet shrink-0"
       >
         {state === 'busy' ? '取回中…' : state === 'saved' ? '再取一次' : '取回'}

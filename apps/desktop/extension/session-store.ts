@@ -23,11 +23,15 @@
  * 这样它能在 node 里测，也让「用的是哪个存储区」变成一个显式、可审查的选择，
  * 而不是散落在代码里的一行 `ext.storage.local`。
  */
-import { fromBase64, toBase64, type SymmetricKey } from '@coffer/crypto';
+import { fromBase64, toBase64 } from '@coffer/crypto';
 import type { AccountInfo, VaultFolder, VaultItem, VaultClientState } from '@coffer/vault';
+import { accountKey } from '../src/application/account-target';
 
 /** 存储键。带前缀，避免与其他扩展数据撞名 */
 const KEY = 'coffer.session';
+const ACCOUNT_KEY = 'coffer.account';
+const ACCOUNTS_KEY = 'coffer.sessions';
+export const SESSION_DURATION_MS = 15 * 60 * 1000;
 
 /** `ext.storage` 里用得到的那几个方法 */
 export interface StorageArea {
@@ -105,6 +109,7 @@ export type UnlockedSession = VaultClientState;
 /** 落进存储区的形状 —— 密钥是 base64 字符串，token 原样 */
 interface StoredShape extends Omit<VaultClientState, 'userKey'> {
   userKey: { encKey: string; macKey: string };
+  expiresAt: number;
 }
 
 const KEY_BYTES = 32;
@@ -157,6 +162,7 @@ function revive(raw: unknown): UnlockedSession | null {
     // ⚠️ token 读不出来**不算致命** —— 装作没登录（返回 null）比整个会话作废好：
     // 用户重新解锁一次即可，而作废会让他连密码都看不到
     token: reviveToken(raw['token']),
+    ...(typeof raw['syncVerified'] === 'boolean' ? { syncVerified: raw['syncVerified'] } : {}),
   };
 }
 
@@ -168,10 +174,50 @@ function reviveToken(raw: unknown): VaultClientState['token'] {
 }
 
 export class SessionStore {
-  constructor(private readonly area: StorageArea) {}
+  private invalidated = false;
+  private generation = 0;
+  private writes: Promise<unknown> = Promise.resolve();
+  constructor(private readonly area: StorageArea, private readonly now: () => number = Date.now) {}
+
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.writes.then(operation);
+    this.writes = result.catch(() => {});
+    return result;
+  }
+
+  /** Only a fresh authentication creates a fresh deadline. Writes preserve it. */
+  async start(session: UnlockedSession): Promise<void> {
+    const generation = this.generation;
+    await this.serialize(async () => {
+      if (generation !== this.generation) throw new Error('保险库已锁定，请重新解锁');
+      await this.write(session, this.now() + SESSION_DURATION_MS);
+      if (generation === this.generation) this.invalidated = false;
+    });
+  }
 
   async save(session: UnlockedSession): Promise<void> {
+    const generation = this.generation;
+    await this.serialize(async () => {
+      if (this.invalidated || generation !== this.generation) throw new Error('保险库已锁定，请重新解锁');
+      const existing = await this.area.get(KEY);
+      if (this.invalidated || generation !== this.generation) throw new Error('保险库已锁定，请重新解锁');
+      const raw = existing[KEY];
+      const deadline = isObject(raw) && typeof raw['expiresAt'] === 'number' && Number.isFinite(raw['expiresAt'])
+        ? raw['expiresAt'] : this.now() + SESSION_DURATION_MS;
+      if (deadline <= this.now()) {
+        this.invalidated = true;
+        this.generation++;
+        await this.removeStored({});
+        throw new Error('保险库会话已过期，请重新解锁');
+      }
+      await this.write(session, deadline);
+    });
+  }
+
+  private async write(session: UnlockedSession, expiresAt: number): Promise<void> {
+    const generation = this.generation;
     const stored: StoredShape = {
+      expiresAt,
       account: session.account,
       userKey: {
         encKey: toBase64(session.userKey.encKey),
@@ -181,26 +227,154 @@ export class SessionStore {
       folders: session.folders,
       // ⚠️ 必须一起存。少了它，恢复出来的客户端读得了、**写不了**
       token: session.token,
+      ...(session.syncVerified === undefined ? {} : { syncVerified: session.syncVerified }),
     };
-    await this.area.set({ [KEY]: stored });
+    const got = await this.area.get(ACCOUNTS_KEY);
+    if (generation !== this.generation) throw new Error('账户已切换，请重试');
+    const accounts = isObject(got[ACCOUNTS_KEY]) ? { ...got[ACCOUNTS_KEY] } : {};
+    accounts[accountKey(session.account)] = stored;
+    await this.area.set({ [KEY]: stored, [ACCOUNT_KEY]: session.account, [ACCOUNTS_KEY]: accounts });
+  }
+
+  /** Switch only the selected slot. Other unlocked sessions stay in trusted memory storage. */
+  async select(account: AccountInfo | null): Promise<UnlockedSession | null> {
+    this.invalidated = true;
+    const generation = ++this.generation;
+    return this.serialize(async () => {
+      if (generation !== this.generation) throw new Error('账户选择已过期');
+      const got = await this.area.get([KEY, ACCOUNTS_KEY]);
+      if (generation !== this.generation) throw new Error('账户选择已过期');
+      const accounts = this.slots(got);
+      const key = account ? accountKey(account) : null;
+      const raw = key ? accounts[key] : undefined;
+      const restored = key && this.validSlot(raw, key) ? revive(raw) : null;
+      if (key && !restored) delete accounts[key];
+      await this.area.set({ [KEY]: restored ? raw : null, [ACCOUNT_KEY]: restored?.account ?? account, [ACCOUNTS_KEY]: accounts });
+      if (generation !== this.generation) throw new Error('账户选择已过期');
+      this.invalidated = false;
+      return restored;
+    });
+  }
+
+  /** Include legacy single-slot state until its first account switch. */
+  private slots(got: Record<string, unknown>): Record<string, unknown> {
+    const accounts = isObject(got[ACCOUNTS_KEY]) ? { ...got[ACCOUNTS_KEY] } : {};
+    const raw = got[KEY];
+    const identity = this.identity(raw);
+    if (identity && !Object.hasOwn(accounts, identity)) accounts[identity] = raw;
+    return accounts;
+  }
+
+  private identity(raw: unknown): string | null {
+    if (!isObject(raw) || !isObject(raw['account'])) return null;
+    try { return accountKey(raw['account'] as unknown as AccountInfo); } catch { return null; }
+  }
+
+  private validSlot(raw: unknown, identity: string): boolean {
+    if (!isObject(raw) || this.identity(raw) !== identity || typeof raw['expiresAt'] !== 'number'
+      || !Number.isFinite(raw['expiresAt']) || raw['expiresAt'] <= this.now()) return false;
+    const restored = revive(raw);
+    if (!restored) return false;
+    // Listing identity/status must not retain a second decoded key copy.
+    restored.userKey.encKey.fill(0); restored.userKey.macKey.fill(0);
+    return true;
+  }
+
+  async unlockedAccounts(): Promise<string[]> {
+    const got = await this.area.get([KEY, ACCOUNTS_KEY]);
+    return Object.entries(this.slots(got)).filter(([key, raw]) => this.validSlot(raw, key)).map(([key]) => key);
+  }
+
+  async nextExpiry(): Promise<number | null> {
+    const got = await this.area.get([KEY, ACCOUNTS_KEY]);
+    const deadlines = Object.values(this.slots(got)).filter(isObject)
+      .map((raw) => raw['expiresAt']).filter((deadline): deadline is number => typeof deadline === 'number' && Number.isFinite(deadline));
+    return deadlines.length ? Math.min(...deadlines) : null;
+  }
+
+  /** Purge expired parked keys as well as the active slot. Returns whether active state expired. */
+  async expire(): Promise<boolean> {
+    const generation = this.generation;
+    return this.serialize(async () => {
+      const got = await this.area.get([KEY, ACCOUNTS_KEY]);
+      if (generation !== this.generation) return false;
+      const accounts = this.slots(got);
+      for (const [key, raw] of Object.entries(accounts)) if (!this.validSlot(raw, key)) delete accounts[key];
+      const identity = this.identity(got[KEY]);
+      const activeExpired = isObject(got[KEY]) && (!identity || !this.validSlot(got[KEY], identity));
+      if (activeExpired) { this.invalidated = true; this.generation++; }
+      await this.area.set({ [ACCOUNTS_KEY]: accounts, ...(activeExpired ? { [KEY]: null } : {}) });
+      return activeExpired;
+    });
   }
 
   async load(): Promise<UnlockedSession | null> {
+    if (this.invalidated) return null;
+    const generation = this.generation;
     let got: Record<string, unknown>;
     try {
       got = await this.area.get(KEY);
     } catch {
       return null;
     }
-    return revive(got[KEY]);
+    if (this.invalidated || generation !== this.generation) return null;
+    const raw = got[KEY];
+    if (!isObject(raw)) return null;
+    if (typeof raw['expiresAt'] !== 'number' || !Number.isFinite(raw['expiresAt']) || raw['expiresAt'] <= this.now()) {
+      await this.clear();
+      return null;
+    }
+    const session = revive(raw);
+    if (!session) await this.clear();
+    return session;
+  }
+
+  async expiresAt(): Promise<number | null> {
+    const raw = (await this.area.get(KEY))[KEY];
+    return isObject(raw) && typeof raw['expiresAt'] === 'number' && Number.isFinite(raw['expiresAt'])
+      ? raw['expiresAt'] : null;
+  }
+
+  async loadAccount(): Promise<AccountInfo | null> {
+    const raw = (await this.area.get(ACCOUNT_KEY))[ACCOUNT_KEY];
+    return isObject(raw) && typeof raw['serverUrl'] === 'string' && typeof raw['email'] === 'string'
+      && typeof raw['userId'] === 'string' && isObject(raw['kdf'])
+      ? raw as unknown as AccountInfo : null;
   }
 
   /** 锁定。存储区里不该再留下密钥的任何一段。 */
-  async clear(): Promise<void> {
+  async clear(options: { forgetAccount?: boolean; account?: AccountInfo | null } = {}): Promise<void> {
+    this.invalidated = true;
+    this.generation++;
+    await this.serialize(() => this.removeStored(options));
+  }
+
+  private async removeStored(options: { forgetAccount?: boolean; account?: AccountInfo | null }): Promise<void> {
+    const forgetAccount = options.forgetAccount === true;
+    let got: Record<string, unknown>;
+    try { got = await this.area.get([KEY, ACCOUNT_KEY, ACCOUNTS_KEY]); }
+    catch (error) {
+      // When ownership cannot be read, invalidate every recoverable key rather than acknowledge an unsafe logout.
+      const empty = { [KEY]: null, [ACCOUNTS_KEY]: null, ...(forgetAccount ? { [ACCOUNT_KEY]: null } : {}) };
+      await this.area.set(empty);
+      throw error;
+    }
+    const accounts = this.slots(got);
+    const identity = options.account !== undefined ? (options.account ? accountKey(options.account) : null)
+      : this.identity(got[KEY]) ?? this.identity({ account: got[ACCOUNT_KEY] });
+    if (identity) delete accounts[identity];
+    const empty = Object.keys(accounts).length === 0;
+    if (!empty || (!forgetAccount && options.account !== undefined)) await this.area.set({
+      ...(!empty ? { [ACCOUNTS_KEY]: accounts } : {}),
+      ...(!forgetAccount && options.account !== undefined ? { [ACCOUNT_KEY]: options.account } : {}),
+    });
+    const keys = [KEY, ...(forgetAccount ? [ACCOUNT_KEY] : []), ...(empty ? [ACCOUNTS_KEY] : [])];
     try {
-      await this.area.remove(KEY);
+      await this.area.remove(keys);
     } catch {
-      // 存储坏了也要让「锁定」这个动作成功 —— 锁不上比清不掉严重得多
+      // A failed deletion must not leave a recoverable unlocked snapshot behind.
+      // Replacing the slot is safe even when the storage backend cannot remove it.
+      await this.area.set({ [KEY]: null, ...(forgetAccount ? { [ACCOUNT_KEY]: null } : {}), ...(empty ? { [ACCOUNTS_KEY]: null } : {}) });
     }
   }
 }

@@ -1,7 +1,7 @@
 [package]
 name = "coffer"
 version = "0.0.0"
-description = "Coffer —— 个人密码管理器"
+description = "1Warden —— 个人密码管理器"
 edition = "2021"
 rust-version = "1.77"
 

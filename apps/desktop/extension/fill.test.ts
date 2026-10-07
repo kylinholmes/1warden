@@ -46,7 +46,7 @@ const globals = globalThis as unknown as Record<string, unknown>;
 const saved: Record<string, unknown> = {};
 
 beforeEach(() => {
-  for (const k of ['document', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event']) saved[k] = globals[k];
+  for (const k of ['document', 'location', 'HTMLInputElement', 'HTMLTextAreaElement', 'Event']) saved[k] = globals[k];
 
   nodes = [];
   globals['document'] = {
@@ -64,6 +64,20 @@ afterEach(() => {
 });
 
 describe('fillFields 必须自包含', () => {
+  it('refuses credentials when the document navigated after the background URL check', () => {
+    nodes = [new FakeInput()];
+    globals['location'] = { href: 'https://attacker.test/' };
+    const out = detach<typeof fillFields>(fillFields)([{ index: 0, value: 'secret' }], 'https://example.com/login');
+    expect((nodes[0] as unknown as { _value: string })._value).toBe('');
+    expect(out[0]).toMatchObject({ ok: false, verified: false });
+  });
+
+  it('accepts the same document URL when detached for inline fill', () => {
+    nodes = [new FakeInput()];
+    globals['location'] = { href: 'https://example.com/login' };
+    const out = detach<typeof fillFields>(fillFields)([{ index: 0, value: 'secret' }], 'https://example.com/login');
+    expect(out[0]).toMatchObject({ ok: true, verified: true });
+  });
   it('survives being detached from its module scope', () => {
     nodes = [new FakeInput()];
     const detached = detach(fillFields);

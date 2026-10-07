@@ -1,9 +1,11 @@
-import { useState } from 'react';
-import type { VaultClient, TwoFactorChallenge } from '@coffer/vault';
-import { probeCertificate, trustCertificate, type CertInfo } from '../trust';
+import { useCallback, useEffect, useRef, useState } from 'react';
+import type { TwoFactorChallenge } from '@coffer/vault';
+import type { ApplicationClient, ConnectionDraft } from '../application/types';
+import type { CertInfo } from '../trust';
+import { twoFactorChallenge } from './auth-error';
 import {
   ConnectScreen, IconLock, IconSpinner, apiMessageOf, rememberAccount, useAccounts,
-  type ConnectCreds,
+  type ConnectCreds, type SavedAccount,
 } from '@coffer/ui';
 
 /**
@@ -13,7 +15,7 @@ import {
  * （账户列表、快速解锁、表单、两步验证都在那边）。这里负责三件共享组件
  * 不该知道的事：
  *
- * 1. **连接动作**：直接调 `VaultClient`（扩展端是发消息给后台）
+ * 1. **连接动作**：调用统一 `ApplicationClient`，由入口选择本地或后台服务
  * 2. **证书确认**：走 Rust 的 `probeCertificate` / `trustCertificate`。
  *    扩展端**没有**这条路 —— TLS 校验在浏览器手里，自签证书只能靠
  *    系统信任库解决。所以它是塞进 `ConnectScreen` 的一个插槽。
@@ -22,12 +24,8 @@ import {
  */
 
 interface Props {
-  client: VaultClient;
+  client: ApplicationClient;
   onConnected: () => void;
-}
-
-function isTwoFactor(e: unknown): e is TwoFactorChallenge & { __twoFactor: true } {
-  return typeof e === 'object' && e !== null && (e as { twoFactorRequired?: boolean }).twoFactorRequired === true;
 }
 
 function isCertUntrusted(e: unknown): e is { kind: 'certUntrusted'; fingerprint?: string } {
@@ -48,29 +46,103 @@ export function Connect({ client, onConnected }: Props) {
    * 表单已经不在屏幕上了（`cert` 插槽盖住了它），拿不回那两个字段。
    */
   const [pending, setPending] = useState<ConnectCreds | null>(null);
+  const [restored, setRestored] = useState<ConnectionDraft | null | undefined>(client.connectionDraft ? undefined : null);
+  const currentDraft = useRef<ConnectionDraft | null>(null);
+  const operation = useRef(0);
+  const mounted = useRef(true);
+  const leaving = useRef(false);
+  const draftWrites = useRef<Promise<unknown>>(Promise.resolve());
+
+  useEffect(() => {
+    let alive = true;
+    mounted.current = true;
+    void client.connectionDraft?.load().catch(() => null).then((draft) => {
+      if (!alive) return;
+      currentDraft.current = draft;
+      setRestored(draft);
+      setError(draft?.error ?? null);
+    });
+    return () => { alive = false; mounted.current = false; };
+  }, [client]);
+
+  const saveDraft = useCallback((draft: ConnectionDraft) => {
+    if (leaving.current || !mounted.current) return;
+    currentDraft.current = draft;
+    const version = operation.current;
+    draftWrites.current = draftWrites.current.then(() => {
+      if (!mounted.current || leaving.current || version !== operation.current) return;
+      return client.connectionDraft?.save(draft);
+    }).catch(() => {});
+  }, [client]);
+
+  async function clearDraft(version: number) {
+    currentDraft.current = null;
+    await draftWrites.current;
+    if (version !== operation.current) return;
+    await client.connectionDraft?.clear().catch(() => {});
+  }
+
+  const rememberFields = useCallback((fields: Pick<ConnectCreds, 'serverUrl' | 'email'>) => {
+    saveDraft({ ...currentDraft.current, ...fields, error: currentDraft.current?.error ?? null });
+  }, [saveDraft]);
+
+  function rememberError(error: string | null, fields?: Pick<ConnectCreds, 'serverUrl' | 'email'>) {
+    const draft = { ...currentDraft.current, serverUrl: fields?.serverUrl ?? currentDraft.current?.serverUrl ?? '',
+      email: fields?.email ?? currentDraft.current?.email ?? '', error };
+    saveDraft(draft);
+  }
+
+  async function navigate(account: SavedAccount | null) {
+    if (leaving.current) return;
+    const version = ++operation.current;
+    leaving.current = true;
+    setBusy(true); setError(null); setChallenge(null); setCert(null); setPending(null);
+    try {
+      currentDraft.current = null;
+      await client.switchAccount(account);
+      // Cancel authentication first, then flush already-started saves before
+      // clearing. Back must not let a slow save postpone request cancellation.
+      await clearDraft(version);
+      if (mounted.current && version === operation.current) setRestored(null);
+    } catch (cause) {
+      if (mounted.current && version === operation.current) setError(apiMessageOf(cause));
+    } finally {
+      if (version === operation.current) leaving.current = false;
+      if (mounted.current && version === operation.current) setBusy(false);
+    }
+  }
 
   async function doConnect(c: ConnectCreds) {
+    if (leaving.current) return;
+    const version = ++operation.current;
     setBusy(true);
     setError(null);
+    rememberError(null, c);
     try {
       await client.connect({
         serverUrl: c.serverUrl, email: c.email, masterPassword: c.masterPassword,
       });
+      if (version !== operation.current || leaving.current) return;
       // 只记住服务器与邮箱 —— **绝不**记住主密码。不 await：它是便利功能，
       // 而且 `rememberAccount` 自己就不抛
       void rememberAccount({ serverUrl: c.serverUrl, email: c.email });
-      onConnected();
+      await clearDraft(version);
+      if (mounted.current && version === operation.current) onConnected();
     } catch (err) {
-      if (isTwoFactor(err)) {
-        setChallenge({ providers: err.providers, providersInfo: err.providersInfo });
-      } else if (isCertUntrusted(err)) {
+      if (!mounted.current || version !== operation.current || leaving.current) return;
+      const nextChallenge = twoFactorChallenge(err);
+      if (nextChallenge) {
+        setChallenge(nextChallenge);
+      } else if (client.capabilities.native && isCertUntrusted(err)) {
         setPending(c);
-        await offerCertificate(c.serverUrl);
+        await offerCertificate(c.serverUrl, version);
       } else {
-        setError(apiMessageOf(err));
+        const message = apiMessageOf(err);
+        setError(message);
+        rememberError(message, c);
       }
     } finally {
-      setBusy(false);
+      if (mounted.current && version === operation.current) setBusy(false);
     }
   }
 
@@ -82,34 +154,48 @@ export function Connect({ client, onConnected }: Props) {
    * 客户端这边看不出来，只有用户自己知道那台服务器是不是他的。所以把
    * 证据摆出来，让用户拍板。
    */
-  async function offerCertificate(url: string) {
+  async function offerCertificate(url: string, version: number) {
     try {
-      setCert(await probeCertificate(url));
+      const { probeCertificate } = await import('../trust');
+      const certificate = await probeCertificate(url);
+      if (mounted.current && version === operation.current) setCert(certificate);
     } catch (e) {
-      setError(apiMessageOf(e));
+      if (mounted.current && version === operation.current) setError(apiMessageOf(e));
     }
   }
 
   async function submitCode(code: string, provider: number, remember: boolean) {
+    if (leaving.current) return;
+    const version = ++operation.current;
     setBusy(true);
     setError(null);
     try {
       await client.connectWithTwoFactor(code, provider, remember);
-      onConnected();
+      if (version !== operation.current || leaving.current) return;
+      const account = client.getSnapshot().account;
+      if (account) void rememberAccount({ serverUrl: account.serverUrl, email: account.email });
+      await clearDraft(version);
+      if (mounted.current && version === operation.current) onConnected();
     } catch (err) {
+      if (!mounted.current || version !== operation.current || leaving.current) return;
+      if ((err as { kind?: string } | null)?.kind === 'authRestartRequired') setChallenge(null);
       setError(apiMessageOf(err));
     } finally {
-      setBusy(false);
+      if (mounted.current && version === operation.current) setBusy(false);
     }
   }
 
   async function trustAndRetry() {
     if (!cert || !pending) return;
+    const version = ++operation.current;
     setBusy(true);
     try {
+      const { trustCertificate } = await import('../trust');
       await trustCertificate(pending.serverUrl, cert.fingerprint);
+      if (!mounted.current || version !== operation.current || leaving.current) return;
       setCert(null);
     } catch (e) {
+      if (!mounted.current || version !== operation.current || leaving.current) return;
       setError(apiMessageOf(e));
       setBusy(false);
       return;
@@ -131,8 +217,13 @@ export function Connect({ client, onConnected }: Props) {
     */
     <div className="below-titlebar flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
       <div className="screen-in w-full max-w-[380px]">
-        <ConnectScreen
+        {restored === undefined ? <p className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在恢复表单…</p> : <ConnectScreen
           accounts={accounts}
+          initialCredentials={restored ?? undefined}
+          onCredentialsChange={rememberFields}
+          canGoBack={Boolean(restored?.returnAccount)}
+          onBack={() => { void navigate(currentDraft.current?.returnAccount ?? null); }}
+          onPickAccount={(account) => { void navigate(account); }}
           busy={busy}
           error={error}
           challenge={challenge}
@@ -151,12 +242,12 @@ export function Connect({ client, onConnected }: Props) {
               <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-[var(--accent-ink)]">
                 <IconLock size={17} />
               </span>
-              <span className="text-xl font-semibold tracking-[-0.01em]">Coffer</span>
+              <span className="text-xl font-semibold tracking-[-0.01em]">1Warden</span>
             </>
           }
           onSubmit={(c) => { void doConnect(c); }}
           onTwoFactor={({ code, provider, remember }) => { void submitCode(code, provider, remember); }}
-        />
+        />}
       </div>
     </div>
   );

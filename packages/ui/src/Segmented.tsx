@@ -67,7 +67,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, c
             }}
             className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2.5 py-1 text-xs transition-colors duration-[var(--dur-fast)] ${
               active
-                ? 'bg-[var(--surface-paper)] font-medium text-[var(--ink-primary)]'
+                ? 'bg-[var(--accent-tint)] font-medium text-[var(--accent)]'
                 : 'text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]'
             }`}
             style={active ? { boxShadow: 'var(--elev-raise)' } : undefined}

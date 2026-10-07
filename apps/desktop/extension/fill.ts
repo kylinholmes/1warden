@@ -33,7 +33,12 @@ export interface FillOutcome {
  *
  * 自包含 —— 不要在里面引用模块作用域的任何东西。
  */
-export function fillFields(entries: FillEntry[]): FillOutcome[] {
+export function fillFields(entries: FillEntry[], expectedUrl?: string): FillOutcome[] {
+  // Inline selection is tied to the document that requested it. Recheck inside
+  // the injected function too: navigation can race the background's tabs.get.
+  if (expectedUrl !== undefined && location.href !== expectedUrl) {
+    return entries.map(({ index }) => ({ index, ok: false, verified: false, reason: '网页地址已改变' }));
+  }
   const inputs = Array.from(
     document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'),
   );

@@ -51,6 +51,11 @@ export function ConnectScreen({
   onTwoFactor,
   onCertCancel,
   onTrustCert,
+  initialCredentials,
+  onCredentialsChange,
+  onPickAccount,
+  onBack,
+  canGoBack = false,
 }: {
   /** `null` = 还在读（见 `accounts.ts` 对 `null` 和 `[]` 区别的说明） */
   accounts: SavedAccount[] | null;
@@ -66,6 +71,11 @@ export function ConnectScreen({
   onTwoFactor: (p: { code: string; provider: number; remember: boolean }) => void;
   onCertCancel?: () => void;
   onTrustCert?: () => void;
+  initialCredentials?: Pick<ConnectCreds, 'serverUrl' | 'email'> | undefined;
+  onCredentialsChange?: ((credentials: Pick<ConnectCreds, 'serverUrl' | 'email'>) => void) | undefined;
+  onPickAccount?: (account: SavedAccount) => void;
+  onBack?: () => void;
+  canGoBack?: boolean;
 }) {
   /*
    * 三档视图：
@@ -77,10 +87,15 @@ export function ConnectScreen({
    * 这样回访用户是「点一下 + 敲密码」，第一次用的人是完整表单，
    * 两条路都不别扭。
    */
-  const [view, setView] = useState<'pick' | 'form' | 'quick' | null>(null);
-  const [serverUrl, setServerUrl] = useState('');
-  const [email, setEmail] = useState('');
+  const [view, setView] = useState<'pick' | 'form' | 'quick' | null>(initialCredentials ? 'form' : null);
+  const [serverUrl, setServerUrl] = useState(initialCredentials?.serverUrl ?? '');
+  const [email, setEmail] = useState(initialCredentials?.email ?? '');
   const [password, setPassword] = useState('');
+  const returning = useRef(false);
+
+  useEffect(() => {
+    if (!returning.current && (view === 'form' || view === 'quick')) onCredentialsChange?.({ serverUrl, email });
+  }, [serverUrl, email, view, onCredentialsChange]);
 
   /*
    * 账户读到之后再决定从哪一屏开始。
@@ -110,6 +125,12 @@ export function ConnectScreen({
   }
 
   const inFlow = cert !== undefined || challenge !== null;
+  function goBack() {
+    returning.current = true;
+    setServerUrl(''); setEmail(''); setPassword('');
+    setView(accounts?.length ? 'pick' : null);
+    onBack?.();
+  }
 
   return (
     <>
@@ -122,6 +143,11 @@ export function ConnectScreen({
       )}
 
       <div className="mt-5">
+        {(view === 'form' || inFlow) && (canGoBack || Boolean(accounts?.length)) && (
+          <button type="button" aria-label="返回上一级" onClick={goBack} className="btn btn-quiet mb-4 gap-1.5 py-1.5 text-xs">
+            <IconArrowLeft size={13} />返回
+          </button>
+        )}
         {view === null ? (
           /* 账户还在读。**不渲染表单** —— 见上面那个 effect 的说明 */
           <div className="h-[176px]" aria-hidden />
@@ -138,13 +164,17 @@ export function ConnectScreen({
             /* `?? []` 只为类型收窄：`view === 'pick'` 只在 `accounts[0]`
                存在时才设上（见上面那个 effect），TS 追不到这条因果 */
             accounts={accounts ?? []}
+            busy={busy}
             onPick={(a) => {
+              if (busy) return;
+              returning.current = false;
+              if (onPickAccount) { onPickAccount(a); return; }
               setServerUrl(a.serverUrl);
               setEmail(a.email);
               setPassword('');
               setView('quick');
             }}
-            onOther={() => { setServerUrl(''); setEmail(''); setPassword(''); setView('form'); }}
+            onOther={() => { returning.current = false; setServerUrl(''); setEmail(''); setPassword(''); setView('form'); }}
           />
         ) : (
           <form onSubmit={submit} className="space-y-4">
@@ -152,7 +182,7 @@ export function ConnectScreen({
               <AccountChip
                 email={email}
                 serverUrl={serverUrl}
-                onBack={() => { setPassword(''); setView('pick'); }}
+                onBack={goBack}
               />
             )}
 
@@ -228,8 +258,9 @@ export function ConnectScreen({
  * 每一项给出**能用来区分的信息**：邮箱、服务器主机名。
  * 只显示邮箱是不够的（同一个人在两个服务器上常用同一个邮箱）。
  */
-export function AccountPicker({ accounts, onPick, onOther }: {
+export function AccountPicker({ accounts, busy = false, onPick, onOther }: {
   accounts: SavedAccount[];
+  busy?: boolean;
   onPick: (a: SavedAccount) => void;
   onOther: () => void;
 }) {
@@ -240,6 +271,7 @@ export function AccountPicker({ accounts, onPick, onOther }: {
           <li key={`${a.serverUrl}|${a.email}`}>
             <button
               type="button"
+              disabled={busy}
               onClick={() => onPick(a)}
               className="group flex w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-paper)] px-3 py-2.5 text-left transition-colors duration-[var(--dur-fast)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
             >
@@ -259,7 +291,7 @@ export function AccountPicker({ accounts, onPick, onOther }: {
         ))}
       </ul>
 
-      <button type="button" onClick={onOther} className="btn btn-quiet mt-3 w-full gap-2 py-2.5">
+      <button type="button" onClick={onOther} disabled={busy} className="btn btn-quiet mt-3 w-full gap-2 py-2.5">
         <IconPlus size={14} />
         连接其他服务器
       </button>

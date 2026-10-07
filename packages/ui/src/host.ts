@@ -49,7 +49,7 @@ export interface Host {
    */
   fetch: typeof fetch;
 
-  /** 落盘存储。**只放密文与偏好** —— 明文密钥永不落盘（spec 不变量 S1） */
+  /** 落盘存储：密文与偏好（含用户授权的 Profile 头像/名称），不保存明文密钥或整条记录。 */
   storage: HostStorage;
 }
 
