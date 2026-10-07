@@ -1,0 +1,192 @@
+name: 1Warden builds
+
+on:
+  push:
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - 'README.md'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: builds-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUN_VERSION: '1.3.14'
+  NODE_VERSION: '26.8.1'
+  RUST_VERSION: '1.98.1'
+  CI: 'true'
+
+jobs:
+  check:
+    name: Typecheck and unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - name: Verify package and tag versions
+        id: version
+        run: |
+          bun run scripts/build-version.ts
+      - run: bun run check
+
+  extensions:
+    name: Chromium and Firefox packages
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      APP_VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - run: bun run build:extension-firefox
+      - name: Archive extensions
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_dir="$GITHUB_WORKSPACE/artifacts/browser"
+          mkdir -p "$package_dir"
+          (cd apps/desktop/dist-extension && zip -q -r "$package_dir/1Warden-$APP_VERSION-chromium.zip" .)
+          (cd apps/desktop/dist-firefox && zip -q -r "$package_dir/1Warden-$APP_VERSION-firefox.zip" .)
+          unzip -t "$package_dir/1Warden-$APP_VERSION-chromium.zip"
+          unzip -t "$package_dir/1Warden-$APP_VERSION-firefox.zip"
+          (cd "$package_dir" && sha256sum ./*.zip > SHA256SUMS-browser.txt)
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: 1Warden-browser-extensions
+          path: artifacts/browser/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  macos:
+    name: Apple Silicon macOS package
+    needs: check
+    runs-on: macos-15
+    timeout-minutes: 60
+    env:
+      APP_VERSION: ${{ needs.check.outputs.version }}
+      CARGO_TARGET_DIR: ${{ github.workspace }}/apps/desktop/src-tauri/target
+      CARGO_PROFILE_DEV_DEBUG: '0'
+      CARGO_PROFILE_TEST_DEBUG: '0'
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          package-manager-cache: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - name: Install pinned Rust and ARM target
+        run: |
+          rustup toolchain install "$RUST_VERSION" --profile minimal
+          rustup default "$RUST_VERSION"
+          rustup target add aarch64-apple-darwin
+      - uses: actions/cache@caa296126883cff596d87d8935842f9db880ef25 # v5.1.0
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            apps/desktop/src-tauri/target
+          key: macos-arm64-rust-${{ env.RUST_VERSION }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
+          restore-keys: |
+            macos-arm64-rust-${{ env.RUST_VERSION }}-
+      - run: bun install --frozen-lockfile
+      - name: Build frontend for Rust test context
+        run: bun run --cwd apps/desktop build
+      - name: Native unit tests
+        run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
+      - name: Build Apple Silicon app and DMG
+        run: bun run build:desktop -- --ci --target aarch64-apple-darwin --bundles app,dmg -- --locked
+      - name: Verify and archive macOS packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          bundle_dir="$CARGO_TARGET_DIR/aarch64-apple-darwin/release/bundle"
+          app_path="$bundle_dir/macos/1Warden.app"
+          package_dir="$GITHUB_WORKSPACE/artifacts/macos"
+          executable=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' "$app_path/Contents/Info.plist")
+          test "$(lipo -archs "$app_path/Contents/MacOS/$executable")" = arm64
+          codesign --verify --deep --strict "$app_path"
+          mkdir -p "$package_dir"
+          ditto -c -k --sequesterRsrc --keepParent "$app_path" "$package_dir/1Warden-$APP_VERSION-macos-apple-silicon.app.zip"
+          shopt -s nullglob
+          dmg_files=("$bundle_dir/dmg/"*.dmg)
+          test "${#dmg_files[@]}" -eq 1
+          cp "${dmg_files[0]}" "$package_dir/1Warden-$APP_VERSION-macos-apple-silicon.dmg"
+          (cd "$package_dir" && shasum -a 256 ./*.zip ./*.dmg > SHA256SUMS-macos.txt)
+      - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: 1Warden-macos-apple-silicon
+          path: artifacts/macos/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 30
+
+  release:
+    name: Publish tagged packages
+    needs: [check, extensions, macos]
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
+        with:
+          pattern: 1Warden-*
+          merge-multiple: true
+          path: release-artifacts
+      - name: Publish release assets
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          cd release-artifacts
+          sha256sum ./*.zip ./*.dmg > SHA256SUMS.txt
+          printf '%s\n' \
+            'Includes Chromium and Firefox extension archives, plus an Apple Silicon macOS app and DMG (macOS 13+).' \
+            'These are testing packages: the macOS app is ad-hoc signed, without Developer ID signing or notarization; browser extensions require manual installation.' \
+            "Installation and build instructions: https://github.com/$GH_REPO/blob/$RELEASE_TAG/docs/builds.md" > release-notes.md
+          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+            gh release upload "$RELEASE_TAG" ./*.zip ./*.dmg SHA256SUMS.txt --clobber
+          else
+            gh release create "$RELEASE_TAG" ./*.zip ./*.dmg SHA256SUMS.txt \
+              --verify-tag --title "1Warden $RELEASE_TAG" --generate-notes --notes-file release-notes.md
+          fi
