@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "1Warden",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "identifier": "app.coffer.desktop",
   "build": {
     "frontendDist": "../dist",
@@ -57,6 +57,7 @@
   },
   "bundle": {
     "active": true,
+    "createUpdaterArtifacts": false,
     "targets": [
       "app",
       "dmg"
@@ -69,6 +70,16 @@
     "longDescription": "1Warden 是一个面向个人用户的密码管理器，后端对接自建的 Vaultwarden。",
     "macOS": {
       "minimumSystemVersion": "13.0"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "requireSignedVersion": true,
+      "allowDowngrades": false,
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDA1RkU5QTk3QkFFNjM5RjMKUldUek9lYTZsNXIrQlF6UE1XWSsrV2RndXl6U2dnci9PdmNaenB0SWd3ZEFYMERpTFNmeFFvVjQK",
+      "endpoints": [
+        "https://github.com/kylinholmes/1warden/releases/latest/download/latest.json"
+      ]
     }
   }
 }

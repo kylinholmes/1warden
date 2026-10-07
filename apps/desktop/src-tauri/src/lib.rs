@@ -55,6 +55,22 @@ fn app_version() -> String {
     env!("CARGO_PKG_VERSION").to_string()
 }
 
+#[tauri::command]
+fn app_updates_supported(window: tauri::WebviewWindow) -> bool {
+    cfg!(target_os = "macos") && window.label() == "main"
+}
+
+/// 已验证的更新安装到原应用路径后，由用户选择重启来运行新版本。
+/// 复用 Tauri 的进程重启，无需另引入 process 插件；快速窗口不能调用。
+#[cfg(desktop)]
+#[tauri::command]
+fn restart_app(app: tauri::AppHandle, window: tauri::WebviewWindow) -> Result<(), String> {
+    if window.label() != "main" {
+        return Err("只能从主窗口重启应用".into());
+    }
+    app.restart();
+}
+
 /*
  * ⚠️ 下面这三条是**桌面端专属**的，因为它们都是「第二个窗口」这件事的一部分 ——
  * 快速面板是一个 `alwaysOnTop` / `skipTaskbar` 的常驻小窗（见 tauri.conf.json），
@@ -114,6 +130,9 @@ pub fn run() {
     let builder = tauri::Builder::default()
         .invoke_handler(tauri::generate_handler![
             app_version,
+            app_updates_supported,
+            #[cfg(desktop)]
+            restart_app,
             http::http_request,
             http::probe_certificate,
             http::trust_certificate,
@@ -183,6 +202,11 @@ pub fn run() {
 
             Ok(())
         });
+
+    // updater 不访问保险库密钥；安装必须通过配置公钥的 minisign 验证。
+    // Cargo 依赖和插件初始化都排除 iOS/Android。
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
     builder
         .run(tauri::generate_context!())

@@ -96,7 +96,7 @@ Chrome 载入 `apps/desktop/dist-extension`；Firefox 在 `about:debugging#/runt
 
 - 移动端尚未在真机/模拟器完整运行。之前 iOS SDK 27.0 与已装运行时 26.5 不匹配；用户此前决定暂不下载约 8GB 运行时，真机也缺签名证书。
 - 移动端尚无附件保存的分享面板；`canSaveFiles()` 返回 false。浏览器附件通过 downloads API，桌面通过 Rust 保存。
-- 仓库已创建为 GitHub 私有仓库 `kylinholmes/1warden`；浏览器插件及 Apple Silicon macOS 构建/发布流程见 [构建说明](builds.md)。
+- 仓库已创建为 GitHub 仓库 `kylinholmes/1warden`（用户后续明确选择公开）；浏览器插件及 Apple Silicon macOS 构建/发布流程见 [构建说明](builds.md)。
 - 快速面板 `use-quick-bridge.ts` 仍有自己的 QuickItem 投影，属于另一窗口协议。
 - 原 `keys.test.ts` 的错误尺寸密钥测试曾有一次未复现的失败；不能凭旧记录断言原因。
 
@@ -117,3 +117,14 @@ Chrome 载入 `apps/desktop/dist-extension`；Firefox 在 `about:debugging#/runt
 添加账户的返回按钮覆盖普通登录、两步验证和证书流程；返回会取消旧请求，避免迟到的失败提示或草稿污染原账户。账户菜单只显示“登出”，其他账户标明“已解锁”或“需要验证”；自动到期锁定和原生快捷锁定仍工作。
 
 当前验证：类型检查和 **1,030 项测试 / 80 个文件**通过；两个真实 Vaultwarden 后端 **70 项检查**；实际扩展双账户 Edge/Zen 各 **66 项检查**，直接切换无认证请求；连接返回 Edge/Zen 各 **21 项检查**，Zen Profile **30 项检查**。桌面/移动前端和两浏览器插件构建通过。独立审查确认并修复了切换期间选错清理账户、过期请求抢占新选择、旧 WebAuthn 写入、worker 重启后首条登出未清除会话的问题。详细证据在 Profile 实施计划中。
+
+
+## 自动更新与首个安装包
+
+用户明确选择把 `kylinholmes/1warden` 设为公开；当前版本升级为 `0.1.0`。首轮真实 GitHub Actions（`37667181798`）已通过类型/单元检查、浏览器打包、原生测试、Apple Silicon App/DMG 打包；下载后的 App 已验证 ARM64 和严格签名。
+
+桌面主窗口启动 10 秒后、此后每 6 小时检查公开 GitHub Releases 的 `latest.json`。后台完成验证与安装后显示小提示“稍后 / 重启更新”，不自动退出；设置保留版本、进度、错误和重启入口。更新不会修改当前保险库会话。网络检查及下载分别有 15 秒 / 5 分钟超时。浏览器、移动端产物排除更新代码，快速窗口不启动更新。
+
+官方 Tauri updater 是本次明确授权的插件例外：签名验证、签名版本绑定与禁止降级由固定 `2.13.1` 执行，私钥只在仓库外与 GitHub Secret。普通构建关闭 updater archives，只有可信版本标签生成签名更新包及清单；新 Release 先作为 draft 上传完整资产再公开。原生插件的真实签名/篡改/降级/安装行为已在临时 App 中验证，当前进程保持旧版本而磁盘为新版，未启动 GUI 或触碰个人数据。
+
+最新前端检查 **1,048 项测试 / 83 个文件**及类型检查通过；更新界面 13 项 Edge 检查通过，桌面/移动/扩展构建及产物排除检查通过；原生 **35 项通过、4 项明确忽略**。首个 `0.1.0` 需手动安装，后续版本自动准备。用户安装说明见 [builds.md](builds.md)，更新说明见 [updates.md](updates.md)。

@@ -1,4 +1,4 @@
-import { useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
+import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { ProfileEditor } from '../components/ProfileEditor';
 import type { ApplicationClient, ApplicationCapabilities } from '../application/types';
 import { FloatingPanel } from '@coffer/ui';
@@ -44,6 +44,11 @@ const SECTIONS: Array<{ id: SectionId; label: string; icon: ReactNode }> = [
   { id: 'autofill', label: '自动填充', icon: <IconKeyboard size={16} /> },
   { id: 'about', label: '关于', icon: <IconInfo size={16} /> },
 ];
+
+declare const __PLATFORM__: 'desktop' | 'extension' | 'mobile' | undefined;
+// Keep this import behind the literal build define so other targets emit no updater chunk.
+const DesktopAppUpdates = typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop'
+  ? lazy(() => import('../components/AppUpdates')) : null;
 
 export function Settings({ client, open, account, serverUrl, onClose, initialSection = 'account', capabilities = { native: false, browser: false, saveAttachments: false }, onDisconnect }: {
   client?: ApplicationClient;
@@ -251,7 +256,8 @@ export function Settings({ client, open, account, serverUrl, onClose, initialSec
           )}
 
           {section === 'about' && (
-            <Group title="关于" hint="1Warden 0.0.0">
+            <Group title="关于" hint="1Warden">
+              {DesktopAppUpdates && capabilities.native && <Suspense fallback={null}><DesktopAppUpdates /></Suspense>}
               <Row label="数据在哪里" hint="条目在服务端加密，主密码与本机派生的密钥永不发送" />
               <Row label="许可" hint="自有实现，未使用禁止用于 Vaultwarden 的官方 SDK" />
               <Shortcuts native={capabilities.native} />

@@ -1,6 +1,6 @@
 {
   "name": "@coffer/desktop",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -20,6 +20,7 @@
     "@coffer/crypto": "workspace:*",
     "@coffer/vault": "workspace:*",
     "@tauri-apps/api": "2.12.1",
+    "@tauri-apps/plugin-updater": "2.13.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
     "@coffer/ui": "workspace:*"

@@ -1,9 +1,9 @@
 [package]
 name = "coffer"
-version = "0.0.0"
+version = "0.1.0"
 description = "1Warden —— 个人密码管理器"
 edition = "2021"
-rust-version = "1.77"
+rust-version = "1.90"
 
 [lib]
 # Tauri 的约定：lib 名必须是 `<package>_lib`，否则 main.rs 里的
@@ -70,6 +70,9 @@ x509-parser = "0.16"
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 rfd = "0.15"
 tauri = { version = "2", features = ["tray-icon", "image-png"] }
+# 更新包必须通过内置公钥的 minisign 验证；不自写下载/替换/验签协议。
+# 这是存储/生物识别插件限制之外的桌面更新专用依赖，不访问保险库密钥。
+tauri-plugin-updater = "=2.13.1"
 
 # ── 原生自动输入（spec §7.4）──
 # 只做「往当前焦点合成按键」，不读任何应用的界面内容。

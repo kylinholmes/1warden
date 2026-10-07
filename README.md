@@ -4,6 +4,7 @@
 
 - **macOS App**：Apple Silicon，基于 Tauri；支持菜单栏、快速面板、原生自动输入及 Touch ID。
 - **浏览器扩展**：Chromium / Edge，以及 Firefox / Zen；支持当前网站匹配和登录输入框中的账户选择。
+- **桌面更新**：自动检查并准备签名更新，下载完成后弹出“稍后 / 重启更新”的小提示；不自动退出。
 - **多账户**：按服务器地址与邮箱区分；已解锁账户直接切换，锁定、登出或到期后重新验证。添加账户可以返回原账户。
 - **个人资料**：头像与名称保存在服务端加密的 Profile 安全备注中，解锁后同步，并按账户缓存展示信息。
 - **共享界面**：明暗主题；窄窗口中的详情、设置及编辑页铺满窗口，从右侧进入。
@@ -29,7 +30,7 @@ bun run build:desktop            # 当前 Mac 的 .app 与 .dmg
 
 Edge 的开发者模式加载 `apps/desktop/dist-extension`。Zen 在 `about:debugging#/runtime/this-firefox` 临时加载 `apps/desktop/dist-firefox/manifest.json`。商店发布及 Firefox 正式签名需要另行配置。
 
-GitHub Actions 自动验证并提供插件 ZIP 与 Apple Silicon macOS 安装包；构建、下载和发布方法见 [构建说明](docs/builds.md)。
+[GitHub Releases](https://github.com/kylinholmes/1warden/releases) 提供插件 ZIP 与 Apple Silicon macOS 安装包。GitHub Actions 自动验证、构建并发布签名更新；构建、下载和发布方法见 [构建说明](docs/builds.md)。
 
 ## 数据与会话
 

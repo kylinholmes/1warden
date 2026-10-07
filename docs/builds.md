@@ -1,6 +1,6 @@
 # 构建与下载
 
-GitHub Actions 在每次 push、Pull Request 和手动运行时执行类型检查、单元测试，并生成浏览器扩展和 macOS 安装包。打开 [Actions](https://github.com/kylinholmes/1warden/actions)，选择成功的 `1Warden builds` 运行，在页面底部下载 Artifacts；构建产物保留 30 天。推送与包版本一致的 `v` 标签后，流水线会把相同的安装包和 SHA-256 校验文件发布到 [Releases](https://github.com/kylinholmes/1warden/releases)。私有仓库的下载需要仓库访问权限。
+GitHub Actions 在每次 push、Pull Request 和手动运行时执行类型检查、单元测试，并生成浏览器扩展和 macOS 安装包。打开 [Actions](https://github.com/kylinholmes/1warden/actions)，选择成功的 `1Warden builds` 运行，在页面底部下载 Artifacts；构建产物保留 30 天。推送与包版本一致的 `v` 标签后，流水线会把相同的安装包和 SHA-256 校验文件发布到 [Releases](https://github.com/kylinholmes/1warden/releases)。代码与发布包已按用户选择设为公开；桌面自动更新无需 GitHub 登录。
 
 | 产物 | 用途 |
 | --- | --- |
@@ -51,11 +51,20 @@ CI=true APPLE_SIGNING_IDENTITY=- \
 
 ## 发布版本
 
-当前包版本为 `0.0.0`。例如发布 `v0.1.0` 前，先把以下四处版本更新为 `0.1.0`：
+当前包版本为 `0.1.0`。例如发布 `v0.1.1` 前，先把以下四处版本更新为 `0.1.1`：
 
 - `apps/desktop/package.json`
 - `apps/desktop/src-tauri/tauri.conf.json`
 - `apps/desktop/src-tauri/Cargo.toml`
 - `apps/desktop/extension/public/manifest.json`
 
-运行 `bun install --lockfile-only` 更新 Bun workspace 锁文件，并运行一次不带 `--locked` 的 `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml` 更新 Cargo 包版本；随后运行 `bun install --frozen-lockfile`、`bun run scripts/build-version.ts` 和 `bun run check`，提交版本及锁文件，再创建并推送 `v0.1.0` 标签。流水线会检查四处版本一致、标签匹配，然后发布安装包；手动运行只生成 Actions artifacts。现有 release 重新运行时会替换同名资产。
+运行 `bun install --lockfile-only` 更新 Bun workspace 锁文件，并运行一次不带 `--locked` 的 `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml` 更新 Cargo 包版本；随后运行 `bun install --frozen-lockfile`、`bun run scripts/build-version.ts` 和 `bun run check`，提交版本及锁文件，再创建并推送 `v0.1.1` 标签。流水线会检查四处版本一致、标签匹配，然后发布安装包；手动运行只生成 Actions artifacts。现有 release 重新运行时会替换同名资产。
+
+
+## 自动更新发布
+
+普通分支、PR 和手动构建生成测试用安装包；只有与四处版本一致的 `v` 标签构建会读取 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`，启用 `createUpdaterArtifacts` 并生成签名的 `.app.tar.gz` / `.sig`。签名私钥留在开发机的仓库外目录与 GitHub Secret，不能提交到代码或写入构建日志。应用内只有公钥。
+
+标签发布同时生成 `latest.json`，其中 `darwin-aarch64` 指向本版本的签名 archive。新 Release 先作为 draft 上传完整产物，成功后才公开；已有 Release 重试时先上传包和签名，再更新 manifest。应用使用公开的 `releases/latest/download/latest.json` 检查更新，不需要 GitHub token。下载校验通过且安装完成后显示重启提示；源码中的签名版本校验和禁止降级设置不能关闭。
+
+Updater archive 供应用自动更新，DMG / `.app.zip` 供首次手动安装，两者用途不同。自动更新的交互及本地签名测试见 [桌面更新说明](updates.md)。

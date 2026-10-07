@@ -99,6 +99,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
       APPLE_SIGNING_IDENTITY: '-'
+      RELEASE_BUILD: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -130,7 +131,22 @@ jobs:
       - name: Native unit tests
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
       - name: Build Apple Silicon app and DMG
-        run: bun run build:desktop -- --ci --target aarch64-apple-darwin --bundles app,dmg -- --locked
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          set -euo pipefail
+          rm -rf "$CARGO_TARGET_DIR/aarch64-apple-darwin/release/bundle"
+          if [ "$RELEASE_BUILD" = true ]; then
+            test -n "$TAURI_SIGNING_PRIVATE_KEY"
+            config_path="$RUNNER_TEMP/tauri-release.json"
+            printf '%s\n' '{"bundle":{"createUpdaterArtifacts":true}}' > "$config_path"
+            bun run build:desktop -- --ci --target aarch64-apple-darwin --bundles app,dmg --config "$config_path" -- --locked
+          else
+            config_path="$RUNNER_TEMP/tauri-ci.json"
+            printf '%s\n' '{"bundle":{"createUpdaterArtifacts":false}}' > "$config_path"
+            bun run build:desktop -- --ci --target aarch64-apple-darwin --bundles app,dmg --config "$config_path" -- --locked
+          fi
       - name: Verify and archive macOS packages
         shell: bash
         run: |
@@ -147,7 +163,12 @@ jobs:
           dmg_files=("$bundle_dir/dmg/"*.dmg)
           test "${#dmg_files[@]}" -eq 1
           cp "${dmg_files[0]}" "$package_dir/1Warden-$APP_VERSION-macos-apple-silicon.dmg"
-          (cd "$package_dir" && shasum -a 256 ./*.zip ./*.dmg > SHA256SUMS-macos.txt)
+          if [ "$RELEASE_BUILD" = true ]; then
+            update_name="1Warden-$APP_VERSION-macos-apple-silicon.app.tar.gz"
+            cp "$bundle_dir/macos/1Warden.app.tar.gz" "$package_dir/$update_name"
+            cp "$bundle_dir/macos/1Warden.app.tar.gz.sig" "$package_dir/$update_name.sig"
+          fi
+          (cd "$package_dir" && files=(*.zip *.dmg *.tar.gz *.sig) && shasum -a 256 "${files[@]}" > SHA256SUMS-macos.txt)
       - uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           name: 1Warden-macos-apple-silicon
@@ -165,11 +186,19 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           pattern: 1Warden-*
           merge-multiple: true
           path: release-artifacts
+      - name: Create signed update manifest
+        run: bun run scripts/updater-manifest.ts release-artifacts
       - name: Publish release assets
         shell: bash
         env:
@@ -179,14 +208,18 @@ jobs:
         run: |
           set -euo pipefail
           cd release-artifacts
-          sha256sum ./*.zip ./*.dmg > SHA256SUMS.txt
+          sha256sum ./*.zip ./*.dmg ./*.tar.gz ./*.sig latest.json > SHA256SUMS.txt
+          assets=(./*.zip ./*.dmg ./*.tar.gz ./*.sig SHA256SUMS.txt)
           printf '%s\n' \
             'Includes Chromium and Firefox extension archives, plus an Apple Silicon macOS app and DMG (macOS 13+).' \
             'These are testing packages: the macOS app is ad-hoc signed, without Developer ID signing or notarization; browser extensions require manual installation.' \
+            'After the first installation, 1Warden automatically prepares signed updates and prompts for an explicit restart.' \
             "Installation and build instructions: https://github.com/$GH_REPO/blob/$RELEASE_TAG/docs/builds.md" > release-notes.md
           if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
-            gh release upload "$RELEASE_TAG" ./*.zip ./*.dmg SHA256SUMS.txt --clobber
+            gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
+            gh release upload "$RELEASE_TAG" latest.json --clobber
           else
-            gh release create "$RELEASE_TAG" ./*.zip ./*.dmg SHA256SUMS.txt \
-              --verify-tag --title "1Warden $RELEASE_TAG" --generate-notes --notes-file release-notes.md
+            gh release create "$RELEASE_TAG" "${assets[@]}" latest.json \
+              --draft --verify-tag --title "1Warden $RELEASE_TAG" --generate-notes --notes-file release-notes.md
           fi
+          gh release edit "$RELEASE_TAG" --draft=false

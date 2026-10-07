@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "1Warden",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "个人密码管理器 —— 自动填充、密码生成、自建 Vaultwarden",
   "minimum_chrome_version": "116",
   "content_security_policy": {

@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "desktop-updater",
+  "description": "只允许 macOS 主窗口检查、下载及安装经过签名验证的更新。快速窗口和移动端没有更新权限。",
+  "windows": ["main"],
+  "platforms": ["macOS"],
+  "permissions": [
+    "updater:allow-check",
+    "updater:allow-download-and-install"
+  ]
+}

@@ -1,7 +1,7 @@
-import { StrictMode, useEffect } from 'react';
+import { lazy, StrictMode, Suspense, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, ErrorBoundary } from './App';
-import { webAssemblyAvailable } from './capabilities';
+import { tauriAvailable, webAssemblyAvailable } from './capabilities';
 import { initPlatform } from './platform';
 import { installDesktopHost } from './host-impl';
 import { initNativeFeel } from './native';
@@ -11,6 +11,8 @@ import { listen } from '@tauri-apps/api/event';
 import { useQuickBridge } from './use-quick-bridge';
 import { createDesktopApplication } from './application/desktop';
 import './styles.css';
+
+declare const __PLATFORM__: 'desktop' | 'extension' | 'mobile' | undefined;
 
 // 宿主要**最先**装：后面所有代码都可能用到它（发请求、读存储）
 installDesktopHost();
@@ -25,6 +27,13 @@ initNativeFeel();
 initTheme();
 
 const runtime = createDesktopApplication();
+const DesktopUpdateNotice = typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop'
+  ? lazy(() => import('./components/AppUpdateNotice')) : null;
+
+// The main entry owns updates; quick.html, mobile and extension entries never start them.
+if (typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop' && tauriAvailable()) {
+  void import('./updates/desktop').then(({ startDesktopUpdater }) => startDesktopUpdater()).catch(() => {});
+}
 
 function DesktopEvents() {
   useQuickBridge(runtime.getActiveVault, runtime.subscribeActiveVault);
@@ -46,6 +55,7 @@ createRoot(root).render(
       <ErrorBoundary>
         {IS_DESKTOP && <DesktopEvents />}
         <App client={runtime.client} />
+        {DesktopUpdateNotice && tauriAvailable() && <Suspense fallback={null}><DesktopUpdateNotice /></Suspense>}
       </ErrorBoundary>
     ) : (
       <Unsupported />
