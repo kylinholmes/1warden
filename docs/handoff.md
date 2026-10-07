@@ -128,3 +128,6 @@ Chrome 载入 `apps/desktop/dist-extension`；Firefox 在 `about:debugging#/runt
 官方 Tauri updater 是本次明确授权的插件例外：签名验证、签名版本绑定与禁止降级由固定 `2.13.1` 执行，私钥只在仓库外与 GitHub Secret。普通构建关闭 updater archives，只有可信版本标签生成签名更新包及清单；新 Release 先作为 draft 上传完整资产再公开。原生插件的真实签名/篡改/降级/安装行为已在临时 App 中验证，当前进程保持旧版本而磁盘为新版，未启动 GUI 或触碰个人数据。
 
 最新前端检查 **1,048 项测试 / 83 个文件**及类型检查通过；更新界面 13 项 Edge 检查通过，桌面/移动/扩展构建及产物排除检查通过；原生 **35 项通过、4 项明确忽略**。首个 `0.1.0` 需手动安装，后续版本自动准备。用户安装说明见 [builds.md](builds.md)，更新说明见 [updates.md](updates.md)。
+
+
+`v0.1.0` 已正式发布：[安装包](https://github.com/kylinholmes/1warden/releases/tag/v0.1.0)。最终 main CI `37671324915` 和版本标签 CI `37671405436` 全部成功；公开更新清单和全部发布资产可匿名下载，校验和一致。实际 GitHub App 为 ARM64、严格签名校验通过；真实 GitHub updater 包的篡改拒绝、版本绑定、禁止降级和不退出安装测试均通过。插件 ZIP 根 manifest、运行入口及 updater 排除检查通过。
