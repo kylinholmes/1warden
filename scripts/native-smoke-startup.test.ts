@@ -42,4 +42,10 @@ describe('native smoke startup', () => {
       } });
     expect(result).toBe(browser);
   });
+  it('does not turn the startup deadline into a lifetime CDP timeout', async () => {
+    const app = start(); const options: unknown[] = [];
+    await connectNativeBrowser({ app, browserURL: endpoint, timeoutMs: 3000,
+      connect: async (value: unknown) => { options.push(value); return { disconnect() {} }; } });
+    expect(options).toEqual([{ browserURL: endpoint, defaultViewport: null }]);
+  });
 });

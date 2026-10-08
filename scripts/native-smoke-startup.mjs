@@ -28,7 +28,7 @@ export async function connectNativeBrowser({ app, connect, browserURL, timeoutMs
   try {
     while (Date.now() < deadline) {
       if (app.exitCode !== null || app.signalCode !== null) { reason = `exited with code=${app.exitCode} signal=${app.signalCode}`; break; }
-      const attempt = Promise.resolve().then(() => connect({ browserURL, defaultViewport: null, protocolTimeout: Math.max(1, deadline - Date.now()) }))
+      const attempt = Promise.resolve().then(() => connect({ browserURL, defaultViewport: null }))
         .then(browser => {
           // A connection resolving after timeout must not keep the owned WebView attached.
           if (abandoned) Promise.resolve(browser.disconnect()).catch(() => {});
