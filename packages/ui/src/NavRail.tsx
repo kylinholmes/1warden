@@ -1,7 +1,7 @@
 import { createStore, type StoreApi } from '@1warden/state';
 import { useLocalStore, useStore } from '@1warden/state/react';
 import { createContext, useContext, useEffect, useLayoutEffect, useId, useRef, type ReactNode, type RefObject } from 'react';
-import { IconItems } from './icons';
+import { IconChevronDown, IconItems } from './icons';
 import { useCompactLayout } from './layout';
 
 interface NavigationState {
@@ -92,6 +92,9 @@ export interface NavGroup {
   title?: string;
   /** 标题右边的动作，比如「新建文件夹」。折叠态一并隐藏 */
   action?: ReactNode;
+  /** Controlled section folding; independent of the rail's width. */
+  collapsed?: boolean;
+  onToggleCollapsed?: () => void;
   /**
    * 常规条目。和 `render` 二选一。
    */
@@ -140,6 +143,7 @@ export function NavRail({
   expanded, onToggleExpanded, collapsedWidth = COLLAPSED, expandedWidth = EXPANDED,
   className = '', label = '导航',
 }: NavRailProps) {
+  const sectionId = useId();
   // 只有调用方给了**非默认**宽度时才写内联（那意味着它自己承担覆盖的责任）
   const widthsEqualDefaults = expandedWidth === EXPANDED && collapsedWidth === COLLAPSED;
 
@@ -188,14 +192,22 @@ export function NavRail({
             */}
             {expanded && (g.title !== undefined || g.action !== undefined) && (
               <div className="nav-group-head mt-3 mb-1 flex items-center justify-between pl-2.5 pr-1">
-                {g.title !== undefined && (
+                {g.title !== undefined && (g.onToggleCollapsed ? (
+                  <button type="button" onClick={g.onToggleCollapsed}
+                    aria-expanded={!g.collapsed} aria-controls={`${sectionId}-${g.key}`}
+                    className="nav-section-title flex min-w-0 flex-1 items-center gap-1.5 rounded-[var(--radius-sm)] py-1 text-left text-xs font-medium text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]">
+                    <span className={`shrink-0 transition-transform ${g.collapsed ? '-rotate-90' : ''}`} aria-hidden="true"><IconChevronDown size={12} /></span>
+                    <span>{g.title}</span>
+                  </button>
+                ) : (
                   <span className="nav-section-title text-xs font-medium text-[var(--ink-secondary)]">
                     {g.title}
                   </span>
-                )}
+                ))}
                 {g.action}
               </div>
             )}
+            <div id={`${sectionId}-${g.key}`} hidden={Boolean(g.collapsed)}>
             {g.render !== undefined ? (
               g.render(expanded)
             ) : (
@@ -211,6 +223,7 @@ export function NavRail({
                 ))}
               </ul>
             )}
+            </div>
           </div>
         ))}
       </div>
@@ -238,7 +251,7 @@ export function NavRow({ entry, active, expanded, onClick }: {
         onClick={onClick}
         data-key={entry.key}
         aria-current={active ? 'page' : undefined}
-        title={expanded ? undefined : entry.label}
+        title={entry.label}
         className={`nav-item flex w-full rounded-[var(--radius-sm)] transition-colors duration-[var(--dur-fast)] ${
           expanded
             ? 'items-center gap-2.5 px-2.5 py-[7px] text-left text-sm'

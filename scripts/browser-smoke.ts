@@ -10,6 +10,9 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { createCipheriv, createHash, createHmac } from 'node:crypto';
 import type { VaultItem } from '../packages/vault/src/model';
+import { encryptCipher } from '../packages/vault/src/encrypt';
+import { decryptCipher, decryptFolder } from '../packages/vault/src/decrypt';
+import type { CipherDto } from '../packages/api/src/types';
 
 const ROOT = resolve(import.meta.dir, '..');
 const product = process.argv[2];
@@ -58,8 +61,16 @@ function encryptFixture(bytes: Uint8Array, encByte: number, macByte: number): st
   const mac = createHmac('sha256', Buffer.alloc(32, macByte)).update(iv).update(encrypted).digest();
   return `2.${iv.toString('base64')}|${encrypted.toString('base64')}|${mac.toString('base64')}`;
 }
-const encryptedAttachment = encryptFixture(attachmentContent, 41, 43);
+const attachmentParts = encryptFixture(attachmentContent, 41, 43).slice(2).split('|');
+const encryptedAttachment = Buffer.concat([Buffer.from([2]), Buffer.from(attachmentParts[0]!, 'base64'),
+  Buffer.from(attachmentParts[2]!, 'base64'), Buffer.from(attachmentParts[1]!, 'base64')]);
 const attachmentKey = encryptFixture(Buffer.concat([Buffer.alloc(32, 41), Buffer.alloc(32, 43)]), 17, 23);
+const folderRequests: unknown[] = [];
+const folderCreates: { name: string }[] = [];
+let rejectFolderMove = false;
+const cipherWrites: CipherDto[] = [];
+const cipherCreates: CipherDto[] = [];
+const savedDtos = new Map<string, CipherDto>();
 
 function check(label: string, passed: boolean, diagnostic = ''): void {
   if (!passed) throw new Error(`${label}${diagnostic ? `: ${diagnostic}` : ''}`);
@@ -69,8 +80,67 @@ function check(label: string, passed: boolean, diagnostic = ''): void {
 
 const site = Bun.serve({
   hostname: '127.0.0.1', port: 0,
-  fetch(request) {
+  async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/ciphers' && request.method === 'POST') {
+      const body = await request.json() as CipherDto;
+      const dto = { ...body, id: `smoke-registration-${cipherCreates.length + 1}`,
+        creationDate: new Date().toISOString(), revisionDate: new Date().toISOString(),
+        deletedDate: null, archivedDate: null, attachments: [] };
+      const record = await decryptCipher(dto, { encKey: Buffer.alloc(32, 17), macKey: Buffer.alloc(32, 23) });
+      cipherCreates.push(body); savedDtos.set(record.id, dto); seed.items.push(record);
+      return Response.json(dto);
+    }
+    if (url.pathname === '/api/folders' && request.method === 'POST') {
+      const body = await request.json() as { name: string };
+      folderCreates.push(body);
+      const dto = { id: `smoke-created-${folderCreates.length}`, name: body.name, revisionDate: '2026-10-09T16:05:00Z' };
+      seed.folders.push(await decryptFolder(dto, { encKey: Buffer.alloc(32, 17), macKey: Buffer.alloc(32, 23) }));
+      return Response.json(dto);
+    }
+    if (url.pathname === '/api/ciphers/move' && request.method === 'POST') {
+      const body = await request.json() as { folderId: string | null; ids: string[] };
+      folderRequests.push(body);
+      if (rejectFolderMove) return Response.json({ message: 'Synthetic folder move rejected' }, { status: 403 });
+      for (const record of seed.items) if (body.ids.includes(record.id)) {
+        record.folderId = body.folderId; record.updatedAt = '2026-10-09T16:00:00Z';
+      }
+      return new Response(null, { status: 204 });
+    }
+    if (url.pathname.endsWith('/partial') && request.method === 'PUT') {
+      const record = seed.items.find(record => url.pathname === `/api/ciphers/${record.id}/partial`);
+      if (record) {
+        const body = await request.json() as { folderId?: string | null; favorite: boolean };
+        record.folderId = body.folderId ?? null; record.favorite = body.favorite;
+        return new Response(null, { status: 204 });
+      }
+    }
+    if (url.pathname.startsWith('/api/ciphers/') && request.method === 'PUT') {
+      const index = seed.items.findIndex(record => url.pathname === `/api/ciphers/${record.id}`);
+      if (index >= 0) {
+        const record = seed.items[index]!;
+        const body = await request.json() as CipherDto;
+        const dto = { ...body, id: record.id, creationDate: record.createdAt, revisionDate: new Date().toISOString(),
+          deletedDate: null, archivedDate: null, attachments: record.attachments.map(attachment => ({
+            ...attachment, fileName: encryptFixture(Buffer.from(attachment.fileName), 17, 23),
+          })) };
+        seed.items[index] = await decryptCipher(dto, { encKey: Buffer.alloc(32, 17), macKey: Buffer.alloc(32, 23) });
+        cipherWrites.push(body); savedDtos.set(record.id, dto);
+        return Response.json(dto);
+      }
+    }
+    if (url.pathname.startsWith('/api/ciphers/') && request.method === 'GET') {
+      const record = seed.items.find(record => url.pathname === `/api/ciphers/${record.id}`);
+      if (record) {
+        const saved = savedDtos.get(record.id);
+        if (saved) return Response.json(saved);
+        const body = await encryptCipher(record, { encKey: Buffer.alloc(32, 17), macKey: Buffer.alloc(32, 23) }, {});
+        return Response.json({ ...body, id: record.id, creationDate: record.createdAt, revisionDate: record.updatedAt,
+          deletedDate: null, archivedDate: null, attachments: record.attachments.map(attachment => ({
+            ...attachment, fileName: encryptFixture(Buffer.from(attachment.fileName), 17, 23),
+          })) });
+      }
+    }
     if (url.pathname === '/attachment') return new Response(encryptedAttachment);
     if (url.pathname === '/api/ciphers/smoke-alpha/attachment/smoke-file') {
       return Response.json({ id: 'smoke-file', url: `${url.origin}/attachment` });
@@ -92,10 +162,12 @@ function item(id: string, title: string, date: string): VaultItem {
     id, name: title, type: 'login', rawType: 1, nameFailed: false, notes: 'Synthetic smoke fixture',
     notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: date, updatedAt: date, deletedAt: null, archivedAt: null, wrappedKey: null,
-    login: { username, password: secret, uris: [{ uri: siteUrl, match: 1 }], totp: null,
-      passwordRevisionDate: null, fido2Credentials: [] },
+    login: { username, password: secret, uris: [{ uri: siteUrl, match: 1 }, { uri: 'https://old.example.invalid', match: 0 },
+        { uri: 'https://keep.example.invalid', match: 3 }], totp: null,
+      passwordRevisionDate: '2026-01-01T00:00:00Z', fido2Credentials: [] },
     card: null, identity: null, secureNote: null, sshKey: null,
-    customFields: [], passwordHistory: [], attachments: id === 'smoke-alpha' ? [{
+    customFields: [{ name: 'Toggle smoke', value: 'false', type: 2, linkedId: null },
+      { name: 'Linked smoke', value: '', type: 3, linkedId: 100 }], passwordHistory: [], attachments: id === 'smoke-alpha' ? [{
       id: 'smoke-file', fileName: 'smoke-attachment.txt', size: String(encryptedAttachment.length), sizeName: '32 B',
       url: `${new URL(siteUrl).origin}/attachment`, key: attachmentKey, failed: false,
     }] : [],
@@ -107,7 +179,8 @@ const seed = {
   account, userKey: { encKey: Buffer.alloc(32, 17).toString('base64'), macKey: Buffer.alloc(32, 23).toString('base64') },
   items: [item('smoke-alpha', 'Alpha smoke login', '2026-01-01T00:00:00Z'),
     item('smoke-zulu', 'Zulu smoke login', '2026-02-01T00:00:00Z')],
-  folders: [], token: null, expiresAt: Date.now() + 15 * 60 * 1000,
+  folders: [{ id: 'work', name: 'Synthetic Work', nameFailed: false, updatedAt: '2026-01-01T00:00:00Z' }],
+  token: { accessToken: 'synthetic-smoke-token', expiresIn: 3600, kdf: 0 }, expiresAt: Date.now() + 15 * 60 * 1000,
 };
 
 let browser: any;
@@ -133,6 +206,7 @@ async function click(selector: string): Promise<void> {
     element = await popup.evaluateHandle((q: string, t: string) => Array.from(document.querySelectorAll(q))
       .find((node) => node.textContent?.trim().startsWith(t)), query, text);
   } else element = await popup.waitForSelector(selector, { visible: true });
+  await element.evaluate((node: HTMLElement) => node.scrollIntoView({ block: 'center' }));
   // Firefox 156/157 also rejects BiDi input.performActions on extension pages.
   if (name === 'firefox') await element.evaluate((button: HTMLElement) => button.click());
   else {
@@ -285,16 +359,131 @@ try {
   await screenshot('detail-440');
   await click('[aria-label="隐藏"]');
   check('hide removes revealed value', !(await popup.evaluate(() => document.body.textContent)).includes(secret));
+  check('detail shows folder selection and record metadata', await popup.$('[data-item-folder]') !== null
+    && await popup.evaluate(() => ['创建时间', '更新时间', '密码更新', '记录 ID'].every(label => document.body.textContent?.includes(label))));
+  await popup.select('[data-item-folder]', 'work');
+  await popup.waitForFunction(() => {
+    const picker = document.querySelector<HTMLSelectElement>('[data-item-folder]');
+    return picker?.value === 'work' && !picker.disabled;
+  });
+  const filed = await rpc('getItem', ['smoke-alpha']);
+  check('detail folder choice updates the real background record and revision', filed.ok
+    && filed.result.summary.folderId === 'work' && filed.result.summary.updatedAt === seed.items[0]!.updatedAt);
+  check('folder mutation sends only membership and retains masked credentials',
+    JSON.stringify(folderRequests[0]) === JSON.stringify({ folderId: 'work', ids: ['smoke-alpha'] })
+    && !(await popup.evaluate(() => document.body.textContent)).includes(secret));
+  check('folder assignment preserves attachment metadata', filed.result.attachments[0]?.fileName === 'smoke-attachment.txt');
+  await click('[aria-label="加入收藏"]');
+  await popup.waitForSelector('[aria-label="取消收藏"]');
+  check('favoriting a filed record retains folder membership on the server', seed.items[0]!.folderId === 'work' && seed.items[0]!.favorite);
+  await click('[data-folder-organization] button::-p-text(查看)');
+  await popup.waitForFunction(() => document.querySelector('.vault-detail')?.getAttribute('data-state') === 'closed');
+  check('opening the folder returns to an interactive list in a narrow window',
+    await popup.$eval('.vault-list', (list: HTMLElement) => !list.inert));
+  await openNavigation();
+  await click('nav button::-p-text(全部)');
+  await click('.vault-list li > button');
+  await popup.waitForSelector('[data-item-folder]', { visible: true });
+  rejectFolderMove = true;
+  await popup.select('[data-item-folder]', '');
+  await popup.waitForSelector('.vault-detail [role="alert"]');
+  check('rejected assignment leaves the saved folder selected and exposes the error',
+    await popup.$eval('[data-item-folder]', (picker: HTMLSelectElement) => picker.value === 'work' && !picker.disabled)
+      && (await rpc('getItem', ['smoke-alpha'])).result.summary.folderId === 'work');
+  // Error notifications persist until dismissed; close this deliberate rejection before testing the editor footer.
+  await click('[aria-label="关闭通知"]');
+  rejectFolderMove = false;
+  await popup.select('[data-item-folder]', '');
+  await popup.waitForFunction(() => {
+    const picker = document.querySelector<HTMLSelectElement>('[data-item-folder]');
+    return picker?.value === '' && !picker.disabled;
+  });
+  check('detail can remove folder membership without changing its password',
+    (await rpc('getItem', ['smoke-alpha'])).result.summary.folderId === null
+      && (await rpc('reveal', ['smoke-alpha', { kind: 'password' }])).result === secret);
+  await click('[data-folder-organization] button::-p-text(新建文件夹)');
+  await type('[data-item-folder-name]', '  Synthetic Created  ');
+  await click('[data-folder-organization] button::-p-text(创建并归类)');
+  await popup.waitForFunction(() => {
+    const picker = document.querySelector<HTMLSelectElement>('[data-item-folder]');
+    return picker?.value === 'smoke-created-1' && !picker.disabled;
+  });
+  const createdFolderDetail = await rpc('getItem', ['smoke-alpha']);
+  check('detail creates an encrypted folder and immediately assigns the selected record',
+    folderCreates.length === 1 && /^2\./.test(folderCreates[0]!.name)
+      && !JSON.stringify(folderCreates).includes('Synthetic Created')
+      && seed.folders.find(folder => folder.id === 'smoke-created-1')?.name === 'Synthetic Created'
+      && createdFolderDetail.result.summary.folderId === 'smoke-created-1');
+  check('new folder becomes available in the shared snapshot and keeps record secrets masked',
+    (await rpc('snapshot')).result.folders.some((folder: any) => folder.id === 'smoke-created-1' && folder.name === 'Synthetic Created')
+      && !(await popup.evaluate(() => document.body.textContent)).includes(secret)
+      && createdFolderDetail.result.attachments[0]?.fileName === 'smoke-attachment.txt');
+  await screenshot('created-folder-detail-440');
+  await popup.select('[data-item-folder]', '');
+  await popup.waitForFunction(() => {
+    const picker = document.querySelector<HTMLSelectElement>('[data-item-folder]');
+    return picker?.value === '' && !picker.disabled;
+  });
   await click('button::-p-text(编辑)');
   await popup.waitForSelector('#editor-title', { visible: true });
   check('editor loads selected record through explicit draft RPC',
     (await popup.$eval('#editor-title', (node: Element) => node.textContent)) === '编辑条目');
   await screenshot('editor-440');
+  check('saved editor omits unused native fields and retains one Add More entrance',
+    await popup.$('[aria-label="验证码"]') === null
+      && await popup.$$eval('[data-editor-add-more]', (nodes: Element[]) => nodes.length === 1));
+  await click('[data-editor-add-more]');
+  check('Add More omits visible singletons and offers repeatable websites and actual custom types',
+    await popup.$('[data-add-field="login.password"]') === null && await popup.$('[data-add-field="login.uris"]') !== null
+      && await popup.$eval('#editor-add-more-menu', (menu: Element) => ['自定义 · 文本', '自定义 · 隐藏', '自定义 · 开关', '自定义 · 关联'].every(label => menu.textContent?.includes(label))));
+  await screenshot('add-more-picker-440');
+  await click('[data-add-field="login.totp"]');
+  check('Add More selects and focuses the chosen native control',
+    await popup.$eval('[aria-label="验证码"]', (input: HTMLInputElement) => document.activeElement === input && input.value === ''));
+  await screenshot('optional-control-440');
+
   check('editor exposes one cancel action without a duplicate header close', await popup.$('.panel-head [aria-label="关闭"]') === null);
   await click('.panel-foot button::-p-text(取消)');
   await popup.waitForSelector('[aria-label="返回列表"]', { visible: true });
   check('editor cancel returns to selected detail', true);
+  check('record metadata is a compact footer', await popup.$eval('[data-record-info]', (node: HTMLElement) =>
+    node.tagName === 'FOOTER' && parseFloat(getComputedStyle(node).fontSize) <= 12));
+  await click('button::-p-text(编辑)');
+  await popup.waitForSelector('[aria-label="网址 3"]');
+  check('editor presents every saved URL and its match rule',
+    await popup.$eval('[aria-label="网址 3"]', (input: HTMLInputElement) => input.value === 'https://keep.example.invalid')
+    && await popup.$eval('[aria-label="网址 3 匹配方式"]', (input: HTMLSelectElement) => input.value === '3'));
+  await popup.$eval('[aria-label="删除网址 2"]', (button: HTMLElement) => button.scrollIntoView({ block: 'center' }));
+  await click('[aria-label="删除网址 2"]');
+  await click('[data-editor-add-more]');
+  await click('[data-add-field="login.uris"]');
+  await type('[aria-label="网址 3"]', 'https://new.example.invalid');
+  await click('[data-editor-url="2"] summary');
+  await popup.select('[aria-label="网址 3 匹配方式"]', '5');
+  await popup.$eval('[aria-label="字段 1 开关"]', (button: HTMLElement) => button.scrollIntoView({ block: 'center' }));
+  await click('[aria-label="字段 1 开关"]');
+  await popup.select('[aria-label="字段 2 关联目标"]', '101');
+  await click('.panel-foot button::-p-text(保存)');
+  await popup.waitForFunction(() => !document.querySelector('#editor-title'));
+  await popup.waitForSelector('[data-record-info]');
+  const edited = await rpc('getItem', ['smoke-alpha']);
+  check('saving URL additions and deletions preserves the other URLs and native matching', edited.ok
+    && JSON.stringify(edited.result.login.uris) === JSON.stringify([
+      { uri: siteUrl, match: 1 }, { uri: 'https://keep.example.invalid', match: 3 }, { uri: 'https://new.example.invalid', match: 5 },
+    ]));
+  check('native boolean and linked fields round trip through the editor and encrypted API',
+    edited.result.customFields[0].value === 'true' && edited.result.customFields[1].value === null
+    && edited.result.customFields[1].linkedId === 101
+    && (await rpc('reveal', ['smoke-alpha', { kind: 'custom', index: 1 }])).result === secret
+    && cipherWrites.length === 1 && !JSON.stringify(cipherWrites).includes(secret));
+  check('ordinary edits retain attachment metadata and do not add password history',
+    edited.result.attachments[0]?.fileName === 'smoke-attachment.txt' && edited.result.passwordHistory.length === 0);
+  await screenshot('edited-detail-440');
+  const downloaded = await rpc('downloadAttachment', ['smoke-alpha', 'smoke-file']);
+  check('attachment decrypts native binary through the extension bridge', downloaded.ok
+    && Buffer.from(downloaded.result.dataBase64, 'base64').equals(attachmentContent));
   if (process.env.ONEWARDEN_SMOKE_ATTACHMENTS === '1') {
+    await popup.evaluate(() => Array.from(document.querySelectorAll('button')).find(button => button.textContent?.trim() === '取回')?.scrollIntoView({ block: 'center' }));
     await click('button::-p-text(取回)');
     console.log(`  Waiting for attachment download; test destination: ${downloads}`);
     await popup.waitForFunction(async () => {
@@ -372,13 +561,67 @@ try {
   await login.waitForFunction((expected: string) => (document.querySelector('#password') as HTMLInputElement)?.value === expected, {}, secret);
   check('real site receives username and password', await login.$eval('#email', (input: HTMLInputElement) => input.value) === username);
 
+  // Exercise the site's actual submit event and content script, including native
+  // new-password/confirmation roles. Saving remains an explicit popup action.
+  const registeredUsername = 'registration-smoke@example.invalid';
+  const registeredPassword = 'Synthetic-New-Registration!42';
+  const changedPassword = 'Synthetic-Changed-Registration!43';
+  async function submitCredentialForm(changing: boolean): Promise<void> {
+    await login.evaluate(({ changing, user, original, changed }) => {
+      const form = document.querySelector('form')!;
+      form.innerHTML = '<label>Email<input id="email" type="email" autocomplete="username"></label>'
+        + (changing ? '<label>Current password<input id="current" type="password" autocomplete="current-password"></label>' : '')
+        + '<label>New password<input id="new-password" type="password" autocomplete="new-password"></label>'
+        + '<label>Confirm password<input id="confirm-password" type="password" autocomplete="new-password"></label>'
+        + '<button type="submit">Submit</button>';
+      (form.querySelector('#email') as HTMLInputElement).value = user;
+      if (changing) (form.querySelector('#current') as HTMLInputElement).value = original;
+      (form.querySelector('#new-password') as HTMLInputElement).value = changing ? changed : original;
+      (form.querySelector('#confirm-password') as HTMLInputElement).value = changing ? changed : original;
+      form.requestSubmit();
+    }, { changing, user: registeredUsername, original: registeredPassword, changed: changedPassword });
+  }
+  async function pendingCapture(action: string) {
+    await popup.waitForFunction(async (id: number, action: string, user: string) => {
+      const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+      const response = await api.runtime.sendMessage({ type: '1warden:pending', tabId: id });
+      return response.pending?.action === action && response.pending?.username === user;
+    }, {}, tabId, action, registeredUsername);
+    return popup.evaluate(async (id: number) => {
+      const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+      return api.runtime.sendMessage({ type: '1warden:pending', tabId: id });
+    }, tabId);
+  }
+  const saveCapture = () => popup.evaluate(async (id: number) => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return api.runtime.sendMessage({ type: '1warden:save-capture', tabId: id, application: true });
+  }, tabId);
+  await submitCredentialForm(false);
+  const registration = await pendingCapture('save');
+  check('registration with new-password and confirmation prompts before writing',
+    cipherCreates.length === 0 && !JSON.stringify(registration).includes(registeredPassword));
+  check('registration save confirmation succeeds', (await saveCapture()).ok === true);
+  const created = seed.items.find(record => record.login?.username === registeredUsername)!;
+  check('registration creates one encrypted record with the correct username and new password',
+    cipherCreates.length === 1 && created?.login?.password === registeredPassword
+      && created.login.uris[0]?.uri === siteUrl && !JSON.stringify(cipherCreates).includes(registeredPassword));
+  await submitCredentialForm(true);
+  const change = await pendingCapture('update');
+  check('change-password targets the existing login and awaits confirmation',
+    change.pending.itemId === created.id && seed.items.find(record => record.id === created.id)?.login?.password === registeredPassword);
+  check('change-password confirmation succeeds', (await saveCapture()).ok === true);
+  const updatedLogin = seed.items.find(record => record.id === created.id)!;
+  check('change-password saves the new password and preserves the old password in history',
+    updatedLogin.login?.password === changedPassword && updatedLogin.passwordHistory[0]?.password === registeredPassword
+      && cipherCreates.length === 1 && !JSON.stringify(cipherWrites).includes(changedPassword));
+
   await openPopup(true);
   await enterHome();
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   await screenshot('vault-440');
   if (process.env.ONEWARDEN_SMOKE_CLIPBOARD === '1') {
     const copyPassword = async () => {
-      await click('.vault-list li > button');
+      await click('.vault-list li > button span::-p-text(Alpha smoke login)');
       await click('div.group:has(> span[title="密码"]) button[aria-label="复制"]');
       await popup.waitForSelector('button[aria-label="已复制"]');
       check('real shared copy button writes the revealed password',

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeUserKey, encryptBytes } from '@1warden/crypto';
+import { makeUserKey, encryptBytes, parseEncString, concatBytes } from '@1warden/crypto';
 import type { SymmetricKey } from '@1warden/crypto';
-import { unwrapAttachmentKey, decryptAttachmentContent, attachmentBytes } from './attachments';
+import { unwrapAttachmentKey, decryptAttachmentContent, attachmentBytes, encryptAttachmentContent } from './attachments';
 
 let key: SymmetricKey;
 beforeAll(() => { key = makeUserKey(); });
@@ -101,5 +101,29 @@ describe('attachmentBytes', () => {
 
   it('returns null for an empty size', () => {
     expect(attachmentBytes({ size: '' })).toBeNull();
+  });
+});
+
+
+describe('native attachment binary format', () => {
+  it('rejects an unauthenticated downgrade with a modified IV', async () => {
+    const binary = await encryptAttachmentContent(new TextEncoder().encode('original attachment data'), key);
+    const downgraded = concatBytes(new Uint8Array([0]), binary.slice(1, 17), binary.slice(49));
+    downgraded[1] = downgraded[1]! ^ 'o'.charCodeAt(0) ^ 'X'.charCodeAt(0);
+    await expect(decryptAttachmentContent(downgraded, key)).rejects.toThrow();
+  });
+  it('accepts type byte, IV, MAC, ciphertext instead of interpreting binary as UTF-8', async () => {
+    const original = new Uint8Array([0, 255, 128]);
+    const parts = parseEncString(await encryptBytes(original, key));
+    const binary = concatBytes(new Uint8Array([2]), parts.iv!, parts.mac!, parts.data);
+    expect(await decryptAttachmentContent(binary, key)).toEqual(original);
+  });
+  it('writes the native binary envelope and rejects tampering', async () => {
+    const binary = await encryptAttachmentContent(new Uint8Array([0, 255]), key);
+    expect(binary[0]).toBe(2);
+    expect(binary.length).toBe(65);
+    expect(await decryptAttachmentContent(binary, key)).toEqual(new Uint8Array([0, 255]));
+    binary[20] = binary[20]! ^ 1;
+    await expect(decryptAttachmentContent(binary, key)).rejects.toThrow();
   });
 });

@@ -74,13 +74,18 @@ export class HttpClient {
    * 都不是常规路径，混在一起会让「什么时候拼 baseUrl」变成一个要读注释才知道的事。
    */
   async requestAbsolute(
-    method: string, url: string, opts: { raw?: Uint8Array } = {},
+    method: string, url: string, opts: { raw?: Uint8Array; headers?: Record<string, string> } = {},
   ): Promise<Response> {
     const headers: Record<string, string> = {
       Accept: '*/*',
       ...this.headerFn?.(),
     };
     if (opts.raw !== undefined) headers['Content-Type'] = 'application/octet-stream';
+    Object.assign(headers, opts.headers);
+    const target = new URL(url, this.baseUrl);
+    if (target.origin !== new URL(this.baseUrl).origin || target.username || target.password) {
+      throw new ApiError('malformedResponse', '附件上传地址不属于当前服务器');
+    }
 
     // ⚠️ 绝对 URL 的接口要**自己检查**它是不是绝对的。
     // 服务端给的地址可能是相对路径（版本差异），直接丢给 fetch 只会得到
@@ -99,6 +104,7 @@ export class HttpClient {
         // ⚠️ 传**字节**，不是字符串 —— 传字符串会经 UTF-8 编码把内容改掉
         ...(opts.raw === undefined ? {} : { body: opts.raw as unknown as BodyInit }),
         signal: controller.signal,
+        redirect: 'error',
       });
       if (!res.ok) {
         const kind = res.status === 404 ? 'notFound'
@@ -116,9 +122,12 @@ export class HttpClient {
     const headers: Record<string, string> = {
       // 附件是任意二进制，不能要 JSON
       Accept: '*/*',
-      ...this.headerFn?.(),
       ...opts.headers,
     };
+    const target = new URL(url);
+    if (!['http:', 'https:'].includes(target.protocol) || target.username || target.password) {
+      throw new ApiError('malformedResponse', '附件下载地址不正确');
+    }
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), this.timeoutMs);
     opts.signal?.addEventListener('abort', () => controller.abort(), { once: true });

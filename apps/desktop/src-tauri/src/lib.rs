@@ -42,6 +42,8 @@ mod http;
 mod autotype;
 #[cfg(desktop)]
 mod save;
+#[cfg(desktop)]
+mod website;
 mod hotkey;
 #[cfg(target_os = "windows")]
 mod windows;
@@ -190,6 +192,8 @@ pub fn run() {
             // 那边走的是分享面板，是另一套东西，不是这一套的移植
             #[cfg(desktop)]
             save::save_file,
+            #[cfg(desktop)]
+            website::open_website,
             #[cfg(target_os = "macos")]
             biometric::biometric_status,
             #[cfg(target_os = "macos")]

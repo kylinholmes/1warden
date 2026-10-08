@@ -74,6 +74,7 @@
      */
     .tile-img,
     .tile-avatar,
+    .tile-card-brand,
     .tile-glyph {
       display: grid;
       place-items: center;
@@ -82,6 +83,18 @@
       height: var(--tile-size, 34px);
       border-radius: calc(var(--tile-size, 34px) * 0.265);
       overflow: hidden;
+    }
+
+    .tile-card-brand {
+      background: #fff;
+      padding: 2px;
+      box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
+    }
+    .tile-card-brand img {
+      display: block;
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
     }
 
     /* 站点图标：favicon 底色多半是白的，留一点内边距免得贴边裁掉边缘 */
@@ -159,8 +172,15 @@
       inset: 0;
       display: flex;
       flex-direction: column;
-      overflow-y: auto;
+      overflow: hidden;
       background: var(--surface-paper);
+    }
+
+    /* Keep the native titlebar inset outside scrolling content. */
+    .vault-detail-scroll {
+      min-height: 0;
+      flex: 1;
+      overflow-y: auto;
     }
 
     /*

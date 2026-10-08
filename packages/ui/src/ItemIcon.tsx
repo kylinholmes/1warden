@@ -34,6 +34,7 @@ import { useEffect } from 'react';
 import { avatarOf, iconDomainOf, type VaultItem } from '@1warden/vault';
 import type { IconStore } from '@1warden/vault';
 import { TypeIcon } from './icons';
+import { cardBrandLogo } from './card-brand';
 
 /**
  * 图标要的四样东西。
@@ -56,6 +57,7 @@ export interface IconProps {
   text: string;
   hue: number;
   type: string;
+  cardBrand?: string | null | undefined;
 }
 
 /**
@@ -67,10 +69,11 @@ export interface IconProps {
  */
 export function iconPropsOf(item: VaultItem): IconProps {
   const avatar = avatarOf(item);
-  return { iconDomain: iconDomainOf(item), text: avatar.text, hue: avatar.hue, type: item.type };
+  return { iconDomain: iconDomainOf(item), text: avatar.text, hue: avatar.hue, type: item.type,
+    ...(item.type === 'card' ? { cardBrand: item.card?.brand ?? null } : {}) };
 }
 
-export function ItemIcon({ iconDomain, text, hue, type, store, size }: IconProps & {
+export function ItemIcon({ iconDomain, text, hue, type, cardBrand, store, size }: IconProps & {
   store: IconStore | null;
   /** 块边长。默认 34px（列表行）—— 详情栏头部用 36 */
   size?: number;
@@ -81,17 +84,19 @@ export function ItemIcon({ iconDomain, text, hue, type, store, size }: IconProps
       text={text}
       hue={hue}
       type={type}
+      cardBrand={cardBrand}
       store={store}
       {...(size === undefined ? {} : { size })}
     />
   );
 }
 
-export function IconGlyph({ domain, text, hue, type, store, size }: {
+export function IconGlyph({ domain, text, hue, type, cardBrand, store, size }: {
   domain: string | null;
   text: string;
   hue: number;
   type: string;
+  cardBrand?: string | null | undefined;
   store: IconStore | null;
   size?: number;
 }) {
@@ -105,7 +110,7 @@ export function IconGlyph({ domain, text, hue, type, store, size }: {
     // 换了条目就把上一个的图标清掉，否则会先显示上一条的图标再换 ——
     // 列表滚动时那一下闪烁很明显
     setUrl(null);
-    if (domain === null || store === null) return;
+    if (type === 'card' || domain === null || store === null) return;
 
     let alive = true;
     void store.get(domain).then((u) => {
@@ -113,7 +118,7 @@ export function IconGlyph({ domain, text, hue, type, store, size }: {
       if (alive) setUrl(u);
     });
     return () => { alive = false; };
-  }, [store, domain]);
+  }, [store, domain, type]);
 
   /*
    * 尺寸走 CSS 变量而不是内联 width/height —— 三个类各自就是那个方块，
@@ -129,7 +134,12 @@ export function IconGlyph({ domain, text, hue, type, store, size }: {
     ...(size === undefined ? {} : { '--tile-size': `${size}px` }),
   } as React.CSSProperties;
 
-  if (url !== null) {
+  const network = type === 'card' ? cardBrandLogo(cardBrand) : null;
+  if (network) return <span className="tile-card-brand" style={style} title={network.name} data-card-brand={network.id}>
+    <img src={network.src} alt={network.name} draggable={false} />
+  </span>;
+
+  if (url !== null && type !== 'card') {
     // alt 留空：紧接着就是条目的名字，读屏软件念两遍同一个东西反而更糟
     return <img src={url} alt="" className="tile-img" style={style} draggable={false} />;
   }

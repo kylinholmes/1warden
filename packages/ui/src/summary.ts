@@ -70,6 +70,8 @@ export interface ItemSummary {
   iconDomain: string | null;
   avatarText: string;
   avatarHue: number;
+  /** Display-only payment network; never includes the full number or security code. */
+  cardBrand?: string | null | undefined;
 }
 
 /**
@@ -101,5 +103,6 @@ export function summarise(i: VaultItem): ItemSummary {
     iconDomain: iconDomainOf(i),
     avatarText: av.text,
     avatarHue: av.hue,
+    ...(i.type === 'card' ? { cardBrand: i.card?.brand ?? null } : {}),
   };
 }

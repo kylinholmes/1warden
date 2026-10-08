@@ -93,6 +93,14 @@ describe('toNativeRequest —— 二进制体', () => {
 });
 
 describe('toNativeRequest', () => {
+  it('carries redirect mode from RequestInit and Request while retaining the fetch default', async () => {
+    expect((await toNativeRequest('https://a.test', { redirect: 'error' }))).toHaveProperty('redirect', 'error');
+    const request = new Request('https://a.test', { redirect: 'manual' });
+    expect(await toNativeRequest(request)).toHaveProperty('redirect', 'manual');
+    expect(await toNativeRequest(request, { redirect: 'follow' })).toHaveProperty('redirect', 'follow');
+    expect(await toNativeRequest('https://a.test')).toHaveProperty('redirect', 'follow');
+  });
+
   it('uppercases the method and defaults to GET', async () => {
     expect((await toNativeRequest('https://a.test', { method: 'post' })).method).toBe('POST');
     expect((await toNativeRequest('https://a.test')).method).toBe('GET');

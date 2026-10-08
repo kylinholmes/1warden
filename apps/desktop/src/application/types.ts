@@ -35,14 +35,19 @@ export type SecretRef =
 /** A selected record's presentation. Secret values require an explicit reveal. */
 export interface ItemDetailData {
   summary: ItemSummary;
+  /** Some encrypted fields could not be read; never present them as simply absent. */
+  decryptionFailed?: boolean;
   rawType: number;
   notes: string | null;
   notesFailed: boolean;
-  login: { username: string | null; uris: LoginUri[]; hasPassword: boolean; hasTotp: boolean } | null;
+  login: { username: string | null; uris: LoginUri[]; hasPassword: boolean; hasTotp: boolean;
+    passwordRevisionDate?: string | null; passkeyCount?: number;
+    passkeys?: { credentialId: string; rpId: string; rpName: string | null;
+      userName: string | null; userDisplayName: string | null; creationDate: string }[] } | null;
   card: (Omit<CardFields, 'number' | 'code'> & { hasNumber: boolean; hasCode: boolean }) | null;
   identity: IdentityFields | null;
   sshKey: { publicKey: string | null; fingerprint: string | null; hasPrivateKey: boolean } | null;
-  customFields: { name: string; value: string | null; type: 0 | 1 | 2 | 3; linkedId: number | null }[];
+  customFields: { name: string; value: string | null; type: 0 | 1 | 2 | 3; linkedId: number | null; hasValue?: boolean }[];
   passwordHistory: { lastUsedDate: string }[];
   attachments: Pick<Attachment, 'id' | 'fileName' | 'size' | 'sizeName' | 'failed'>[];
 }
@@ -84,14 +89,19 @@ export interface ApplicationService {
   recordDevice(device: ProfileDeviceInput): Promise<void>;
   saveItem(draft: VaultItem): Promise<ItemSummary>;
   toggleFavorite(id: string): Promise<void>;
+  moveToFolder(id: string, folderId: string | null): Promise<void>;
   moveToTrash(id: string): Promise<void>;
   deletePermanently(id: string): Promise<void>;
-  createFolder(name: string): Promise<void>;
+  createFolder(name: string): Promise<VaultFolder>;
   renameFolder(id: string, name: string): Promise<void>;
   deleteFolder(id: string): Promise<void>;
   reveal(id: string, field: SecretRef): Promise<string>;
   totp(id: string): Promise<{ code: string; remaining: number; period: number } | null>;
   downloadAttachment(id: string, attachmentId: string): Promise<{ fileName: string; dataBase64: string }>;
+  uploadAttachment(id: string, fileName: string, dataBase64: string): Promise<void>;
+  deleteAttachment(id: string, attachmentId: string): Promise<void>;
+  removePasskey(id: string, credentialId: string): Promise<void>;
+  clearPasswordHistory(id: string): Promise<void>;
   securityReport(now: number): Promise<ReportBrief>;
   checkBreaches(): Promise<ReportBrief['breached']>;
   parseImport(file: ImportFile): Promise<ImportPreview>;

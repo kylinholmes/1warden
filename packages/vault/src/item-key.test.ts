@@ -141,10 +141,11 @@ describe('带独立密钥的条目', () => {
     expect(after.wrappedKey).toBe(before);
   });
 
-  it('treats an item with no key as using the user key', async () => {
-    const { client, item, userKey } = await setup();
-    const plain = { ...item(), wrappedKey: null };
-    expect(() => client.saveItem(plain)).not.toThrow();
-    void userKey;
+  it('retains the owner key when an edit supplies a different wrapping key', async () => {
+    const { client, item, itemKey, saved } = await setup();
+    const before = item().wrappedKey;
+    const after = await client.saveItem({ ...item(), wrappedKey: null, name: 'Preserved' });
+    expect(after.wrappedKey).toBe(before);
+    await expect(decryptString(String(saved()!['name']), itemKey)).resolves.toBe('Preserved');
   });
 });

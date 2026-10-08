@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeUserKey, encryptString } from '@1warden/crypto';
+import { makeUserKey, encryptString, decryptString } from '@1warden/crypto';
 import type { SymmetricKey } from '@1warden/crypto';
 import type { CipherDto, CipherFido2CredentialDto } from '@1warden/api';
 import { decryptCipher } from './decrypt';
@@ -39,24 +39,15 @@ function loginItem(over: Partial<VaultItem> = {}): VaultItem {
 }
 
 describe('passkey 的线上形态', () => {
-  /**
-   * ⚠️ 只有 `keyValue` 加密。
-   * 整条一起加密的话，官方 Bitwarden 客户端读不出来 —— 用户换回去就丢 passkey；
-   * 而一个都不加密的话，私钥就明文躺在服务器上。
-   */
-  it('encrypts keyValue and leaves the metadata plaintext', async () => {
+  // Official Bitwarden domain model stores every metadata string as EncString.
+  it('encrypts native passkey metadata and keeps creationDate plaintext', async () => {
     const body = await encryptCipher(loginItem(), key, {});
-    const cred = body.login?.fido2Credentials?.[0];
-    expect(cred).toBeDefined();
-
-    expect(cred!.keyValue).toMatch(/^2\./);          // EncString
-    expect(cred!.keyValue).not.toContain(PASSKEY.keyValue);
-    // 元数据必须留在明文里，否则别的客户端解不出来
-    expect(cred!.rpId).toBe('github.com');
-    expect(cred!.credentialId).toBe('aBcD1234');
-    expect(cred!.counter).toBe('7');
-    expect(cred!.discoverable).toBe('true');
-    expect(cred!.userName).toBe('kylin@example.com');
+    const cred = body.login!.fido2Credentials![0]!;
+    for (const [field, value] of Object.entries(PASSKEY)) {
+      if (field === 'creationDate') continue;
+      expect(await decryptString(cred[field as keyof typeof cred]!, key)).toBe(value);
+    }
+    expect(cred.creationDate).toBe('2026-01-01T00:00:00.000000Z');
   });
 
   it('round-trips through encrypt and decrypt unchanged', async () => {
@@ -73,7 +64,7 @@ describe('passkey 的线上形态', () => {
       fields: [], passwordHistory: [],
     };
     const item = await decryptCipher(dto, key);
-    expect(item.login?.fido2Credentials).toEqual([PASSKEY]);
+    expect(item.login?.fido2Credentials).toEqual([expect.objectContaining(PASSKEY)]);
   });
 
   /** 条目上原本没有 passkey 时，字段是空数组而不是 undefined —— 省得每个调用方都判空 */

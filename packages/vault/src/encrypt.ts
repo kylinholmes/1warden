@@ -1,8 +1,9 @@
-import { encryptString } from '@1warden/crypto';
+import { encryptString, sha256, utf8Encode, toBase64 } from '@1warden/crypto';
 import type { SymmetricKey } from '@1warden/crypto';
 import type { CipherWriteBody, CipherFido2CredentialDto } from '@1warden/api';
 import type { StoredPasskey } from './passkey';
 import type { VaultItem, ItemType } from './model';
+import { preserveCipherData } from './preservation';
 
 export interface EncryptOptions {
   /** 条目独立密钥；`hasItemKey` 为 true 时必须提供，否则字段会用错密钥加密 */
@@ -29,30 +30,16 @@ async function enc(v: string | null | undefined, key: SymmetricKey): Promise<str
   return encryptString(v, key);
 }
 
-/**
- * 一条 passkey → 线上形态。
- *
- * ⚠️ **只加密 `keyValue`**（PKCS#8 私钥），其余字段留明文。
- * 这是 Bitwarden 客户端的约定：元数据（rpId、用户名、计数）本来就不是秘密，
- * 整条一起加密的话官方客户端读不出来 —— 用户哪天换回官方客户端，passkey 就丢了。
- * 反过来一个都不加密，私钥就明文躺在服务器上。真正的秘密只有那把私钥。
+/** Native Bitwarden encrypts credential metadata as well as keyValue; creationDate is plain.
+ * Source: bitwarden/clients libs/common/src/vault/models/domain/fido2-credential.ts.
  */
 async function encryptPasskey(c: StoredPasskey, key: SymmetricKey): Promise<CipherFido2CredentialDto> {
-  return {
-    credentialId: c.credentialId,
-    keyType: c.keyType,
-    keyAlgorithm: c.keyAlgorithm,
-    keyCurve: c.keyCurve,
-    keyValue: await encryptString(c.keyValue, key),
-    rpId: c.rpId,
-    rpName: c.rpName ?? null,
-    userHandle: c.userHandle ?? null,
-    userName: c.userName ?? null,
-    userDisplayName: c.userDisplayName ?? null,
-    counter: c.counter,
-    discoverable: c.discoverable,
-    creationDate: c.creationDate,
-  };
+  const out: CipherFido2CredentialDto = { creationDate: c.creationDate };
+  for (const field of ['credentialId', 'keyType', 'keyAlgorithm', 'keyCurve', 'keyValue', 'rpId',
+    'rpName', 'userHandle', 'userName', 'userDisplayName', 'counter', 'discoverable'] as const) {
+    out[field] = await enc(c[field], key);
+  }
+  return out;
 }
 
 /**
@@ -67,7 +54,7 @@ export async function encryptCipher(
 ): Promise<CipherWriteBody> {
   // 名解不开的条目若原样保存，会把「无法解密」变成一个真实的密文，反而破坏数据。
   // 宁可拒绝保存并让调用方提示用户。
-  if (item.nameFailed) {
+  if (item.nameFailed || item.notesFailed) {
     throw new Error('该条目的名称无法解密，拒绝保存以免写坏数据');
   }
   const numeric = TYPE_TO_NUMBER[item.type];
@@ -75,6 +62,8 @@ export async function encryptCipher(
     throw new Error(`未知的条目类型（rawType=${item.rawType}），不支持编辑`);
   }
 
+  if (item.wrappedKey && !opts.itemKey) throw new Error('条目使用独立密钥，必须先解包密钥再保存');
+  if (item.preservation?.failures.length) throw new Error('条目包含无法解密或读取的字段，已阻止保存；请重新同步或使用兼容客户端修复');
   const key = opts.itemKey ?? userKey;
   const body: CipherWriteBody = {
     type: numeric,
@@ -82,7 +71,8 @@ export async function encryptCipher(
     notes: await enc(item.notes, key),
     // ⚠️ 必须总是发送：省略会让服务端把条目移出文件夹
     folderId: item.folderId,
-    organizationId: null,
+    organizationId: item.preservation?.source.organizationId ?? null,
+    ...(item.wrappedKey ? { key: item.wrappedKey } : {}),
     favorite: item.favorite,
     reprompt: item.reprompt,
     fields: item.customFields.length === 0 ? null : await Promise.all(
@@ -107,9 +97,11 @@ export async function encryptCipher(
       password: await enc(item.login.password, key),
       totp: await enc(item.login.totp, key),
       passwordRevisionDate: item.login.passwordRevisionDate,
+      ...(item.login.autofillOnPageLoad !== undefined ? { autofillOnPageLoad: item.login.autofillOnPageLoad } : {}),
       uris: await Promise.all(item.login.uris.map(async (u) => ({
         uri: await encryptString(u.uri, key),
         match: u.match,
+        uriChecksum: await encryptString(toBase64(await sha256(utf8Encode(u.uri))), key),
       }))),
       // ⚠️ **总是发送**，和 folderId 同理：用户删掉最后一条 passkey 时，
       // 不发这个字段就等于没删掉 —— 下次同步它会原样回来。
@@ -146,5 +138,5 @@ export async function encryptCipher(
   // None = 取消归档。默认省略，否则普通保存会误把已归档条目恢复。
   if (opts.archivedDate !== undefined) body.archivedDate = opts.archivedDate;
 
-  return body;
+  return preserveCipherData(item, body);
 }

@@ -19,9 +19,8 @@ export interface CipherLoginUriDto {
 /**
  * 一条 passkey 的**线上**形态。
  *
- * ⚠️ 只有 `keyValue`（PKCS#8 私钥）是 EncString，其余字段都是**明文**。
- * 这是 Bitwarden 客户端的约定 —— 别处的凭据元数据（rpId、用户名）本来也不是秘密，
- * 真正的秘密只有那把私钥。整条一起加密的话，官方客户端读不出来。
+ * Native Bitwarden encrypts all string metadata except creationDate.
+ * Legacy 1Warden rows may contain plaintext metadata; vault decoding supports both.
  *
  * ⚠️ `counter` 与 `discoverable` 是**字符串**，不是数字与布尔。
  */

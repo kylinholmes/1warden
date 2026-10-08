@@ -3,19 +3,21 @@ import {
   buildProfileItem, isProfileItem, parseProfile, selectProfileItem, profileRevision,
   buildPreferencesItem, buildDeviceItem, parseProfileSettings, validatePreferences,
   buildReport, checkBreaches, hasTotp, IMPORT_FORMATS, parseImport, searchItems, totpCode,
-  type VaultClient, type VaultItem,
+  retainItemMetadata, type VaultClient, type VaultItem,
 } from '@1warden/vault';
 import { fromBase64, toBase64 } from '@1warden/crypto';
 import { summarise } from '../../../../packages/ui/src/summary';
 import { reportBrief } from '../../../../packages/ui/src/SecurityReportView';
+import { linkedFieldTargets } from '../../../../packages/ui/src/item-editor-fields';
 import type { ProfileCache } from './profile-cache';
 import type { ApplicationSnapshot } from './types';
 import type { ApplicationService, ItemDetailData, SecretRef } from './types';
 
 /** Single-record edit is deliberate. Keys and fields owned by other workflows stay local. */
 export function editableDraft(item: VaultItem): VaultItem {
+  const { preservation: _preservation, ...editable } = item;
   return structuredClone({
-    ...item, wrappedKey: null, attachments: [], passwordHistory: [],
+    ...editable, wrappedKey: null, attachments: [], passwordHistory: [],
     login: item.login ? { ...item.login, fido2Credentials: [] } : null,
   });
 }
@@ -36,35 +38,44 @@ export function mergeEditableDraft(draft: VaultItem, old?: VaultItem): VaultItem
     wrappedKey: old?.wrappedKey ?? null,
     login: draft.login ? {
       username: draft.login.username, password: draft.login.password, totp: draft.login.totp,
-      uris: draft.login.uris.map(({ uri, match }) => ({ uri, match })),
+      uris: draft.login.uris.map(({ uri, match, sourceId }) => ({ uri, match, ...(sourceId === undefined ? {} : { sourceId }) })),
+      ...(draft.login.autofillOnPageLoad === undefined ? {} : { autofillOnPageLoad: draft.login.autofillOnPageLoad }),
       passwordRevisionDate: old?.login?.passwordRevisionDate ?? null,
       fido2Credentials: old?.login?.fido2Credentials ?? [],
     } : null,
     card: draft.card, identity: draft.identity, secureNote: draft.secureNote, sshKey: draft.sshKey,
-    customFields: draft.customFields.map(({ name, value, type, linkedId }) => ({ name, value, type, linkedId })),
+    customFields: draft.customFields.map(({ name, value, type, linkedId, sourceId, unsupportedType }) => ({ name, value, type, linkedId,
+      ...(sourceId === undefined ? {} : { sourceId }), ...(unsupportedType === undefined ? {} : { unsupportedType }) })),
     passwordHistory: old?.passwordHistory ?? [], attachments: old?.attachments ?? [],
   };
-  return structuredClone(item);
+  return structuredClone(old ? retainItemMetadata(old, item) : item);
 }
 
 export function itemDetail(item: VaultItem): ItemDetailData {
   return {
-    summary: summarise(item), rawType: item.rawType, notes: item.notes, notesFailed: item.notesFailed,
+    summary: summarise(item), decryptionFailed: Boolean(item.preservation?.failures.length),
+    rawType: item.rawType, notes: item.notes, notesFailed: item.notesFailed,
     login: item.login ? {
-      username: item.login.username, uris: item.login.uris.map((u) => ({ ...u })),
-      hasPassword: item.login.password !== null, hasTotp: hasTotp(item),
+      username: item.login.username, uris: item.login.uris.map(({ uri, match }) => ({ uri, match })),
+      hasPassword: Boolean(item.login.password), hasTotp: hasTotp(item),
+      passwordRevisionDate: item.login.passwordRevisionDate, passkeyCount: item.login.fido2Credentials.length,
+      passkeys: item.login.fido2Credentials.map(p => ({ credentialId: p.credentialId,
+        rpId: p.rpId, rpName: p.rpName ?? null, userName: p.userName ?? null,
+        userDisplayName: p.userDisplayName ?? null, creationDate: p.creationDate })),
     } : null,
     card: item.card ? {
       cardholderName: item.card.cardholderName, brand: item.card.brand,
       expMonth: item.card.expMonth, expYear: item.card.expYear,
-      hasNumber: item.card.number !== null, hasCode: item.card.code !== null,
+      hasNumber: Boolean(item.card.number), hasCode: Boolean(item.card.code),
     } : null,
     identity: item.identity ? { ...item.identity } : null,
     sshKey: item.sshKey ? {
       publicKey: item.sshKey.publicKey, fingerprint: item.sshKey.fingerprint,
-      hasPrivateKey: item.sshKey.privateKey !== null,
+      hasPrivateKey: Boolean(item.sshKey.privateKey),
     } : null,
-    customFields: item.customFields.map((f) => ({ ...f, value: f.type === 1 ? null : f.value })),
+    customFields: item.customFields.map(f => ({ name: f.name, type: f.type, linkedId: f.linkedId,
+      hasValue: f.value !== null && f.value !== '',
+      value: f.type === 1 || f.type === 3 ? null : f.value })),
     passwordHistory: item.passwordHistory.map(({ lastUsedDate }) => ({ lastUsedDate })),
     attachments: item.attachments.map(({ id, fileName, size, sizeName, failed }) => ({ id, fileName, size, sizeName, failed })),
   };
@@ -77,7 +88,17 @@ function secretValue(item: VaultItem, field: SecretRef): string {
     case 'cardNumber': value = item.card?.number; break;
     case 'cardCode': value = item.card?.code; break;
     case 'privateKey': value = item.sshKey?.privateKey; break;
-    case 'custom': value = item.customFields[field.index]?.value; break;
+    case 'custom': {
+      const custom = item.customFields[field.index];
+      if (custom?.type !== 3) { value = custom?.value; break; }
+      const target = linkedFieldTargets(item.type).find(target => target.id === custom.linkedId);
+      if (!target) throw new Error('无法解析这个关联字段');
+      const source = item.type === 'login' ? item.login : item.type === 'card' ? item.card : item.identity;
+      value = target.key === 'fullName' && item.identity
+        ? [item.identity.firstName, item.identity.middleName, item.identity.lastName].filter(Boolean).join(' ')
+        : (source as Record<string, unknown> | null)?.[target.key] as string | null | undefined;
+      break;
+    }
     case 'history': value = item.passwordHistory[field.index]?.password; break;
   }
   if (value == null) throw new Error('找不到这个字段');
@@ -208,9 +229,14 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
       return summarise(saved);
     },
     async toggleFavorite(id) { find(id); await guarded(() => client.toggleFavorite(id)); },
+    async moveToFolder(id, folderId) { find(id); await guarded(() => client.moveToFolder(id, folderId)); },
     async moveToTrash(id) { find(id); await guarded(() => client.moveToTrash(id)); },
     async deletePermanently(id) { find(id); await guarded(() => client.deletePermanently(id)); },
-    async createFolder(name) { await guarded(() => client.createFolder(name)); },
+    async createFolder(name) {
+      const trimmed = name.trim();
+      if (!trimmed) throw new Error('请输入文件夹名称');
+      return guarded(() => client.createFolder(trimmed));
+    },
     async renameFolder(id, name) { await guarded(() => client.renameFolder(id, name)); },
     async deleteFolder(id) { await guarded(() => client.deleteFolder(id)); },
     async reveal(id, field) { return secretValue(find(id), field); },
@@ -220,6 +246,16 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
       const result = await guarded(() => client.downloadAttachment(id, attachmentId));
       return { fileName: result.fileName, dataBase64: toBase64(result.bytes) };
     },
+    async uploadAttachment(id, fileName, dataBase64) {
+      find(id);
+      if (!fileName.trim() || /[\u0000\r\n]/u.test(fileName)) throw new Error('附件名称无效');
+      const bytes = fromBase64(dataBase64);
+      try { await guarded(() => client.uploadAttachment(id, fileName, bytes)); }
+      finally { bytes.fill(0); }
+    },
+    async deleteAttachment(id, attachmentId) { find(id); await guarded(() => client.deleteAttachment(id, attachmentId)); },
+    async removePasskey(id, credentialId) { find(id); await guarded(() => client.removePasskey(id, credentialId)); },
+    async clearPasswordHistory(id) { find(id); await guarded(() => client.clearPasswordHistory(id)); },
     async securityReport(now) {
       return reportBrief(buildReport(activeItems(), now), (i) => i.nameFailed ? '无法解密' : i.name);
     },

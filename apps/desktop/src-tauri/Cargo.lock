@@ -580,29 +580,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "onewarden"
-version = "0.1.0"
-dependencies = [
- "accessibility-sys",
- "base64 0.22.1",
- "core-foundation-sys",
- "core-graphics",
- "reqwest 0.12.28",
- "rfd",
- "rustls",
- "rustls-native-certs",
- "security-framework-sys",
- "serde",
- "serde_json",
- "sha2",
- "tauri",
- "tauri-build",
- "tauri-plugin-updater",
- "windows-sys 0.61.2",
- "x509-parser",
-]
-
-[[package]]
 name = "combine"
 version = "4.6.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2711,6 +2688,29 @@ name = "once_cell"
 version = "1.21.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
+
+[[package]]
+name = "onewarden"
+version = "0.1.0"
+dependencies = [
+ "accessibility-sys",
+ "base64 0.22.1",
+ "core-foundation-sys",
+ "core-graphics",
+ "reqwest 0.12.28",
+ "rfd",
+ "rustls",
+ "rustls-native-certs",
+ "security-framework-sys",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-updater",
+ "windows-sys 0.61.2",
+ "x509-parser",
+]
 
 [[package]]
 name = "openssl-probe"

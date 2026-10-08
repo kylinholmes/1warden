@@ -24,7 +24,7 @@
  * 那串 base64 的 UTF-8 文本（88 字节），长度就不对。
  * 好在下面的长度检查会拦住它。
  */
-import { decryptBytes, decryptString, DecryptError } from '@1warden/crypto';
+import { decryptBytes, decryptString, DecryptError, encryptBytes, parseEncString, serializeEncString, concatBytes } from '@1warden/crypto';
 import type { SymmetricKey } from '@1warden/crypto';
 
 /** 附件密钥的长度：32 字节 enc + 32 字节 mac */
@@ -51,9 +51,10 @@ export async function unwrapAttachmentKey(
 
   // 长度不对说明数据被改过或版本不兼容 —— 拿它去解密只会得到乱码，
   // 而乱码看起来像「文件损坏」
-  if (raw.length !== ATTACHMENT_KEY_BYTES) return null;
-
-  return { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
+  try {
+    if (raw.length !== ATTACHMENT_KEY_BYTES) return null;
+    return { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
+  } finally { raw.fill(0); }
 }
 
 /**
@@ -66,10 +67,18 @@ export async function unwrapAttachmentKey(
 export async function decryptAttachmentContent(
   encrypted: Uint8Array | string, key: SymmetricKey,
 ): Promise<Uint8Array> {
-  const encString = typeof encrypted === 'string'
-    ? encrypted
-    : new TextDecoder().decode(encrypted);
-  return decryptBytes(encString, key);
+  if (typeof encrypted === 'string') return decryptBytes(encrypted, key);
+  // Bitwarden EncArrayBuffer: type (1), IV (16), MAC (32), ciphertext.
+  // This path uses authenticated per-attachment keys; never accept a downgrade
+  // to legacy unauthenticated CBC merely because the untrusted type byte says so.
+  const type = encrypted[0];
+  const offset = 49;
+  if (type !== 2 || encrypted.length <= offset || (encrypted.length - offset) % 16 !== 0) {
+    throw new DecryptError('malformed', '附件加密数据格式不正确');
+  }
+  const iv = encrypted.slice(1, 17);
+  const data = encrypted.slice(offset);
+  return decryptBytes(serializeEncString(2, iv, data, encrypted.slice(17, 49)), key);
 }
 
 /**
@@ -85,3 +94,9 @@ export function attachmentBytes(a: { size: string }): number | null {
 
 /** 供解密元数据时复用 */
 export { decryptString };
+
+/** Native Bitwarden attachment content, never the UTF-8 bytes of an EncString. */
+export async function encryptAttachmentContent(bytes: Uint8Array, key: SymmetricKey): Promise<Uint8Array> {
+  const parts = parseEncString(await encryptBytes(bytes, key));
+  return concatBytes(new Uint8Array([2]), parts.iv!, parts.mac!, parts.data);
+}

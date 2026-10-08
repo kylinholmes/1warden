@@ -14,6 +14,9 @@ import type {
  * 前两者的字段集合随服务端版本变化，后两者是固定的小结构，暂不值得建模。
  */
 export interface CipherWriteBody {
+  /** Unknown native fields retained by the vault serializer. */
+  [key: string]: unknown;
+  collectionIds?: string[];
   type: number;
   name: string;
   notes: string | null;
@@ -33,12 +36,6 @@ export interface CipherWriteBody {
   archivedDate?: string | null;
 }
 
-/** 只有调用方显式提供的可选字段才会被序列化 */
-const OPTIONAL_KEYS = [
-  'key', 'login', 'card', 'identity', 'secureNote', 'sshKey',
-  'fields', 'passwordHistory', 'lastKnownRevisionDate', 'archivedDate',
-] as const;
-
 /**
  * 组装请求体。两个必须显式处理的字段：
  *
@@ -52,19 +49,7 @@ const OPTIONAL_KEYS = [
  * 因此只在调用方显式提供时才带上 —— 否则一次普通的改名会把已归档条目悄悄"取消归档"。
  */
 function buildBody(userId: string, b: CipherWriteBody): Record<string, unknown> {
-  const out: Record<string, unknown> = {
-    encryptedFor: userId,
-    type: b.type,
-    name: b.name,
-    notes: b.notes,
-    folderId: b.folderId,
-    organizationId: b.organizationId,
-    favorite: b.favorite,
-    reprompt: b.reprompt,
-  };
-  for (const k of OPTIONAL_KEYS) {
-    if (k in b) out[k] = b[k];
-  }
+  const out: Record<string, unknown> = { ...b, encryptedFor: userId };
   return out;
 }
 
@@ -72,6 +57,10 @@ export async function createCipher(
   http: HttpClient, userId: string, body: CipherWriteBody,
 ): Promise<CipherDto> {
   return http.request<CipherDto>('POST', '/api/ciphers', { json: buildBody(userId, body) });
+}
+
+export async function getCipher(http: HttpClient, id: string): Promise<CipherDto> {
+  return http.request<CipherDto>('GET', `/api/ciphers/${encodeURIComponent(id)}`);
 }
 
 export async function updateCipher(
@@ -122,11 +111,10 @@ export async function moveCiphers(
  *
  * 这是**唯一能作用于只读条目**的更新路径 —— 服务端对这条路由只校验可读性，
  * 不校验可写性。也因此它**不做** `lastKnownRevisionDate` 的乐观并发检查。
+ * Both fields are required: Vaultwarden clears folder membership if folderId is omitted.
  */
 export async function updateCipherPartial(
-  http: HttpClient, id: string, p: { folderId?: string | null; favorite: boolean },
+  http: HttpClient, id: string, p: { folderId: string | null; favorite: boolean },
 ): Promise<void> {
-  const body: Record<string, unknown> = { favorite: p.favorite };
-  if ('folderId' in p) body['folderId'] = p.folderId;
-  await http.request<void>('PUT', `/api/ciphers/${id}/partial`, { json: body });
+  await http.request<void>('PUT', `/api/ciphers/${id}/partial`, { json: { folderId: p.folderId, favorite: p.favorite } });
 }

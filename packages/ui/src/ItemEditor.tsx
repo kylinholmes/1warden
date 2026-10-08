@@ -1,13 +1,21 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { useCallback, useEffect, useRef } from 'react';
 import { generatePassword, passwordStrength } from '@1warden/crypto';
-import { writeTotpSecret } from '@1warden/vault';
-import type { VaultItem, VaultFolder, ItemType, CustomField } from '@1warden/vault';
+import type { VaultItem, VaultFolder, ItemType } from '@1warden/vault';
 import { FloatingPanel } from './FloatingPanel';
+import { EditorUrls } from './EditorUrls';
+import { EditorCustomFields } from './EditorCustomFields';
+import { EditorAddMore } from './EditorAddMore';
+import {
+  blankEditorItem, blankLogin, blankCard, blankIdentity, blankSshKey,
+  clearNativeField, createCustomField, customFieldsForItemType, initialVisibleFields,
+  nativeEditorFields, nativeFieldValue, removeLoginUri, savedLoginUris, updateNativeField,
+  type NativeEditorField,
+} from './item-editor-fields';
 import { STRENGTH_COLORS, STRENGTH_LABELS } from './strength';
 import {
   IconCard, IconChevronDown, IconIdentity, IconKey, IconNote,
-  IconPlus, IconSpinner, IconStar, IconTerminal, IconTrash,
+  IconSpinner, IconStar, IconTerminal, IconTrash,
 } from './icons';
 
 interface Props {
@@ -21,7 +29,14 @@ interface Props {
   open: boolean;
   onDone: (saved: Pick<VaultItem, 'id' | 'name'> | null) => void;
   onCancel: () => void;
+  onCreateFolder?: (name: string) => Promise<{ id: string; name: string }>;
 }
+
+const CARD_BRANDS = [
+  ['Visa', 'Visa'], ['Mastercard', 'Mastercard 万事达'], ['Amex', 'American Express 美国运通'],
+  ['UnionPay', 'UnionPay 银联'], ['JCB', 'JCB'], ['Discover', 'Discover'],
+  ['Diners Club', 'Diners Club'], ['Maestro', 'Maestro'], ['RuPay', 'RuPay'], ['Other', '其他'],
+] as const;
 
 /**
  * 新建 / 编辑条目 —— 一个浮在主界面之上的浮层。
@@ -39,8 +54,7 @@ interface Props {
  *
  * ── 版面：滚动区 + 固定底栏
  *
- * 表单有六组字段（类型 / 基本信息 / 登录 / 信用卡 / 身份 / SSH 密钥 / 备注 /
- * 自定义字段），比面板高得多。所以：头部不滚（标题和收藏一直在），
+ * 字段随条目内容和「添加更多」展开。头部不滚（标题和收藏一直在），
  * 中间滚，**底栏不滚** —— 「保存」必须永远在手指底下，
  * 让用户在长表单里滚到底才能保存是没道理的。
  *
@@ -54,15 +68,22 @@ interface Props {
  * 第三次确认：**没有任何键盘路径能丢掉改动**。Esc 第一次是「你要关吗」，
  * 第二次是把这一问撤掉、回到编辑。要丢只能点「放弃改动」。
  */
-export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Props) {
+export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCreateFolder }: Props) {
   const viewStore = useLocalStore(() => {
-    const draft = item ?? blankItem();
+    const draft = item ?? newEditorItem();
     const initial = draft;
     const busy = false;
     const error = (null) as string | null;
     const confirming = false;
     const isNew = item === null;
-    return { draft, initial, busy, error, confirming, isNew };
+    return {
+      draft, initial, busy, error, confirming, isNew,
+      visible: initialVisibleFields(draft, isNew), visibleUrls: visibleUrlIndices(draft, isNew),
+      pendingFocus: null as string | null,
+      undoRemoval: null as { label: string; run: () => void } | null,
+      createdFolders: [] as { id: string; name: string }[],
+      folderName: '', creatingFolder: false, folderError: null as string | null,
+    };
   });
   const [draft, setDraft] = useStoreField(viewStore, 'draft');
   /** 打开那一刻的样子 —— 判断「改没改过」就靠它 */
@@ -78,6 +99,18 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
    * 「新建条目」，像是点错了什么东西。
    */
   const [isNew, setIsNew] = useStoreField(viewStore, 'isNew');
+  // Visibility belongs to this editing session, not to the saved data. Clearing a
+  // control must not unmount it beneath the user while they are still typing.
+  const [visible, setVisible] = useStoreField(viewStore, 'visible');
+  const [visibleUrls, setVisibleUrls] = useStoreField(viewStore, 'visibleUrls');
+  const [pendingFocus, setPendingFocus] = useStoreField(viewStore, 'pendingFocus');
+  const [undoRemoval, setUndoRemoval] = useStoreField(viewStore, 'undoRemoval');
+  const editorBody = useRef<HTMLDivElement>(null);
+  const [createdFolders, setCreatedFolders] = useStoreField(viewStore, 'createdFolders');
+  const [folderName, setFolderName] = useStoreField(viewStore, 'folderName');
+  const [creatingFolder, setCreatingFolder] = useStoreField(viewStore, 'creatingFolder');
+  const [folderError, setFolderError] = useStoreField(viewStore, 'folderError');
+
 
   /*
    * ⚠️ 只在**开**的那一刻取一次 item，之后不再跟着 prop 走。
@@ -91,17 +124,29 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
 
   useEffect(() => {
     if (!open) return;
-    const start = itemRef.current ?? blankItem();
+    const start = itemRef.current ?? newEditorItem();
     setIsNew(itemRef.current === null);
     setInitial(start);
     setDraft(start);
     setError(null);
     setBusy(false);
     setConfirming(false);
+    setVisible(initialVisibleFields(start, itemRef.current === null));
+    setVisibleUrls(visibleUrlIndices(start, itemRef.current === null));
+    setPendingFocus(null);
+    setUndoRemoval(null);
+    setFolderName('');
+    setFolderError(null);
+    setCreatedFolders([]);
   }, [open]);
 
-  // 文件夹列表从会话里取 —— 编辑期间新建的文件夹看不到，这是可接受的：
-  // 用户不会一边编辑一边去侧栏建文件夹
+  useEffect(() => {
+    if (!pendingFocus) return;
+    const field = editorBody.current?.querySelector<HTMLElement>(pendingFocus);
+    const input = field?.matches('button,input,textarea,select') ? field : field?.querySelector<HTMLElement>('input:not([disabled]),textarea:not([disabled]),select:not([disabled]),button:not([disabled])');
+    if (input) { input.focus(); input.scrollIntoView?.({ block: 'nearest' }); setPendingFocus(null); }
+  }, [pendingFocus, visible, draft]);
+
   function patch(p: Partial<VaultItem>) { setDraft((d) => ({ ...d, ...p })); }
   function patchLogin(p: Partial<NonNullable<VaultItem['login']>>) {
     setDraft((d) => ({ ...d, login: { ...(d.login ?? blankLogin()), ...p } }));
@@ -118,13 +163,125 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
    */
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
 
+  function addNative(id: string) {
+    setVisible(current => current.includes(id) ? current : [...current, id]);
+    if (id === 'login.uris') {
+      const index = draft.login?.uris.length ?? 0;
+      patchLogin({ uris: [...(draft.login?.uris ?? []), { uri: '', match: null }] });
+      setVisibleUrls(current => [...current, index]);
+      setPendingFocus(`[data-editor-url="${index}"]`);
+    } else setPendingFocus(`[data-editor-field="${id}"]`);
+  }
+
+  function removeNative(field: NativeEditorField) {
+    setPendingFocus('[data-editor-add-more]');
+    const original = draft;
+    setDraft(current => clearNativeField(current, field.id));
+    setVisible(current => current.filter(id => id !== field.id));
+    setUndoRemoval({ label: field.label, run: () => {
+      setDraft(current => field.keys.reduce((result, key) => updateNativeField(result, key,
+        nativeFieldValue(original, key) as string | null), current));
+      setVisible(current => current.includes(field.id) ? current : [...current, field.id]);
+      setPendingFocus(`[data-editor-field="${field.id}"]`);
+    } });
+  }
+
+  function removeUrl(index: number) {
+    setPendingFocus('[data-editor-add-more]');
+    const removed = draft.login!.uris[index]!;
+    const lastVisible = visibleUrls.length === 1;
+    patchLogin({ uris: removeLoginUri(draft.login!.uris, index) });
+    setVisibleUrls(current => current.filter(i => i !== index).map(i => i > index ? i - 1 : i));
+    if (lastVisible) setVisible(current => current.filter(id => id !== 'login.uris'));
+    setUndoRemoval({ label: '网址', run: () => {
+      setDraft(current => {
+        const uris = [...(current.login?.uris ?? [])]; uris.splice(index, 0, removed);
+        return { ...current, login: { ...blankLogin(), ...current.login, uris } };
+      });
+      setVisibleUrls(current => [...current.map(i => i >= index ? i + 1 : i), index].sort((a, b) => a - b));
+      setVisible(current => current.includes('login.uris') ? current : [...current, 'login.uris']);
+      setPendingFocus(`[data-editor-url="${index}"]`);
+    } });
+  }
+
+  function removeCustom(index: number) {
+    setPendingFocus('[data-editor-add-more]');
+    const removed = draft.customFields[index]!;
+    patch({ customFields: draft.customFields.filter((_, i) => i !== index) });
+    setUndoRemoval({ label: removed.name || '自定义字段', run: () => {
+      setDraft(current => {
+        const customFields = [...current.customFields]; customFields.splice(index, 0, removed);
+        return { ...current, customFields };
+      });
+      setPendingFocus(`[data-editor-custom="${index}"]`);
+    } });
+  }
+
+  async function createFolder() {
+    if (!onCreateFolder || !folderName.trim() || creatingFolder) return;
+    setCreatingFolder(true); setFolderError(null);
+    try {
+      const folder = await onCreateFolder(folderName.trim());
+      setCreatedFolders(current => [...current.filter(existing => existing.id !== folder.id), folder]);
+      patch({ folderId: folder.id }); setFolderName('');
+    } catch (error) { setFolderError(messageOf(error)); }
+    finally { setCreatingFolder(false); }
+  }
+
+  function renderNative(field: NativeEditorField) {
+    const value = String(nativeFieldValue(draft, field.id) ?? '');
+    return <Row key={field.id} label={field.label} fieldId={field.id}
+      {...(field.kind === 'urls' ? {} : { onRemove: () => removeNative(field) })}>
+      {field.kind === 'urls' ? <EditorUrls uris={draft.login?.uris ?? []} visibleIndices={visibleUrls}
+        onChange={uris => patchLogin({ uris })} onRemove={removeUrl} />
+      : field.kind === 'expiry' ? <div className="grid min-w-0 grid-cols-2 gap-2">
+        {(['card.expMonth', 'card.expYear'] as const).map((key, index) => <input key={key}
+          value={String(nativeFieldValue(draft, key) ?? '')} className="field min-w-0" inputMode="numeric"
+          placeholder={index === 0 ? '月' : '年'} aria-label={index === 0 ? '月份' : '年份'}
+          onChange={event => setDraft(current => updateNativeField(current, key, event.target.value))} />)}
+      </div>
+      : field.id === 'card.brand' ? <select value={value} aria-label={field.label} className="field min-w-0"
+        onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))}>
+        <option value="">选择卡片品牌</option>
+        {value && !CARD_BRANDS.some(([brand]) => brand === value) && <option value={value}>已保存：{value}</option>}
+        {CARD_BRANDS.map(([brand, label]) => <option key={brand} value={brand}>{label}</option>)}
+      </select>
+      : field.kind === 'multiline' ? <textarea value={value} rows={field.id === 'sshKey.publicKey' ? 2 : 4}
+        aria-label={field.label} autoComplete="off" spellCheck={false}
+        placeholder={field.id === 'sshKey.privateKey' ? '-----BEGIN OPENSSH PRIVATE KEY-----' : field.id === 'sshKey.publicKey' ? 'ssh-ed25519 AAAA…' : '需要记下来的其他事情'}
+        className={`field resize-y leading-[var(--lh-prose)] ${field.id.startsWith('sshKey.') ? 'secret' : ''}`}
+        onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))} />
+      : <>
+        <div className="relative min-w-0">
+          <input value={value} aria-label={field.label} autoComplete="off" spellCheck={false}
+            {...(field.id === 'login.totp' ? { placeholder: 'otpauth://totp/…' } : {})}
+            className={`field ${field.kind === 'secret' ? 'secret' : ''} ${field.id === 'login.password' ? 'pr-[76px]' : ''}`}
+            onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))} />
+          {field.id === 'login.password' && <button type="button" title="生成随机密码"
+            onClick={() => setDraft(current => updateNativeField(current, field.id, generatePassword({ length: 20 })))}
+            className="absolute right-1 top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)] px-2 py-1 text-xs text-[var(--accent)] hover:bg-[var(--accent-tint)]">生成</button>}
+        </div>
+        {field.id === 'login.password' && <StrengthMeter value={value} />}
+        {field.id === 'login.totp' && <p className="mt-1 text-xs text-[var(--ink-tertiary)]">otpauth:// 链接，或直接填 base32 密钥</p>}
+      </>}
+    </Row>;
+  }
+  const shownFields = nativeEditorFields(draft.type).filter(field => visible.includes(field.id));
+  const nativeGroups = [...new Set(shownFields.map(field => field.group))];
+  const allFolders = [...folders, ...createdFolders.filter(folder => !folders.some(existing => existing.id === folder.id))];
+
+
   async function save() {
     setBusy(true);
     setError(null);
     try {
       // 名是必填的 —— 一条没有名字的记录在列表里是一片空白，用户找不回来
       if (draft.name.trim().length === 0) throw new Error('名称不能为空');
-      onDone(await onSave(draft));
+      // An unused newly added URL row is a UI placeholder, never a saved URL.
+      const savedDraft = draft.login ? {
+        ...draft, login: { ...draft.login, uris: savedLoginUris(draft.login.uris, isNew ? [] : initial.login?.uris ?? []) },
+      } : draft;
+      onDone(await onSave(savedDraft));
     } catch (e) {
       setError(messageOf(e));
       setBusy(false);
@@ -133,10 +290,10 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
 
   const requestClose = useCallback(() => {
     // 保存中不给关：这时候关掉，用户无从知道到底存上没有
-    if (busy) return;
+    if (busy || creatingFolder) return;
     if (!dirty) { onCancel(); return; }
     setConfirming(true);
-  }, [busy, dirty, onCancel]);
+  }, [busy, creatingFolder, dirty, onCancel]);
 
   /*
    * 浮层要的 onClose：Esc、点遮罩都走这里。
@@ -169,8 +326,8 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
             ? <span className="min-w-0 truncate text-[var(--risk)]" title={error}>{error}</span>
             : <span className="min-w-0 truncate">{isNew ? '新条目会加密后存到服务器' : '改动会加密后存到服务器'}</span>}
           <span className="flex shrink-0 items-center gap-2">
-            <button onClick={requestClose} disabled={busy} className="btn btn-quiet">取消</button>
-            <button onClick={save} disabled={busy} className="btn btn-primary">
+            <button onClick={requestClose} disabled={busy || creatingFolder} className="btn btn-quiet">取消</button>
+            <button onClick={save} disabled={busy || creatingFolder} className="btn btn-primary">
               {busy && <IconSpinner size={14} />}
               {busy ? '保存中…' : '保存'}
             </button>
@@ -195,223 +352,79 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
         </button>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-y-auto px-5 py-5">
-        {/* ⚠️ 不能传 `title={undefined}` —— exactOptionalPropertyTypes 下那是类型错误，
-              而且意图也不同：这里要的是「不显示标题」而不是「标题是 undefined」 */}
-        <Group {...(isNew ? { title: '类型' } : {})}>
-          {isNew ? (
-            <div className="grid grid-cols-5 gap-2 py-3">
-              {([
-                ['login', '登录', <IconKey size={17} />],
-                ['secureNote', '笔记', <IconNote size={17} />],
-                ['card', '信用卡', <IconCard size={17} />],
-                ['identity', '身份', <IconIdentity size={17} />],
-                ['sshKey', 'SSH 密钥', <IconTerminal size={17} />],
-              ] as const).map(([t, label, icon]) => (
-                <button
-                  key={t}
-                  type="button"
-                  onClick={() => setType(patch, t)}
-                  aria-pressed={draft.type === t}
-                  className={`flex flex-col items-center gap-1.5 rounded-[var(--radius-md)] border px-1 py-3 text-xs transition-colors duration-[var(--dur-fast)] ${
-                    draft.type === t
-                      ? 'border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--ink-primary)]'
-                      : 'border-[var(--border-subtle)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]'
-                  }`}
-                >
-                  <span className={draft.type === t ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}>
-                    {icon}
-                  </span>
-                  {label}
-                </button>
-              ))}
-            </div>
-          ) : (
-            <Row label="名称">
-              <input value={draft.name} onChange={(e) => patch({ name: e.target.value })}
-                className="field" placeholder="例如 GitHub" />
-            </Row>
-          )}
-        </Group>
-
-        <Group title="基本信息">
-          {isNew && (
-            <Row label="名称">
-              <input value={draft.name} onChange={(e) => patch({ name: e.target.value })}
-                className="field" placeholder="例如 GitHub" />
-            </Row>
-          )}
-          {/*
-            ⚠️ 这个选择器此前**根本不存在** —— 于是每个条目创建时 folderId 都是
-            null，侧栏那个「文件夹」分区永远不可能有内容。API 层的文件夹 CRUD
-            早就写好了，缺的是把它接到界面上。
-          */}
-          <Row label="文件夹">
-            <Select
-              value={draft.folderId ?? ''}
-              onChange={(v) => patch({ folderId: v === '' ? null : v })}
-              options={[{ value: '', label: '（无）' },
-                ...folders.map((f) => ({ value: f.id, label: f.nameFailed ? '无法解密' : f.name }))]}
-            />
+      <div ref={editorBody} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-5">
+        {isNew && <Group title="类型">
+          <div className="grid grid-cols-5 gap-2 py-3">
+            {([
+              ['login', '登录', <IconKey size={17} />], ['secureNote', '笔记', <IconNote size={17} />],
+              ['card', '信用卡', <IconCard size={17} />], ['identity', '身份', <IconIdentity size={17} />],
+              ['sshKey', 'SSH 密钥', <IconTerminal size={17} />],
+            ] as const).map(([type, label, icon]) => <button key={type} type="button" aria-pressed={draft.type === type}
+              onClick={() => {
+                if (type === draft.type) return;
+                const next = itemWithType(draft, type);
+                setDraft(next); setVisible(initialVisibleFields(next, true));
+                setVisibleUrls(visibleUrlIndices(next, true)); setUndoRemoval(null);
+              }}
+              className={`flex min-w-0 flex-col items-center gap-1.5 rounded-[var(--radius-md)] border px-1 py-3 text-xs ${
+                draft.type === type ? 'border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--ink-primary)]'
+                  : 'border-[var(--border-subtle)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]'}`}>
+              <span className={draft.type === type ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}>{icon}</span>{label}
+            </button>)}
+          </div>
+        </Group>}
+        <Group>
+          <Row label="名称">
+            <input value={draft.name} aria-label="名称" onChange={event => patch({ name: event.target.value })}
+              className="field" placeholder="例如 GitHub" />
           </Row>
         </Group>
-
-        {draft.type === 'login' && (
-          <Group title="登录">
-            <Row label="用户名">
-              <input value={draft.login?.username ?? ''} onChange={(e) => patchLogin({ username: e.target.value })}
-                className="field" autoComplete="off" />
-            </Row>
-
-            <Row label="密码">
-              <div className="flex gap-2">
-                <div className="relative min-w-0 flex-1">
-                  <input
-                    value={draft.login?.password ?? ''}
-                    onChange={(e) => patchLogin({ password: e.target.value })}
-                    className="field secret pr-[76px]" autoComplete="off" spellCheck={false}
-                  />
-                  <button type="button" onClick={() => patchLogin({ password: generatePassword({ length: 20 }) })}
-                    title="生成随机密码"
-                    className="absolute right-1 top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)] px-2 py-1 text-xs text-[var(--accent)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--accent-tint)]">
-                    生成
-                  </button>
-                </div>
+        {nativeGroups.map(group => <Group key={group} title={group}>
+          {shownFields.filter(field => field.group === group).map(renderNative)}
+        </Group>)}
+        {draft.customFields.length > 0 && <Group title="自定义字段">
+          <div className="py-3"><EditorCustomFields fields={draft.customFields} itemType={draft.type}
+            onChange={customFields => patch({ customFields })} onRemove={removeCustom} /></div>
+        </Group>}
+        {undoRemoval && <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--ink-tertiary)]" role="status">
+          <span className="min-w-0 truncate">已移除 {undoRemoval.label}</span>
+          <button type="button" className="btn btn-quiet" onClick={() => { undoRemoval.run(); setUndoRemoval(null); }}>撤销移除</button>
+        </div>}
+        <EditorAddMore key={`${open}-${draft.type}`} itemType={draft.type} visible={visible} onNative={addNative}
+          onCustom={type => {
+            const field = createCustomField(type, draft.type);
+            if (!field) return;
+            const index = draft.customFields.length;
+            patch({ customFields: [...draft.customFields, field] });
+            setPendingFocus(`[data-editor-custom="${index}"]`);
+          }} />
+        {draft.type === 'login' && <details className="mb-4 text-xs text-[var(--ink-tertiary)]">
+          <summary className="cursor-pointer py-2">高级设置{draft.login?.autofillOnPageLoad == null ? '' : ` · 自动填充${draft.login.autofillOnPageLoad ? '开启' : '关闭'}`}</summary>
+          <div className="@container card px-4"><Row label="自动填充">
+            <Select label="自动填充" value={draft.login?.autofillOnPageLoad == null ? '' : String(draft.login.autofillOnPageLoad)}
+              onChange={value => patchLogin({ autofillOnPageLoad: value === '' ? null : value === 'true' })}
+              options={[{ value: '', label: '使用默认设置' }, { value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} />
+          </Row></div>
+        </details>}
+        <details className="text-xs text-[var(--ink-tertiary)]">
+          <summary className="cursor-pointer py-2">文件夹 · {allFolders.find(folder => folder.id === draft.folderId)?.name ?? (draft.folderId ? '现有文件夹' : '无')}</summary>
+          <div className="@container card px-4"><Row label="文件夹">
+            <Select label="文件夹" value={draft.folderId ?? ''} onChange={value => patch({ folderId: value || null })}
+              options={[{ value: '', label: '（无）' },
+                ...(draft.folderId && !allFolders.some(folder => folder.id === draft.folderId) ? [{ value: draft.folderId, label: '现有文件夹' }] : []),
+                ...allFolders.map(folder => ({ value: folder.id, label: 'nameFailed' in folder && folder.nameFailed ? '无法解密' : folder.name }))]} />
+            {onCreateFolder && <div className="mt-2">
+              <div className="flex min-w-0 flex-wrap gap-2">
+                <input className="field min-w-0 flex-1" value={folderName} aria-label="新文件夹名称" placeholder="新文件夹名称"
+                  disabled={creatingFolder} onChange={event => setFolderName(event.target.value)}
+                  onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void createFolder(); } }} />
+                <button type="button" className="btn btn-quiet" disabled={creatingFolder || !folderName.trim()}
+                  onClick={() => void createFolder()}>{creatingFolder ? '创建中…' : '创建文件夹'}</button>
               </div>
-              {/*
-                ⚠️ 「留空 = 不改」必须**说出来**。
-                扩展端拿不到现有密码（弹窗只收摘要），所以编辑一条已有记录时
-                这一栏是空的 —— 而空栏自己不会告诉用户「保存不会把它抹掉」。
-                用户要么以为本来就空、要么以为存下去就清掉了，两种都是错的。
-
-                判据是「在编辑一条已有记录，而密码是空的」：
-                新建时 `isNew` 为真，走的是另一条路。
-              */}
-              {!isNew && draft.login?.password === null && (
-                <p className="mt-1.5 text-xs text-[var(--ink-tertiary)]">
-                  留空则保持原密码不变。想换就填一个新的，或点「生成」。
-                </p>
-              )}
-              <StrengthMeter value={draft.login?.password ?? ''} />
-            </Row>
-
-            <Row label="验证码" hint="otpauth:// 链接，或直接填 base32 密钥">
-              <input
-                value={draft.login?.totp ?? ''}
-                onChange={(e) => {
-                  const { loginTotp, customFields } = writeTotpSecret(draft, e.target.value || null);
-                  setDraft((d) => ({
-                    ...d,
-                    login: { ...(d.login ?? blankLogin()), totp: loginTotp },
-                    customFields,
-                  }));
-                }}
-                className="field secret" placeholder="otpauth://totp/…" autoComplete="off" />
-            </Row>
-
-            <Row label="网址">
-              <input
-                value={draft.login?.uris[0]?.uri ?? ''}
-                onChange={(e) => patchLogin({
-                  uris: e.target.value ? [{ uri: e.target.value, match: draft.login?.uris[0]?.match ?? null }] : [],
-                })}
-                className="field" placeholder="https://github.com" />
-            </Row>
-          </Group>
-        )}
-
-        {draft.type === 'card' && (
-          <Group title="卡片">
-            <Row label="持卡人">
-              <input value={draft.card?.cardholderName ?? ''} className="field"
-                onChange={(e) => patch({ card: { ...blankCard(), ...draft.card, cardholderName: e.target.value } })} />
-            </Row>
-            <Row label="卡号">
-              <input value={draft.card?.number ?? ''} className="field secret" autoComplete="off"
-                onChange={(e) => patch({ card: { ...blankCard(), ...draft.card, number: e.target.value } })} />
-            </Row>
-            {/* 有效期和安全码是一组 —— 填的时候也是一起看卡背面，放一行 */}
-            <Row label="有效期">
-              <div className="grid grid-cols-3 gap-2">
-                <input value={draft.card?.expMonth ?? ''} className="field" inputMode="numeric" placeholder="月"
-                  aria-label="月份"
-                  onChange={(e) => patch({ card: { ...blankCard(), ...draft.card, expMonth: e.target.value } })} />
-                <input value={draft.card?.expYear ?? ''} className="field" inputMode="numeric" placeholder="年"
-                  aria-label="年份"
-                  onChange={(e) => patch({ card: { ...blankCard(), ...draft.card, expYear: e.target.value } })} />
-                <input value={draft.card?.code ?? ''} className="field secret" autoComplete="off" placeholder="安全码"
-                  aria-label="安全码"
-                  onChange={(e) => patch({ card: { ...blankCard(), ...draft.card, code: e.target.value } })} />
-              </div>
-            </Row>
-          </Group>
-        )}
-
-        {draft.type === 'identity' && (
-          <Group title="身份信息">
-            {([['firstName', '名'], ['lastName', '姓'], ['email', '邮箱'],
-              ['phone', '电话'], ['company', '公司'], ['ssn', '身份证号']] as const).map(([k, label]) => (
-              <Row key={k} label={label}>
-                <input value={(draft.identity?.[k] ?? '') as string} className="field"
-                  onChange={(e) => patch({ identity: { ...blankIdentity(), ...draft.identity, [k]: e.target.value } })} />
-              </Row>
-            ))}
-          </Group>
-        )}
-
-        {/*
-          ⚠️ SSH 密钥此前**只有详情页能看**：模型里有这一组、类型里有它、
-          列表图标也有它，但编辑器里一个字都改不了 —— 从 Bitwarden 导进来的
-          SSH 密钥，打开编辑看到的是「基本信息 + 备注」，会以为密钥丢了。
-          私钥用多行框：它本来就是多行的（PEM / OpenSSH 格式），
-          单行框会把换行吞掉，而用户看不出来自己贴进去的东西已经变形了。
-        */}
-        {draft.type === 'sshKey' && (
-          <Group title="SSH 密钥">
-            <Row label="私钥">
-              <textarea
-                value={draft.sshKey?.privateKey ?? ''}
-                onChange={(e) => patch({ sshKey: { ...blankSshKey(), ...draft.sshKey, privateKey: e.target.value } })}
-                rows={4} aria-label="私钥" spellCheck={false} autoComplete="off"
-                placeholder="-----BEGIN OPENSSH PRIVATE KEY-----"
-                className="field secret resize-y leading-[var(--lh-snug)]"
-              />
-            </Row>
-            <Row label="公钥">
-              <textarea
-                value={draft.sshKey?.publicKey ?? ''}
-                onChange={(e) => patch({ sshKey: { ...blankSshKey(), ...draft.sshKey, publicKey: e.target.value } })}
-                rows={2} aria-label="公钥" spellCheck={false} autoComplete="off"
-                placeholder="ssh-ed25519 AAAA…"
-                className="field secret resize-y leading-[var(--lh-snug)]"
-              />
-            </Row>
-            <Row label="指纹">
-              <input
-                value={draft.sshKey?.fingerprint ?? ''}
-                onChange={(e) => patch({ sshKey: { ...blankSshKey(), ...draft.sshKey, fingerprint: e.target.value } })}
-                className="field secret" spellCheck={false} autoComplete="off"
-                placeholder="SHA256:…" />
-            </Row>
-          </Group>
-        )}
-
-        <Group title="备注">
-          <div className="py-3">
-            <textarea value={draft.notes ?? ''} onChange={(e) => patch({ notes: e.target.value })}
-              rows={4} aria-label="备注" placeholder="需要记下来的其他事情"
-              className="field resize-y leading-[var(--lh-prose)]" />
-          </div>
-        </Group>
-
-        <Group title="自定义字段">
-          <div className="py-3">
-            <CustomFields
-              fields={draft.customFields}
-              onChange={(customFields) => patch({ customFields })}
-            />
-          </div>
-        </Group>
+              {folderError && <p className="mt-1 text-[var(--risk)]" role="alert">{folderError}</p>}
+            </div>}
+          </Row></div>
+        </details>
       </div>
     </FloatingPanel>
   );
@@ -429,7 +442,7 @@ function Group({ title, children }: { title?: string; children: React.ReactNode 
       {title && (
         <h3 className="mb-2 text-xs font-medium text-[var(--ink-tertiary)]">{title}</h3>
       )}
-      <div className="card px-4">{children}</div>
+      <div className="@container card px-4">{children}</div>
     </section>
   );
 }
@@ -440,20 +453,25 @@ function Group({ title, children }: { title?: string; children: React.ReactNode 
  * 和详情页的 `SecretField` 用同一个 76px 标签列 —— 编辑态与只读态对齐，
  * 切换时视线不用重新找位置。
  */
-function Row({ label, hint, children }: { label: string; hint?: string; children: React.ReactNode }) {
-  return (
-    <div className="flex items-start gap-3 border-b border-[var(--border-subtle)] py-3 last:border-b-0">
-      <span className="w-[76px] shrink-0 pt-[9px] text-sm text-[var(--ink-tertiary)]">{label}</span>
-      <div className="min-w-0 flex-1">
-        {children}
-        {hint && <span className="mt-1 block text-xs text-[var(--ink-tertiary)]">{hint}</span>}
-      </div>
+function Row({ label, fieldId, onRemove, children }: {
+  label: string; fieldId?: string; onRemove?: () => void; children: React.ReactNode;
+}) {
+  return <div data-editor-field={fieldId}
+    className="flex flex-col items-start gap-2 border-b border-[var(--border-subtle)] py-3 last:border-b-0 @[340px]:flex-row @[340px]:gap-3">
+    <span className="shrink-0 text-sm text-[var(--ink-tertiary)] @[340px]:w-[76px] @[340px]:pt-[9px]">{label}</span>
+    <div className="flex w-full min-w-0 flex-1 items-start gap-2">
+      <div className="min-w-0 flex-1">{children}</div>
+      {onRemove && <button type="button" onClick={onRemove} aria-label={`移除${label}`} title={`移除${label}`}
+        className="shrink-0 rounded-[var(--radius-sm)] p-2.5 text-[var(--ink-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--risk)]">
+        <IconTrash size={15} />
+      </button>}
     </div>
-  );
+  </div>;
 }
 
 /** 原生下拉框的箭头又大又靠边 —— 关掉它，自己画一个 */
-function Select({ value, onChange, options }: {
+function Select({ value, onChange, options, label }: {
+  label: string;
   value: string;
   onChange: (v: string) => void;
   options: { value: string; label: string }[];
@@ -462,6 +480,7 @@ function Select({ value, onChange, options }: {
     <div className="relative">
       <select
         value={value}
+        aria-label={label}
         onChange={(e) => onChange(e.target.value)}
         className="field appearance-none pr-9"
       >
@@ -501,102 +520,25 @@ function StrengthMeter({ value }: { value: string }) {
   );
 }
 
-function CustomFields({ fields, onChange }: { fields: CustomField[]; onChange: (f: CustomField[]) => void }) {
-  return (
-    <div className="space-y-2">
-      {fields.map((f, i) => (
-        <div key={i} className="flex gap-2">
-          <input
-            value={f.name} placeholder="名称" aria-label="字段名称"
-            onChange={(e) => onChange(fields.map((x, j) => (j === i ? { ...x, name: e.target.value } : x)))}
-            className="field w-1/3"
-          />
-          <input
-            value={f.value} placeholder="值" aria-label="字段值"
-            type={f.type === 1 ? 'password' : 'text'}
-            onChange={(e) => onChange(fields.map((x, j) => (j === i ? { ...x, value: e.target.value } : x)))}
-            className="field secret"
-          />
-          <div className="relative w-[92px] shrink-0">
-            <select
-              value={f.type}
-              onChange={(e) => onChange(fields.map((x, j) => (j === i ? { ...x, type: Number(e.target.value) as 0 | 1 | 2 | 3 } : x)))}
-              className="field appearance-none pr-7"
-              title="字段类型" aria-label="字段类型"
-            >
-              {/* ⚠️ 只发 0–3。服务端在 type 缺失或不可解析时回退到 1（隐藏） */}
-              <option value={0}>文本</option>
-              <option value={1}>隐藏</option>
-              <option value={2}>开关</option>
-              <option value={3}>关联</option>
-            </select>
-            <IconChevronDown size={14}
-              className="pointer-events-none absolute right-2 top-1/2 -translate-y-1/2 text-[var(--ink-tertiary)]" />
-          </div>
-          <button type="button" onClick={() => onChange(fields.filter((_, j) => j !== i))}
-            title="删除此字段" aria-label="删除此字段"
-            className="shrink-0 rounded-[var(--radius-sm)] px-2 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--risk)]">
-            <IconTrash size={15} />
-          </button>
-        </div>
-      ))}
-      <button type="button"
-        onClick={() => onChange([...fields, { name: '', value: '', type: 0, linkedId: null }])}
-        className="btn btn-quiet gap-1.5">
-        <IconPlus size={13} />
-        添加字段
-      </button>
-    </div>
-  );
+function newEditorItem(): VaultItem {
+  const item = blankEditorItem();
+  return { ...item, login: { ...item.login!, uris: [{ uri: '', match: null }] } };
 }
 
-// ── 空白模板 ──
-
-function blankLogin() {
-  // ⚠️ `fido2Credentials` 不能省 —— 它是必填的，而且漏了的话
-  // 新建的条目会在保存时丢掉该条目上已有的 passkey
-  return {
-    username: null, password: null, totp: null, uris: [],
-    passwordRevisionDate: null, fido2Credentials: [],
-  };
-}
-function blankCard() {
-  return { cardholderName: null, brand: null, number: null, expMonth: null, expYear: null, code: null };
-}
-function blankIdentity() {
-  return {
-    title: null, firstName: null, middleName: null, lastName: null,
-    address1: null, address2: null, address3: null, city: null, state: null,
-    postalCode: null, country: null, company: null, email: null, phone: null,
-    ssn: null, username: null, passportNumber: null, licenseNumber: null,
-  };
-}
-function blankSshKey() {
-  return { privateKey: null, publicKey: null, fingerprint: null };
+function visibleUrlIndices(item: VaultItem, isNew: boolean): number[] {
+  return (item.login?.uris ?? []).flatMap((uri, index) => uri.uri !== '' || isNew ? [index] : []);
 }
 
-function blankItem(): VaultItem {
-  return {
-    id: '', type: 'login', rawType: 1, name: '', nameFailed: false,
-    notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
-    login: blankLogin(), card: null, identity: null, secureNote: null, sshKey: null,
-    customFields: [], passwordHistory: [], attachments: [],
-  };
-}
-
-function setType(patch: (p: Partial<VaultItem>) => void, type: ItemType) {
+function itemWithType(draft: VaultItem, type: ItemType): VaultItem {
   const rawType = { login: 1, secureNote: 2, card: 3, identity: 4, sshKey: 5, unknown: -1 }[type];
-  patch({
-    type, rawType,
-    login: type === 'login' ? blankLogin() : null,
+  return {
+    ...draft, type, rawType, customFields: customFieldsForItemType(draft.customFields, type),
+    login: type === 'login' ? { ...blankLogin(), uris: [{ uri: '', match: null }] } : null,
     card: type === 'card' ? blankCard() : null,
     identity: type === 'identity' ? blankIdentity() : null,
     secureNote: type === 'secureNote' ? { type: 0 } : null,
-    // 换类型时另外几组必须显式置空 —— 留着上一组的数据会写出一条
-    // 「类型是卡片、却带着用户名密码」的条目
     sshKey: type === 'sshKey' ? blankSshKey() : null,
-  });
+  };
 }
 
 function messageOf(err: unknown): string {

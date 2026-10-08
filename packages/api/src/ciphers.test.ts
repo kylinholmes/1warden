@@ -190,19 +190,32 @@ describe('moveCiphers', () => {
 describe('updateCipherPartial', () => {
   it('PUTs {folderId, favorite} — the only path that works on read-only ciphers', async () => {
     const fetchImpl = respond();
-    await updateCipherPartial(new HttpClient({ baseUrl: 'https://x.test', fetchImpl }), 'c1', { favorite: true });
+    await updateCipherPartial(new HttpClient({ baseUrl: 'https://x.test', fetchImpl }), 'c1', { folderId: null, favorite: true });
     const c = one(fetchImpl);
     expect(c.url).toBe('https://x.test/api/ciphers/c1/partial');
     expect(c.body!['favorite']).toBe(true);
   });
 
-  it('sends folderId only when the caller provides it', async () => {
+  it('always sends current folder membership, including explicit null for unfiled records', async () => {
     const f1 = respond();
-    await updateCipherPartial(new HttpClient({ baseUrl: 'https://x.test', fetchImpl: f1 }), 'c1', { favorite: false });
-    expect('folderId' in one(f1).body!).toBe(false);
+    await updateCipherPartial(new HttpClient({ baseUrl: 'https://x.test', fetchImpl: f1 }), 'c1', { folderId: null, favorite: false });
+    expect(one(f1).body!['folderId']).toBeNull();
 
     const f2 = respond();
     await updateCipherPartial(new HttpClient({ baseUrl: 'https://x.test', fetchImpl: f2 }), 'c1', { folderId: 'f9', favorite: false });
     expect(one(f2).body!['folderId']).toBe('f9');
+  });
+});
+
+it('retains unknown writable cipher data but pins encryptedFor to the authenticated user', async () => {
+  const fetchImpl = respond({ id: 'c1' });
+  const http = new HttpClient({ baseUrl: 'https://x.test', fetchImpl });
+  await updateCipher(http, 'c1', 'authenticated-user', {
+    ...base, organizationId: 'org1', collectionIds: ['collection1'],
+    future: { encrypted: 'opaque' }, encryptedFor: 'untrusted-user',
+  });
+  expect(one(fetchImpl).body).toMatchObject({
+    organizationId: 'org1', collectionIds: ['collection1'],
+    future: { encrypted: 'opaque' }, encryptedFor: 'authenticated-user',
   });
 });

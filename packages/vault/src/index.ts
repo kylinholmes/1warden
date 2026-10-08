@@ -28,3 +28,5 @@ export * from './credential-capture';
 export * from './totp';
 export * from './profile';
 export * from './profile-settings';
+
+export * from './preservation';

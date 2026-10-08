@@ -49,6 +49,7 @@ export interface NativeRequest {
   /** 二进制体（base64）。附件上传走这条 —— Rust 侧解回字节 */
   bodyBase64?: string;
   timeoutMs?: number;
+  redirect?: RequestRedirect;
 }
 
 /** 桌面端默认超时。比 api 层的 30s 略长 —— 让 api 层先超时，报错信息更准确。 */
@@ -154,6 +155,7 @@ export async function toNativeRequest(
     method,
     url: urlOf(input),
     headers: headersOf(input, init),
+    redirect: init?.redirect ?? (input instanceof Request ? input.redirect : 'follow'),
     // 无 body 时不要传 `body: undefined` —— serde 的 Option 收到 null 与收到
     // 缺失字段行为不同，少传更干净
     ...parts,

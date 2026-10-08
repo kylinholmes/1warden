@@ -1,6 +1,7 @@
+import type { CipherDto } from '@1warden/api';
 import { describe, expect, it, vi } from 'vitest';
-import { VaultClient, emptyLogin, buildProfileItem, buildPreferencesItem, parseProfileSettings, type VaultItem } from '@1warden/vault';
-import { concatBytes, deriveMasterKey, encryptBytes, makeUserKey, stretchMasterKey } from '@1warden/crypto';
+import { VaultClient, decryptCipher, emptyLogin, emptyIdentity, buildProfileItem, buildPreferencesItem, parseProfileSettings, type VaultItem } from '@1warden/vault';
+import { concatBytes, deriveMasterKey, encryptBytes, encryptString, decryptString, makeUserKey, stretchMasterKey } from '@1warden/crypto';
 import { createVaultService, editableDraft, mergeEditableDraft } from './service';
 import { createProfileCache } from './profile-cache';
 
@@ -31,6 +32,38 @@ function restored(items = [record()], fetchImpl: typeof fetch = async () => { th
 }
 
 describe('application display boundary', () => {
+  it('projects custom-field presence without exposing hidden values and keeps boolean false visible', async () => {
+    const item = record();
+    item.customFields = [
+      { name: 'Empty hidden', value: '', type: 1, linkedId: null },
+      { name: 'Present hidden', value: 'private-custom-secret', type: 1, linkedId: null },
+      { name: 'Boolean', value: 'false', type: 2, linkedId: null },
+    ];
+    const { service } = restored([item]);
+    const detail = await service.getItem(item.id);
+    expect(detail.customFields[0]).toMatchObject({ hasValue: false, value: null });
+    expect(detail.customFields[1]).toMatchObject({ hasValue: true, value: null });
+    expect(detail.customFields[2]).toMatchObject({ hasValue: true, value: 'false' });
+    expect(JSON.stringify(detail)).not.toContain('private-custom-secret');
+  });
+
+  it('treats empty secrets as absent while preserving a visible decryption failure indicator', async () => {
+    const item = record();
+    item.login!.password = '';
+    item.card!.number = '';
+    item.card!.code = '';
+    item.sshKey!.privateKey = '';
+    item.preservation = { failures: ['字段无法解密'] } as never;
+    const { service } = restored([item]);
+    const detail = await service.getItem(item.id);
+    expect(detail.login?.hasPassword).toBe(false);
+    expect(detail.card?.hasNumber).toBe(false);
+    expect(detail.card?.hasCode).toBe(false);
+    expect(detail.sshKey?.hasPrivateKey).toBe(false);
+    expect(detail.decryptionFailed).toBe(true);
+    expect(JSON.stringify(detail)).not.toContain('preservation');
+  });
+
   it('lists summaries and searches notes without sending the full records', async () => {
     const { service } = restored();
     const snapshot = await service.snapshot();
@@ -120,6 +153,51 @@ describe('edit ownership', () => {
     const draft = editableDraft(old);
     draft.name = 'New name';
     expect(() => mergeEditableDraft(draft, old)).toThrow(/解密/);
+  });
+});
+
+describe('detail resource management', () => {
+  it('exposes passkey metadata without private material', async () => {
+    const item = record();
+    Object.assign(item.login!.fido2Credentials[0]!, { rpId: 'example.com', rpName: 'Example', userName: 'me', creationDate: '2026-01-01' });
+    const { service } = restored([item]);
+    const detail = await service.getItem(item.id);
+    expect(detail.login?.passkeys?.[0]).toMatchObject({ credentialId: 'credential', rpId: 'example.com', userName: 'me' });
+    expect(JSON.stringify(detail)).not.toContain('passkey-private-material');
+  });
+
+  it('uploads exact binary bytes and routes explicit resource removals through the current record', async () => {
+    const { client, service } = restored();
+    let uploaded: Uint8Array | undefined;
+    const upload = vi.fn(async (_id: string, _name: string, bytes: Uint8Array) => { uploaded = bytes.slice(); });
+    const removeAttachment = vi.fn(async () => {});
+    const removePasskey = vi.fn(async () => {});
+    const clearHistory = vi.fn(async () => {});
+    Object.assign(client, { uploadAttachment: upload, deleteAttachment: removeAttachment, removePasskey, clearPasswordHistory: clearHistory });
+    await service.uploadAttachment('record', 'binary.bin', 'AID/');
+    expect(upload).toHaveBeenCalledWith('record', 'binary.bin', expect.any(Uint8Array));
+    expect(uploaded).toEqual(Uint8Array.from([0, 128, 255]));
+    expect(upload.mock.calls[0]![2].every(byte => byte === 0)).toBe(true);
+    await service.deleteAttachment('record', 'a');
+    await service.removePasskey('record', 'credential');
+    await service.clearPasswordHistory('record');
+    expect(removeAttachment).toHaveBeenCalledWith('record', 'a');
+    expect(removePasskey).toHaveBeenCalledWith('record', 'credential');
+    expect(clearHistory).toHaveBeenCalledWith('record');
+    await service.lock();
+    await expect(service.uploadAttachment('record', 'binary.bin', 'AID/')).rejects.toThrow();
+    await expect(service.deleteAttachment('record', 'a')).rejects.toThrow();
+    await expect(service.removePasskey('record', 'credential')).rejects.toThrow();
+    await expect(service.clearPasswordHistory('record')).rejects.toThrow();
+    expect(upload).toHaveBeenCalledTimes(1); expect(clearHistory).toHaveBeenCalledTimes(1);
+  });
+
+  it('masks linked passwords in detail and resolves their current value only on request', async () => {
+    const item = record();
+    item.customFields = [{ name: 'login_password', value: '', type: 3, linkedId: 101 }];
+    const { service } = restored([item]);
+    expect((await service.getItem(item.id)).customFields[0]?.value).toBeNull();
+    expect(await service.reveal(item.id, { kind: 'custom', index: 0 })).toBe('login-secret');
   });
 });
 
@@ -303,5 +381,134 @@ describe('account switching', () => {
     await expect(service.switchAccount({ serverUrl: 'file:///private', email: 'other@example.com' })).rejects.toThrow();
     expect((await service.snapshot()).status).toBe('unlocked');
     await service.switchAccount(null); expect((await service.snapshot()).status).toBe('loggedOut');
+  });
+});
+
+/** Real crypto/client/service chain; the HTTP boundary alone is a synthetic server. */
+async function nativeBoundaryFixture() {
+  const userKey = makeUserKey();
+  const itemKey = makeUserKey();
+  const enc = (value: string) => encryptString(value, itemKey);
+  const wrappedKey = await encryptBytes(concatBytes(itemKey.encKey, itemKey.macKey), userKey);
+  const dto: CipherDto = {
+    id: 'native', type: 1, name: await enc('Native record'), notes: null, folderId: null,
+    favorite: false, reprompt: 0, organizationId: 'organization-owner', key: wrappedKey,
+    creationDate: '2026-01-01', revisionDate: '2026-01-02', deletedDate: null, archivedDate: null,
+    collectionIds: ['collection-owner'],
+    login: {
+      username: await enc('native-user'), password: await enc('native-password'), autofillOnPageLoad: true,
+      uris: [
+        { uri: await enc('https://remove.test'), match: 0 },
+        { uri: await enc('https://keep.test'), match: 3, futureUriData: 'uri-owner-metadata' } as never,
+      ],
+      fido2Credentials: [{ credentialId: 'credential-native', rpId: 'keep.test', keyValue: await enc('native-private-key'), counter: '0', discoverable: 'true', creationDate: '2026-01-01' }],
+    },
+    fields: [{ name: await enc('Future field'), value: await enc('future-value'), type: 44, futureFieldData: 'custom-owner-metadata' } as never],
+    passwordHistory: [{ lastUsedDate: '2025-01-01', password: await enc('native-history') }],
+    attachments: [{ id: 'attachment-native', fileName: await enc('file.txt'), size: '1', sizeName: '1 B', url: 'https://signed.test/private-download', key: 'attachment-owner-key' }],
+  };
+  Object.assign(dto, { futureTopData: 'top-owner-metadata' });
+  const item = await decryptCipher(dto, userKey);
+  const requests: Array<Record<string, unknown>> = [];
+  const client = new VaultClient({ fetchImpl: async (url, init) => {
+    if (String(url) !== 'https://vault.example/api/ciphers/native' || init?.method !== 'PUT') throw Error('Unexpected request');
+    const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+    requests.push(body);
+    return Response.json({ ...dto, ...body, revisionDate: '2026-01-03' });
+  } });
+  client.restore({
+    account: { email: 'test@example.com', serverUrl: 'https://vault.example', userId: 'u', kdf: { kdf: 0, iterations: 1 } },
+    syncVerified: true, userKey,
+    token: { accessToken: 'test-access-token', refreshToken: undefined, expiresIn: 3600, key: undefined, privateKey: undefined, kdf: 0 },
+    items: [item], folders: [],
+  });
+  return { service: createVaultService(client), client, item, itemKey, wrappedKey, requests };
+}
+
+describe('native preservation application boundary', () => {
+  it('keeps raw preservation, row identities and private resource material out of detail and snapshots', async () => {
+    const { service, item } = await nativeBoundaryFixture();
+    expect(item.preservation).toBeDefined();
+    expect(item.login!.uris[0]!.sourceId).toBeDefined();
+    const detail = await service.getItem('native');
+    const wire = JSON.stringify([detail, await service.snapshot(), await service.search('Native')]);
+    for (const hidden of ['preservation', 'sourceId', 'keyValue', 'native-private-key', 'native-history', 'native-password',
+      'attachment-owner-key', 'private-download', 'top-owner-metadata', 'uri-owner-metadata', 'custom-owner-metadata']) {
+      expect(wire).not.toContain(hidden);
+    }
+    expect(detail.login!.uris[1]).toEqual({ uri: 'https://keep.test', match: 3 });
+    expect(detail.login!.passkeys![0]!.credentialId).toBe('credential-native');
+  });
+
+  it('exports safe row identities for editing without exporting owner-only encrypted data', async () => {
+    const { service, item } = await nativeBoundaryFixture();
+    const draft = await service.getDraft('native');
+    expect(draft).not.toHaveProperty('preservation');
+    expect(draft.wrappedKey).toBeNull();
+    expect(draft.attachments).toEqual([]);
+    expect(draft.passwordHistory).toEqual([]);
+    expect(draft.login!.fido2Credentials).toEqual([]);
+    expect(draft.login!.uris[1]!.sourceId).toBe(item.login!.uris[1]!.sourceId);
+    expect(draft.customFields[0]!.sourceId).toBe(item.customFields[0]!.sourceId);
+    expect(draft.customFields[0]!.unsupportedType).toBe(44);
+    expect(draft.login!.autofillOnPageLoad).toBe(true);
+    for (const hidden of ['top-owner-metadata', 'uri-owner-metadata', 'custom-owner-metadata', 'attachment-owner-key', 'private-download']) {
+      expect(JSON.stringify(draft)).not.toContain(hidden);
+    }
+    draft.login!.uris[1]!.uri = 'https://edited.test';
+    expect(item.login!.uris[1]!.uri).toBe('https://keep.test');
+  });
+
+  it('saves through the real client while preserving ownership and unknown row data after URL deletion', async () => {
+    const { service, client, item, itemKey, wrappedKey, requests } = await nativeBoundaryFixture();
+    const draft = await service.getDraft('native');
+    draft.name = 'Renamed native';
+    draft.login!.uris.splice(0, 1);
+    draft.login!.uris[0]!.uri = 'https://edited.test';
+    draft.login!.autofillOnPageLoad = false;
+    draft.wrappedKey = 'forged-owner-key';
+    draft.preservation = structuredClone(item.preservation!);
+    draft.preservation.source.organizationId = 'forged-organization';
+    draft.login!.fido2Credentials = [];
+    const result = await service.saveItem(draft);
+    expect(result.name).toBe('Renamed native');
+    expect(requests).toHaveLength(1);
+    const body = requests[0]!;
+    expect(body).toMatchObject({ organizationId: 'organization-owner', collectionIds: ['collection-owner'], key: wrappedKey,
+      futureTopData: 'top-owner-metadata', encryptedFor: 'u' });
+    const login = body['login'] as NonNullable<CipherDto['login']>;
+    expect(login.autofillOnPageLoad).toBe(false);
+    expect(login.uris).toHaveLength(1);
+    expect(login.uris![0]).toMatchObject({ match: 3, futureUriData: 'uri-owner-metadata' });
+    expect(await decryptString(login.uris![0]!.uri!, itemKey)).toBe('https://edited.test');
+    expect(body['fields']).toEqual(item.preservation!.source.fields);
+    expect(login.fido2Credentials).toEqual(item.preservation!.source.login!.fido2Credentials);
+    expect(client.getSession().items[0]!.login!.fido2Credentials[0]!.keyValue).toBe('native-private-key');
+    expect(JSON.stringify(result)).not.toContain('preservation');
+  });
+});
+
+describe('native linked field resolution', () => {
+  it.each([[303, '123'], [305, '4111111111111111']] as const)('resolves card linked ID %s from the canonical card without leaking it in detail', async (linkedId, expected) => {
+    const item = { ...record(), type: 'card' as const, rawType: 3, login: null };
+    item.customFields = [{ name: 'Linked', value: 'stale imported value', type: 3, linkedId }];
+    const { service } = restored([item]);
+    expect((await service.getItem(item.id)).customFields[0]!.value).toBeNull();
+    expect(await service.reveal(item.id, { kind: 'custom', index: 0 })).toBe(expected);
+  });
+
+  it('derives linked identity full names from current components and skips absent middle names', async () => {
+    const item = { ...record(), type: 'identity' as const, rawType: 4, login: null,
+      identity: { ...emptyIdentity(), firstName: 'Ada', middleName: null, lastName: 'Lovelace' } };
+    item.customFields = [{ name: 'Full name', value: 'stale imported name', type: 3, linkedId: 418 }];
+    const { service } = restored([item]);
+    expect(await service.reveal(item.id, { kind: 'custom', index: 0 })).toBe('Ada Lovelace');
+  });
+
+  it('rejects a linked target belonging to a different item type', async () => {
+    const item = record();
+    item.customFields = [{ name: 'Invalid target', value: 'must not be returned', type: 3, linkedId: 305 }];
+    const { service } = restored([item]);
+    await expect(service.reveal(item.id, { kind: 'custom', index: 0 })).rejects.toThrow(/关联字段/);
   });
 });

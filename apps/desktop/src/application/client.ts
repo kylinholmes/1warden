@@ -7,14 +7,15 @@ import {
 export const APPLICATION_METHODS = [
   'snapshot', 'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'search',
   'getItem', 'getDraft', 'saveProfile', 'savePreferences', 'recordDevice', 'saveItem', 'toggleFavorite', 'moveToTrash', 'deletePermanently',
-  'createFolder', 'renameFolder', 'deleteFolder', 'reveal', 'totp', 'downloadAttachment',
+  'createFolder', 'renameFolder', 'deleteFolder', 'moveToFolder', 'reveal', 'totp', 'downloadAttachment',
+  'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory',
   'securityReport', 'checkBreaches', 'parseImport', 'importData',
 ] as const satisfies readonly ApplicationMethod[];
 
 const MUTATIONS = new Set<ApplicationMethod>([
   'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'savePreferences', 'recordDevice',
   'toggleFavorite', 'moveToTrash', 'deletePermanently', 'createFolder', 'renameFolder',
-  'deleteFolder', 'importData',
+  'deleteFolder', 'moveToFolder', 'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory', 'importData',
 ]);
 
 interface Options {

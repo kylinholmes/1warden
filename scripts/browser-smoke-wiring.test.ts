@@ -9,16 +9,17 @@ const clickFunction = tree.statements.find((node): node is ts.FunctionDeclaratio
 
 function fixture(engine: 'chrome' | 'firefox') {
   const domClick = vi.fn();
+  const scrollIntoView = vi.fn();
   const handle = {
     click: vi.fn(async () => {}),
-    evaluate: vi.fn(async (action: (node: { click(): void }) => void) => action({ click: domClick })),
+    evaluate: vi.fn(async (action: (node: { click(): void; scrollIntoView(options: unknown): void }) => void) => action({ click: domClick, scrollIntoView })),
     dispose: vi.fn(async () => {}),
   };
   const popup = { waitForSelector: vi.fn(async () => handle), waitForFunction: vi.fn(async () => {}) };
   // Exercise the actual script helper without launching its top-level browser workflow.
   const javascript = ts.transpile(clickFunction.getText(tree), { target: ts.ScriptTarget.ES2022 });
   const click = new Function('popup', 'name', `${javascript}; return click;`)(popup, engine) as (selector: string) => Promise<void>;
-  return { click, popup, handle, domClick };
+  return { click, popup, handle, domClick, scrollIntoView };
 }
 
 describe('production extension smoke input routing', () => {
@@ -41,6 +42,7 @@ describe('production extension smoke input routing', () => {
     expect(f.popup.waitForSelector).toHaveBeenCalledWith('[data-add-server]', { visible: true });
     expect(f.domClick).toHaveBeenCalledOnce();
     expect(f.handle.click).not.toHaveBeenCalled();
+    expect(f.scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
     expect(f.handle.dispose).toHaveBeenCalledOnce();
   });
 
@@ -50,6 +52,7 @@ describe('production extension smoke input routing', () => {
     expect(f.popup.waitForFunction).toHaveBeenCalledOnce();
     expect(f.handle.click).toHaveBeenCalledOnce();
     expect(f.domClick).not.toHaveBeenCalled();
+    expect(f.scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
     expect(f.handle.dispose).toHaveBeenCalledOnce();
   });
 });

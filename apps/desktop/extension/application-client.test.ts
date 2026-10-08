@@ -6,6 +6,18 @@ import { twoFactorChallenge } from '../src/screens/auth-error';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+it('preserves the folder ID returned by the background for create and assign', async () => {
+  vi.resetModules();
+  const folder = { id: 'server-folder-id', name: 'Work', nameFailed: false, updatedAt: '2026-10-09' };
+  vi.stubGlobal('chrome', { storage: { session: {} }, runtime: {
+    sendMessage: async (request: { method: string }) => ({ ok: true, result: request.method === 'createFolder' ? folder : EMPTY_SNAPSHOT }),
+  } });
+  const { createExtensionApplicationClient } = await import('./application-client');
+  const client = createExtensionApplicationClient();
+  await expect(client.createFolder('Work')).resolves.toEqual(folder);
+  client.dispose();
+});
+
 it('prepares Add Account return identity before publishing the connection page', async () => {
   vi.resetModules();
   const account = { serverUrl: 'https://vault.test', email: 'me@example.com', userId: 'u', kdf: { kdf: 0 as const, iterations: 1 } };

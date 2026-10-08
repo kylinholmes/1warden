@@ -29,6 +29,12 @@ describe('application message authority', () => {
 });
 
 describe('application dispatcher', () => {
+  it('returns the authoritative folder ID so the caller can assign an item', async () => {
+    const folder = { id: 'server-folder-id', name: 'Work', nameFailed: false, updatedAt: '2026-10-09' };
+    const dispatch = createApplicationDispatcher({ createFolder: async () => folder } as unknown as ApplicationService);
+    await expect(dispatch({ method: 'createFolder', args: ['Work'] })).resolves.toEqual(folder);
+  });
+
   it('search and detail remain available while a webpage operation holds the shared queue', async () => {
     const run = createSerialRunner();
     let release!: () => void;
@@ -223,4 +229,94 @@ it('switch account cancels queued writes before selecting the next identity', as
   await dispatch({ method: 'switchAccount', args: [{ serverUrl: 'https://next.example', email: 'next@example.com' }] });
   finish(); await cancelled; await queueCancelled;
   expect(events).toEqual(['switch']);
+});
+
+const resourceCalls = [
+  ['uploadAttachment', ['record', 'file.bin', 'AID/']],
+  ['deleteAttachment', ['record', 'attachment']],
+  ['removePasskey', ['record', 'credential']],
+  ['clearPasswordHistory', ['record']],
+] as const;
+
+describe('resource operation RPC contracts', () => {
+  it.each(resourceCalls)('validates the exact %s argument list before invoking the service', async (method, valid) => {
+    let invocations = 0;
+    const dispatch = createApplicationDispatcher({ [method]: async () => { invocations++; } } as unknown as ApplicationService);
+    const args = [...valid];
+    const invalidTypes = args.map((_, index) => args.map((value, position) => position === index ? 7 : value));
+    for (const malformed of [[], args.slice(0, -1), [...args, 'extra'], ...invalidTypes, [null, ...args.slice(1)], {}]) {
+      await expect(dispatch({ method, args: malformed })).rejects.toThrow(/无效/);
+    }
+    expect(invocations).toBe(0);
+    await dispatch({ method, args });
+    expect(invocations).toBe(1);
+  });
+
+  it.each(resourceCalls)('routes %s and persists its resulting mutation before publishing a change', async (method, args) => {
+    let state = 'before';
+    let persisted = 'before';
+    const events: string[] = [];
+    const dispatch = createApplicationDispatcher({ [method]: async (...received: unknown[]) => {
+      expect(received).toEqual([...args]);
+      state = method;
+    } } as unknown as ApplicationService, {
+      afterMutation: async (called, succeeded) => {
+        expect(called).toBe(method); expect(succeeded).toBe(true);
+        persisted = state; events.push('persist');
+      },
+      onChanged: () => { expect(persisted).toBe(method); events.push('publish'); },
+    });
+    await dispatch({ method, args: [...args] });
+    expect(persisted).toBe(method);
+    expect(events).toEqual(['persist', 'publish']);
+  });
+
+  it.each(resourceCalls)('persists partial cleanup state when %s fails and reports the failure', async (method, args) => {
+    let persisted = '';
+    let state = 'before';
+    const dispatch = createApplicationDispatcher({ [method]: async () => {
+      state = 'cleaned-up'; throw Error('server rejected operation');
+    } } as unknown as ApplicationService, { afterMutation: async (called, succeeded) => {
+      expect(called).toBe(method); expect(succeeded).toBe(false); persisted = state;
+    } });
+    await expect(dispatch({ method, args: [...args] })).rejects.toThrow('server rejected operation');
+    expect(persisted).toBe('cleaned-up');
+  });
+
+  it.each(resourceCalls)('discards late %s completion and persistence after account lock', async (method, args) => {
+    let release!: () => void;
+    let entered!: () => void;
+    const started = new Promise<void>((resolve) => { entered = resolve; });
+    const persisted: string[] = [];
+    const dispatch = createApplicationDispatcher({
+      [method]: async () => { entered(); await new Promise<void>((resolve) => { release = resolve; }); },
+      lock: async () => {},
+    } as unknown as ApplicationService, { afterMutation: async (called) => { persisted.push(called); } });
+    const pending = dispatch({ method, args: [...args] });
+    const cancelled = expect(pending).rejects.toThrow(/取消/);
+    await started;
+    await dispatch({ method: 'lock', args: [] });
+    release();
+    await cancelled;
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(persisted).toEqual(['lock']);
+  });
+});
+
+it.each(resourceCalls)('serializes %s behind an existing vault write', async (method, args) => {
+  const run = createSerialRunner();
+  let release!: () => void;
+  let entered!: () => void;
+  const started = new Promise<void>((resolve) => { entered = resolve; });
+  const blocking = run(async () => { entered(); await new Promise<void>((resolve) => { release = resolve; }); });
+  await started;
+  let called = false;
+  const dispatch = createApplicationDispatcher({ [method]: async () => { called = true; } } as unknown as ApplicationService, { run });
+  const resource = dispatch({ method, args: [...args] });
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(called).toBe(false);
+  } finally { release(); }
+  await Promise.all([blocking, resource]);
+  expect(called).toBe(true);
 });

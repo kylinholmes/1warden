@@ -12,17 +12,21 @@
 
 // 只借类型。passkey.ts 反过来不依赖本文件，不构成循环。
 import type { StoredPasskey } from './passkey';
+import type { CipherDto } from '@1warden/api';
 
 export const ITEM_TYPES = ['login', 'secureNote', 'card', 'identity', 'sshKey', 'unknown'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
 export interface LoginUri {
+  /** Opaque row identity; contains no server data. */
+  sourceId?: string;
   uri: string;
   /** 0=Domain 1=Host 2=StartsWith 3=Exact 4=Regex 5=Never；null = 用默认 */
   match: number | null;
 }
 
 export interface LoginFields {
+  autofillOnPageLoad?: boolean | null;
   username: string | null;
   password: string | null;
   /** otpauth:// URI、steam:// URI 或裸 base32 */
@@ -82,6 +86,9 @@ export interface SecureNoteFields {
 }
 
 export interface CustomField {
+  sourceId?: string;
+  /** Unsupported native type: preserve unchanged or explicitly delete. */
+  unsupportedType?: number;
   name: string;
   value: string;
   /** 0=Text 1=Hidden 2=Boolean 3=Linked */
@@ -91,6 +98,7 @@ export interface CustomField {
 }
 
 export interface PasswordHistoryEntry {
+  sourceId?: string;
   lastUsedDate: string;
   password: string;
 }
@@ -108,7 +116,15 @@ export interface Attachment {
   failed: boolean;
 }
 
+/** Owner-only state. Never expose this object to a UI/detail/draft projection. */
+export interface ItemPreservation {
+  source: CipherDto;
+  baseline: Omit<VaultItem, 'preservation'>;
+  failures: string[];
+}
+
 export interface VaultItem {
+  preservation?: ItemPreservation;
   id: string;
   type: ItemType;
   /** 原始数字类型 —— 未知类型时 UI 需要它来提示用户 */

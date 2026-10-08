@@ -38,6 +38,15 @@ use std::sync::{Arc, Mutex};
 
 // ── 对外类型 ──
 
+#[derive(Debug, Default, Deserialize, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum RedirectMode {
+    #[default]
+    Follow,
+    Error,
+    Manual,
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpRequest {
@@ -58,6 +67,8 @@ pub struct HttpRequest {
     pub body_base64: Option<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    #[serde(default)]
+    pub redirect: RedirectMode,
 }
 
 #[derive(Debug, Serialize)]
@@ -359,6 +370,7 @@ impl rustls::client::danger::ServerCertVerifier for CaptureOnlyVerifier {
 
 pub struct HttpState {
     client: reqwest::Client,
+    no_redirect_client: reqwest::Client,
     pins: Arc<Mutex<CertPins>>,
     pins_path: PathBuf,
     /// 最近一次被 TLS 校验拒掉的证书 —— 界面要拿它给用户看
@@ -401,11 +413,19 @@ impl HttpState {
             .with_no_client_auth();
 
         let client = reqwest::Client::builder()
-            .use_preconfigured_tls(tls)
+            .use_preconfigured_tls(tls.clone())
             .build()
             .map_err(|e| format!("无法建立 HTTP 客户端：{e}"))?;
 
-        Ok(Self { client, pins, pins_path, rejected })
+        // Restricted redirects retain exactly the same system roots, pinning
+        // verifier, and captured certificate state as ordinary requests.
+        let no_redirect_client = reqwest::Client::builder()
+            .use_preconfigured_tls(tls)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|e| format!("无法建立 HTTP 客户端：{e}"))?;
+
+        Ok(Self { client, no_redirect_client, pins, pins_path, rejected })
     }
 
     fn take_rejected(&self) -> Option<CapturedCert> {
@@ -428,8 +448,12 @@ pub async fn execute(state: &HttpState, req: HttpRequest) -> Result<HttpResponse
     let method = reqwest::Method::from_bytes(req.method.to_uppercase().as_bytes())
         .map_err(|_| HttpError::new("invalidRequest", format!("不支持的 HTTP 方法：{}", req.method)))?;
 
-    let mut builder = state
-        .client
+    let client = if req.redirect == RedirectMode::Follow {
+        &state.client
+    } else {
+        &state.no_redirect_client
+    };
+    let mut builder = client
         .request(method, &req.url)
         .timeout(std::time::Duration::from_millis(req.timeout_ms.unwrap_or(30_000)));
 
@@ -453,6 +477,9 @@ pub async fn execute(state: &HttpState, req: HttpRequest) -> Result<HttpResponse
     };
 
     let status = res.status().as_u16();
+    if req.redirect == RedirectMode::Error && matches!(status, 301 | 302 | 303 | 307 | 308) {
+        return Err(HttpError::new("network", "服务器返回了不允许的重定向"));
+    }
     let headers = res
         .headers()
         .iter()
@@ -773,6 +800,7 @@ mod tests {
                 body: None,
                 body_base64: None,
                 timeout_ms: Some(10_000),
+                redirect: RedirectMode::Follow,
             }
         }
 
@@ -861,6 +889,74 @@ mod tests {
 
             let _ = std::fs::remove_dir_all(&dir);
         }
+    }
+
+    #[test]
+    fn redirect_modes_do_not_contact_target_unless_follow_requested() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let hits = Arc::new(AtomicUsize::new(0));
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_hits = hits.clone();
+        let server_stop = stop.clone();
+        let server = std::thread::spawn(move || {
+            while !server_stop.load(Ordering::SeqCst) {
+                let (mut socket, _) = match listener.accept() {
+                    Ok(connection) => connection,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(5));
+                        continue;
+                    }
+                    Err(error) => panic!("local HTTP accept failed: {error}"),
+                };
+                socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
+                let mut request = Vec::new();
+                loop {
+                    let mut buffer = [0_u8; 1024];
+                    let size = socket.read(&mut buffer).unwrap();
+                    if size == 0 { break; }
+                    request.extend_from_slice(&buffer[..size]);
+                    if request.windows(4).any(|part| part == b"\r\n\r\n") { break; }
+                }
+                let target = String::from_utf8_lossy(&request).lines().next().unwrap_or("").contains(" /target ");
+                let response = if target {
+                    server_hits.fetch_add(1, Ordering::SeqCst);
+                    "HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok"
+                } else {
+                    "HTTP/1.1 307 Temporary Redirect\r\nLocation: /target\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+                };
+                socket.write_all(response.as_bytes()).unwrap();
+            }
+        });
+        let path = std::env::temp_dir().join(format!("onewarden-redirect-pins-{}.json", std::process::id()));
+        let state = HttpState::new(path).unwrap();
+        let mut outcomes = Vec::new();
+        for mode in ["error", "manual", "follow"] {
+            let req: HttpRequest = serde_json::from_value(serde_json::json!({
+                "method": "POST", "url": format!("http://{address}/redirect"),
+                "headers": { "Authorization": "Bearer synthetic" }, "body": "synthetic",
+                "redirect": mode, "timeoutMs": 2000,
+            })).unwrap();
+            let response = tauri::async_runtime::block_on(execute(&state, req));
+            outcomes.push((mode, response, hits.load(Ordering::SeqCst)));
+        }
+        stop.store(true, Ordering::SeqCst);
+        server.join().unwrap();
+        let (_, error, error_hits) = &outcomes[0];
+        assert!(error.is_err(), "redirect:error must reject the redirect response");
+        assert_eq!(*error_hits, 0, "rejected redirect must never contact target");
+        let (_, manual, manual_hits) = &outcomes[1];
+        assert_eq!(manual.as_ref().unwrap().status, 307);
+        assert_eq!(*manual_hits, 0, "manual redirect must never contact target");
+        let (_, follow, follow_hits) = &outcomes[2];
+        assert_eq!(follow.as_ref().unwrap().status, 200);
+        assert_eq!(*follow_hits, 1, "follow mode proves target was available");
     }
 
     /// ⚠️ **二进制响应体必须在传输中保持原样。**

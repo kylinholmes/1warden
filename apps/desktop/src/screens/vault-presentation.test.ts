@@ -4,6 +4,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { SORT_BY } from '@1warden/vault';
 import type { ItemSummary } from '@1warden/ui';
 import type { ApplicationClient, ItemDetailData } from '../application/types';
+import { EMPTY_SNAPSHOT } from '../application/types';
 import { visibleVaultItems, type VaultCategory } from './vault-presentation';
 
 vi.hoisted(() => {
@@ -19,6 +20,7 @@ import { Settings } from './Settings';
 
 const client = {
   capabilities: { native: false, browser: true, saveAttachments: true },
+  getSnapshot: () => EMPTY_SNAPSHOT,
 } as ApplicationClient;
 
 const item: ItemDetailData = {
@@ -95,6 +97,33 @@ describe('shared vault presentation', () => {
     expect(html).toContain('aria-label="返回列表"');
     expect(html.match(/aria-label="显示"/g)).toHaveLength(2);
     expect(html).not.toContain('输入到其他应用');
+  });
+
+  it('omits empty detail groups and puts folder organization after content', () => {
+    const empty: ItemDetailData = { ...item, login: { username: '', uris: [{ uri: '', match: null }], hasPassword: false, hasTotp: false },
+      passwordHistory: [], customFields: [], attachments: [] };
+    const html = renderToStaticMarkup(createElement(ItemDetail, {
+      client, item: empty, icons: null, onBack() {}, onEdit() {}, onDelete() {}, onToggleFavorite() {},
+    }));
+    expect(html).not.toMatch(/<h3[^>]*>登录<\/h3>/);
+    expect(html).not.toMatch(/<h3[^>]*>网址<\/h3>/);
+    expect(html).not.toMatch(/<h3[^>]*>附件<\/h3>/);
+    expect(html).not.toMatch(/<h3[^>]*>通行密钥<\/h3>/);
+    expect(html).toContain('更多操作');
+    expect(html.indexOf('data-item-folder')).toBeGreaterThan(html.indexOf('data-item-resources'));
+  });
+
+  it('shows explicit false fields, a year-only expiry, and unreadable-data warnings', () => {
+    const card: ItemDetailData = { ...item, summary: { ...item.summary, type: 'card' }, rawType: 3,
+      login: null, passwordHistory: [], decryptionFailed: true,
+      card: { cardholderName: null, brand: null, expMonth: null, expYear: '2030', hasNumber: false, hasCode: false },
+      customFields: [{ name: 'Switch', type: 2, linkedId: null, value: 'false' }] };
+    const html = renderToStaticMarkup(createElement(ItemDetail, {
+      client, item: card, icons: null, onBack() {}, onEdit() {}, onDelete() {}, onToggleFavorite() {},
+    }));
+    expect(html).toContain('关闭');
+    expect(html).toContain('2030');
+    expect(html).toContain('部分字段无法读取或解密');
   });
 
   it('describes browser autofill without desktop permissions or quick panel shortcuts', () => {

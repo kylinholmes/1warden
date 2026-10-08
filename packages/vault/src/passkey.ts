@@ -45,6 +45,8 @@ const P256_COORD_BYTES = 32;
  * 写成数字的话，官方客户端读回来做严格类型检查会失败。
  */
 export interface StoredPasskey {
+  /** Opaque row identity for lossless editing. */
+  sourceId?: string;
   /** base64url 编码的凭据 ID */
   credentialId: string;
   keyType: 'public-key';

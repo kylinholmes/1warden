@@ -8,7 +8,7 @@
  */
 import {
   HttpClient, prelogin, loginWithPassword, refreshToken, DEVICE_TYPE,
-  refreshAttachmentUrl, downloadAttachment, createAttachmentV2, uploadAttachmentBytes,
+  refreshAttachmentUrl, downloadAttachment, createAttachmentV2, uploadAttachmentBytes, deleteAttachment as deleteAttachmentApi,
   type DeviceInfo, type TokenResponse,
 } from '@1warden/api';
 import {
@@ -21,12 +21,13 @@ import {
 import { VaultSession, restoreSession } from './session';
 import { SyncEngine, type SyncCache, type KdfCache } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
-import { unwrapAttachmentKey, decryptAttachmentContent } from './attachments';
+import { unwrapAttachmentKey, decryptAttachmentContent, encryptAttachmentContent } from './attachments';
 import { encryptBytes } from '@1warden/crypto';
 import type { SessionStatus, StoredSession } from './session';
 import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
 import { emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
+import { retainItemMetadata } from './preservation';
 
 /** 导入的类型名 → Bitwarden 的数字类型 */
 const RAW_TYPE: Record<ImportedItem['type'], number> = {
@@ -45,6 +46,18 @@ function blankImportItem(): VaultItem {
     secureNote: null, sshKey: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
+}
+
+/** Ordinary edits must not overwrite another completed full-record edit. */
+function editableState(item: VaultItem): string {
+  let login: unknown = null;
+  if (item.login) {
+    const { fido2Credentials: _credentials, passwordRevisionDate: _revision, ...fields } = item.login;
+    login = { ...fields, autofillOnPageLoad: item.login.autofillOnPageLoad ?? null };
+  }
+  return JSON.stringify({ type: item.type, name: item.name, notes: item.notes, reprompt: item.reprompt,
+    login, card: item.card, identity: item.identity, secureNote: item.secureNote, sshKey: item.sshKey,
+    customFields: item.customFields }, (key, value) => key === 'sourceId' ? undefined : value);
 }
 
 /**
@@ -92,6 +105,7 @@ export class VaultClient {
   private authenticationGeneration = 0;
   private pendingAuthentication: PendingAuthentication | null = null;
   private syncVerified = false;
+  private readonly itemWrites = new Map<string, Promise<void>>();
 
   /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
   private readonly fetchImpl: typeof fetch;
@@ -236,6 +250,7 @@ export class VaultClient {
 
   private invalidateAuthentication(): void {
     this.authenticationGeneration++;
+    this.itemWrites.clear();
     this.syncVerified = false;
     this.clearPendingAuthentication();
   }
@@ -507,36 +522,49 @@ export class VaultClient {
    * ## 两次失败要分开处理
    *
    * 1. **地址过期**：存下来的 `url` 由请求的 Host 头推导、每次 sync 重新生成。
-   *    先要一个新的，失败再回退到存下来的那个（官方客户端也是这个顺序）。
+   *    先要一个新的，仅在 v2 端点返回 404 时回退到存下来的那个。
    * 2. **密钥不对**：附件的密钥被用户密钥（或条目密钥）包装，
-   *    用错的表现是解出来一堆乱码 —— 而文件确实下载到了。
+   *    认证密文用错密钥时会抛错，不能把失败当作下载成功。
    *
    * 带独立密钥的条目也支持 —— 包装后的密钥现在留在会话里（`wrappedKey`）。
    */
   async downloadAttachment(
     itemId: string, attachmentId: string,
   ): Promise<{ fileName: string; bytes: Uint8Array }> {
-    const key = this.requireKey();
-    const item = this.session.items.find((i) => i.id === itemId);
-    if (!item) throw new Error('找不到这条条目');
-    const attachment = item.attachments.find((a) => a.id === attachmentId);
+    const assertCurrent = this.currentSessionGuard();
+    const http = this.http;
+    const item = this.requireItem(itemId);
+    const attachment = item.attachments.find(a => a.id === attachmentId);
     if (!attachment) throw new Error('这条条目上没有这个附件');
-    // 附件密钥可能是被**条目密钥**包装的 —— 用和保存同一处的解析
-    const wrappingKey = await this.keyFor(item);
-
-    // 先要一个新的下载地址；拿不到就回退到存下来的那个
     let url = attachment.url;
-    try {
-      url = (await refreshAttachmentUrl(this.http, itemId, attachmentId)).url;
-    } catch {
-      // 存下来的地址可能还有效 —— 回退，而不是直接失败
+    try { url = (await refreshAttachmentUrl(http, itemId, attachmentId)).url; }
+    catch (error) {
+      assertCurrent();
+      // Only a missing v2 route justifies using the stored signed URL.
+      if ((error as { status?: number }).status !== 404) throw error;
     }
-
-    const bytes = await downloadAttachment(this.http, url);
-    const attKey = await unwrapAttachmentKey(attachment.key, wrappingKey);
-    if (attKey === null) throw new Error('这个附件的密钥读不出来，无法解密');
-
-    return { fileName: attachment.fileName, bytes: await decryptAttachmentContent(bytes, attKey) };
+    assertCurrent();
+    const encrypted = await downloadAttachment(http, url);
+    assertCurrent();
+    let plaintext: Uint8Array | undefined;
+    try {
+      await this.withWriteKey(async userKey => {
+        const wrappingKey = await this.keyFor(item, userKey);
+        let attachmentKey: SymmetricKey | null = null;
+        try {
+          assertCurrent();
+          attachmentKey = attachment.key ? await unwrapAttachmentKey(attachment.key, wrappingKey) : null;
+          if (attachment.key && !attachmentKey) throw new Error('这个附件的密钥读不出来，无法解密');
+          plaintext = await decryptAttachmentContent(encrypted, attachmentKey ?? wrappingKey);
+          assertCurrent();
+        } finally {
+          if (attachmentKey) zeroizeKey(attachmentKey);
+          if (wrappingKey !== userKey) zeroizeKey(wrappingKey);
+        }
+      });
+      assertCurrent();
+      return { fileName: attachment.fileName, bytes: plaintext! };
+    } catch (error) { plaintext?.fill(0); throw error; }
   }
 
   /**
@@ -555,8 +583,10 @@ export class VaultClient {
     } catch {
       throw new Error('这条条目的独立密钥解不开，为避免写坏数据已中止');
     }
-    if (raw.length !== 64) throw new Error('这条条目的独立密钥长度不对，为避免写坏数据已中止');
-    return { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
+    try {
+      if (raw.length !== 64) throw new Error('这条条目的独立密钥长度不对，为避免写坏数据已中止');
+      return { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
+    } finally { raw.fill(0); }
   }
 
   /**
@@ -575,74 +605,103 @@ export class VaultClient {
   async uploadAttachment(
     itemId: string, fileName: string, bytes: Uint8Array,
   ): Promise<{ attachmentId: string }> {
-    const assertCurrent = this.currentSessionGuard();
-    const item = this.session.items.find((i) => i.id === itemId);
-    if (!item) throw new Error('找不到这条条目');
-    const userId = this.requireUserId();
-
-    const metadata = await this.withWriteKey(async (userKey) => {
-      const wrappingKey = await this.keyFor(item, userKey);
-      const attachmentKey = makeUserKey();
+    return this.queueItemWrite(itemId, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      const http = this.http;
+      // Capture old account credentials for compensating cleanup after lock/switch.
+      // They never accompany a request to a different origin.
+      const accessToken = this.token?.accessToken ?? '';
+      const cleanupHttp = this.makeHttp(http.baseUrl, () => ({ Authorization: `Bearer ${accessToken}` }));
+      const item = this.requireItem(itemId);
+      const data = await this.withWriteKey(async userKey => {
+        const wrappingKey = await this.keyFor(item, userKey);
+        const attachmentKey = makeUserKey();
+        const rawKey = new Uint8Array([...attachmentKey.encKey, ...attachmentKey.macKey]);
+        try {
+          assertCurrent();
+          const encrypted = await encryptAttachmentContent(bytes, attachmentKey);
+          assertCurrent();
+          const wrapped = await encryptBytes(rawKey, wrappingKey);
+          const encryptedName = await encryptString(fileName, wrappingKey);
+          assertCurrent();
+          return { encrypted, metadata: { key: wrapped, fileName: encryptedName, fileSize: encrypted.length } };
+        } finally {
+          rawKey.fill(0); zeroizeKey(attachmentKey);
+          if (wrappingKey !== userKey) zeroizeKey(wrappingKey);
+        }
+      });
+      assertCurrent();
+      const ticket = await createAttachmentV2(http, itemId, data.metadata);
       try {
         assertCurrent();
-        const encrypted = await encryptBytes(bytes, attachmentKey);
+        if (ticket.fileUploadType !== 0) throw new Error('当前服务器的附件上传类型暂不支持');
+        const expected = `/ciphers/${encodeURIComponent(itemId)}/attachment/${encodeURIComponent(ticket.attachmentId)}`;
+        const actual = /^https?:\/\//i.test(ticket.url) ? new URL(ticket.url).pathname : ticket.url;
+        const basePath = new URL(http.baseUrl).pathname.replace(/\/$/, '');
+        if (![expected, `/api${expected}`, `${basePath}/api${expected}`].includes(actual)) throw new Error('附件上传地址与登记记录不一致');
+        await uploadAttachmentBytes(http, ticket.url, data.encrypted);
         assertCurrent();
-        const wrapped = await encryptBytes(
-          new Uint8Array([...attachmentKey.encKey, ...attachmentKey.macKey]), wrappingKey,
-        );
-        assertCurrent();
-        const encryptedName = await encryptString(fileName, wrappingKey);
-        return { key: wrapped, fileName: encryptedName, fileSize: encrypted.length };
-      } finally {
-        zeroizeKey(attachmentKey);
-        if (wrappingKey !== userKey) zeroizeKey(wrappingKey);
+        await this.reloadItem(itemId, assertCurrent);
+        if (!this.requireItem(itemId).attachments.some(a => a.id === ticket.attachmentId)) throw new Error('服务器未返回已上传的附件');
+        return { attachmentId: ticket.attachmentId };
+      } catch (error) {
+        if (ticket.attachmentId) {
+          try { await deleteAttachmentApi(cleanupHttp, itemId, ticket.attachmentId); }
+          catch (cleanupError) { throw new Error('附件上传失败，临时附件清理也失败，请重新载入后删除该附件', { cause: new AggregateError([error, cleanupError]) }); }
+        }
+        throw error;
       }
     });
-    assertCurrent();
-    const ticket = await createAttachmentV2(this.http, itemId, metadata);
-    assertCurrent();
+  }
 
-    /*
-     * 3：把加密后的字节 POST 上去。
-     *
-     * ⚠️ **Vaultwarden 返回的是相对路径**（`/ciphers/{id}/attachment/{aid}`），
-     * 而且不带 `/api` 前缀 —— 实测出来的。直接丢给 fetch 只有一句
-     * "fetch() URL is invalid"，看不出是相对路径的问题。
-     * 绝对地址（官方云端那种指向对象存储的）原样用。
-     */
-    /*
-     * ⚠️ **这一步还没打通，所以明确报错，不做半通的事。**
-     *
-     * 登记那一步是好的 —— Vaultwarden 真的建了附件记录并返回了下载地址。
-     * 但把字节送上去这一步走不通，实测：
-     *
-     *   - 它返回 `fileUploadType: 0` 和一个相对地址
-     *     `/ciphers/{cid}/attachment/{aid}`
-     *   - 那条地址在 `/api` 下是 404、在服务根下也是 404
-     *     （用**存在**的条目试的，不是条目不存在导致的 404）
-     *   - 老的 multipart 端点 `/api/ciphers/{cid}/attachment` 同样是 404
-     *   - 唯一存在的是 `/api/ciphers/{cid}/attachment/v2`（无认证时回 401）
-     *
-     * 也就是说 Vaultwarden 只提供 v2 登记这一条路由，而它返回的上传地址
-     * 指向一个它自己没提供的路径。下一件该做的事：翻 Vaultwarden 的源码
-     * 确认 v2 之后字节到底该发到哪里（大概率是某个我没试到的动词或前缀），
-     * 或者退回 multipart 并确认那条路由在当前版本里的真实形态。
-     *
-     * 宁可在这里停住，也不要发一个「上传成功但文件是坏的 / 根本没传上去」的版本。
-     */
-    throw new Error('附件上传暂时不可用（服务端上传地址对不上，见 client.ts 里的说明）');
-    void ticket;
-    // 服务端把附件挂到了条目上 —— 重新同步一次，本地才看得到它
-    await this.refresh();
-    void userId;
-    return { attachmentId: ticket.attachmentId };
+  async deleteAttachment(id: string, attachmentId: string): Promise<void> {
+    return this.queueItemWrite(id, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      const item = this.requireItem(id);
+      if (!item.attachments.some(a => a.id === attachmentId)) throw new Error('找不到这个附件');
+      await deleteAttachmentApi(this.http, id, attachmentId);
+      assertCurrent();
+      const current = this.requireItem(id);
+      this.applyLocally({ ...current, attachments: current.attachments.filter(a => a.id !== attachmentId) }, false);
+      try { await this.reloadItem(id, assertCurrent); }
+      catch (error) { assertCurrent(); throw new Error('附件已删除，但条目信息刷新失败，请重新载入保险库', { cause: error }); }
+    });
+  }
+
+  async removePasskey(id: string, credentialId: string): Promise<void> {
+    return this.queueItemWrite(id, async () => {
+      const item = this.requireItem(id);
+      if (!item.login?.fido2Credentials.some(c => c.credentialId === credentialId)) throw new Error('找不到这个通行密钥');
+      await this.saveItemNow({ ...item, login: { ...item.login, fido2Credentials: item.login.fido2Credentials.filter(c => c.credentialId !== credentialId) } });
+    });
+  }
+
+  async clearPasswordHistory(id: string): Promise<void> {
+    return this.queueItemWrite(id, async () => {
+      const item = this.requireItem(id);
+      await this.saveItemNow({ ...item, passwordHistory: [] });
+    });
+  }
+
+  private requireItem(id: string): VaultItem {
+    const item = this.session.items.find(i => i.id === id);
+    if (!item) throw new Error('找不到这条条目');
+    return item;
+  }
+
+  private async reloadItem(id: string, assertCurrent: () => void): Promise<void> {
+    const dto = await getCipher(this.http, id);
+    assertCurrent();
+    if (dto.id !== id) throw new Error('服务器返回了不同的记录');
+    const saved = await this.withWriteKey(key => decryptCipher(dto, key));
+    assertCurrent();
+    this.applyLocally(saved, false);
   }
 
   /** 重新同步（用户手动刷新、或收到服务器变更通知时调用） */
   async refresh(): Promise<void> {
     const key = this.session.getKey();
     if (!key || !this.session.isUnlocked()) return;
-    this.session.replaceData([], []); // 先清空，避免中间态被渲染成「全部消失了」
     await this.doSync(key);
   }
 
@@ -730,6 +789,42 @@ export class VaultClient {
 
   /** 新建或更新一条。`item.id` 为空串表示新建。 */
   async saveItem(item: VaultItem): Promise<VaultItem> {
+    const initial = item.id ? this.requireItem(item.id) : null;
+    if (initial && item.updatedAt !== initial.updatedAt) throw new Error('条目已更新，请重新载入后编辑');
+    return this.queueItemWrite(item.id, async () => {
+      const latest = item.id ? this.requireItem(item.id) : null;
+      let edited = item;
+      if (latest && initial && latest !== initial) {
+        if (editableState(latest) !== editableState(initial)) throw new Error('保存期间条目已变化，请重新载入后编辑');
+        const addedCredentials = item.login?.fido2Credentials.filter(c =>
+          !initial.login?.fido2Credentials.some(old => old.credentialId === c.credentialId) &&
+          !latest.login?.fido2Credentials.some(existing => existing.credentialId === c.credentialId)) ?? [];
+        edited = { ...item, updatedAt: latest.updatedAt, attachments: latest.attachments,
+          passwordHistory: latest.passwordHistory,
+          favorite: latest.favorite, folderId: latest.folderId,
+          ...(item.login && latest.login ? { login: { ...item.login, fido2Credentials: [...latest.login.fido2Credentials, ...addedCredentials] } } : {}),
+        };
+      }
+      if (latest) edited = retainItemMetadata(latest, edited);
+      return this.saveItemNow(edited);
+    });
+  }
+
+  private async saveItemNow(item: VaultItem): Promise<VaultItem> {
+    const current = item.id ? this.requireItem(item.id) : null;
+    if (current?.login && item.login) {
+      const changed = current.login.password !== item.login.password;
+      let history = item.passwordHistory;
+      const changedAt = changed ? new Date().toISOString() : current.login.passwordRevisionDate;
+      if (changed && current.login.password) {
+        // A caller may already have generated the exact history row.
+        const alreadyAdded = history[0]?.password === current.login.password &&
+          (history[0]?.password !== current.passwordHistory[0]?.password || history[0]?.lastUsedDate !== current.passwordHistory[0]?.lastUsedDate);
+        if (!alreadyAdded) history = [{ password: current.login.password, lastUsedDate: changedAt! }, ...history];
+      }
+      item = { ...item, passwordHistory: changed ? history.slice(0, 5) : history,
+        login: { ...item.login, passwordRevisionDate: changedAt } };
+    }
     const assertCurrent = this.currentSessionGuard();
     const userId = this.requireUserId();
     const isNew = item.id === '';
@@ -771,12 +866,12 @@ export class VaultClient {
 
   /** 软删除 —— 进回收站，**可恢复**。UI 上的「移到回收站」走这条。 */
   async moveToTrash(id: string): Promise<void> {
-    const assertCurrent = this.currentSessionGuard();
-    await softDeleteCipher(this.http, id);
-    assertCurrent();
-    this.removeLocally(id);
-    // The server confirmed this deletion. Keep the remaining snapshot intact;
-    // starting an unawaited full refresh here exposed an empty vault to persistence.
+    return this.queueItemWrite(id, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      await softDeleteCipher(this.http, id);
+      assertCurrent();
+      this.removeLocally(id);
+    });
   }
 
   /**
@@ -784,28 +879,80 @@ export class VaultClient {
    * UI 上必须先做二次确认，并且要明确告诉用户无法恢复。
    */
   async deletePermanently(id: string): Promise<void> {
-    const assertCurrent = this.currentSessionGuard();
-    await hardDeleteCipher(this.http, id);
-    assertCurrent();
-    this.removeLocally(id);
+    return this.queueItemWrite(id, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      await hardDeleteCipher(this.http, id);
+      assertCurrent();
+      this.removeLocally(id);
+    });
   }
 
   async toggleFavorite(id: string): Promise<void> {
+    return this.queueItemWrite(id, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      const item = this.session.items.find((i) => i.id === id);
+      if (!item) return;
+      // 收藏是局部更新 —— 不需要重新加密整条记录
+      await updateCipherPartial(this.http, id, { folderId: item.folderId, favorite: !item.favorite });
+      assertCurrent();
+      const current = this.session.items.find(i => i.id === id);
+      if (current) this.applyLocally({ ...current, favorite: !item.favorite }, false);
+    });
+  }
+
+  /** Assign a folder without re-encrypting or changing any credential fields. */
+  async moveToFolder(id: string, folderId: string | null): Promise<void> {
+    return this.queueItemWrite(id, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      const item = this.session.items.find(i => i.id === id && !i.deletedAt && !i.archivedAt);
+      if (!item) throw new Error('找不到这条记录');
+      if (folderId !== null && !this.session.folders.some(f => f.id === folderId)) throw new Error('文件夹不存在，请重新选择');
+      if (item.folderId === folderId) return;
+      await moveCiphers(this.http, folderId, [id]);
+      assertCurrent();
+      const current = this.session.items.find(i => i.id === id);
+      if (!current) return;
+      try {
+        const dto = await getCipher(this.http, id);
+        assertCurrent();
+        if (dto.id !== id) throw new Error('服务器返回了不同的记录');
+        const saved = await this.withWriteKey(key => decryptCipher(dto, key));
+        assertCurrent();
+        // A later write or sync owns a newer snapshot; do not overwrite it with this read.
+        if (this.session.items.find(i => i.id === id) === current) this.applyLocally(saved, false);
+      } catch (error) {
+        assertCurrent();
+        // Keep server-confirmed membership when reloading its new revision fails.
+        const latest = this.session.items.find(i => i.id === id);
+        if (latest) this.applyLocally({ ...latest, folderId }, false);
+        throw new Error('文件夹归类已保存，但条目信息刷新失败，请重新载入保险库', { cause: error });
+      }
+    });
+  }
+
+  /** Partial writes on one record share its latest snapshot and server revision. */
+  private queueItemWrite<T>(id: string, operation: () => Promise<T>): Promise<T> {
     const assertCurrent = this.currentSessionGuard();
-    const item = this.session.items.find((i) => i.id === id);
-    if (!item) return;
-    // 收藏是局部更新 —— 不需要重新加密整条记录
-    await updateCipherPartial(this.http, id, { favorite: !item.favorite });
-    assertCurrent();
-    this.applyLocally({ ...item, favorite: !item.favorite }, false);
+    const pending = (this.itemWrites.get(id) ?? Promise.resolve()).catch(() => {}).then(() => {
+      assertCurrent();
+      return operation();
+    });
+    this.itemWrites.set(id, pending.then(() => {}, () => {}));
+    const tracked = this.itemWrites.get(id);
+    return pending.finally(() => {
+      if (this.itemWrites.get(id) === tracked) this.itemWrites.delete(id);
+    });
   }
 
   async setArchived(id: string, archived: boolean): Promise<void> {
-    const assertCurrent = this.currentSessionGuard();
-    await setArchivedApi(this.http, id, archived);
-    assertCurrent();
-    this.removeLocally(id);
-    void this.refresh().catch(() => {});
+    return this.queueItemWrite(id, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      await setArchivedApi(this.http, id, archived);
+      assertCurrent();
+      this.removeLocally(id);
+      await this.refresh();
+      assertCurrent();
+    });
   }
 
   /**
@@ -1084,7 +1231,7 @@ async function getDeviceIdentifier(store: DeviceIdStore): Promise<string> {
 // 这些薄封装让依赖注入与调用点的签名保持简单
 import {
   sync as apiSync, getRevisionDate as apiRevisionDate,
-  createCipher, updateCipher, softDeleteCipher, hardDeleteCipher,
+  createCipher, getCipher, updateCipher, softDeleteCipher, hardDeleteCipher, moveCiphers,
   setArchived as setArchivedApi, updateCipherPartial,
   createFolder as createFolderApi, updateFolder as updateFolderApi,
   deleteFolder as deleteFolderApi,

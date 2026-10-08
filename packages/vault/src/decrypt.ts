@@ -1,4 +1,4 @@
-import { decryptString, decryptBytes, DecryptError } from '@1warden/crypto';
+import { decryptString, decryptBytes, DecryptError, sha256, utf8Encode, toBase64Url } from '@1warden/crypto';
 import type { SymmetricKey } from '@1warden/crypto';
 import type { CipherDto, FolderDto, CipherFieldDto } from '@1warden/api';
 import { cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
@@ -31,6 +31,28 @@ async function tryDecrypt(enc: unknown, key: SymmetricKey): Promise<Decrypted> {
     if (e instanceof DecryptError) return { value: null, failed: true };
     throw e;
   }
+}
+
+/** Stable across resource-only saves; changes when the underlying row changes.
+ * Only an opaque digest crosses the draft boundary, never ciphertext or keys.
+ */
+async function rowId(kind: string, raw: unknown, index: number): Promise<string> {
+  return `${kind}:${toBase64Url(await sha256(utf8Encode(JSON.stringify(raw))))}:${index}`;
+}
+
+interface DecodeContext {
+  read(enc: unknown): Promise<Decrypted>;
+  failures: string[];
+}
+
+function rows<T>(raw: T[] | null | undefined, ctx: DecodeContext): T[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) { ctx.failures.push('列表结构无法读取'); return []; }
+  return raw.filter((row) => {
+    if (row !== null && typeof row === 'object' && !Array.isArray(row)) return true;
+    ctx.failures.push('列表字段无法读取');
+    return false;
+  });
 }
 
 /**
@@ -74,33 +96,41 @@ function str(v: unknown): string | null {
  * 数据里可能两种都有。只认加密形态的话，明文那种会表现为「这条 passkey 打不开」，
  * 而失败点在解密而不是在 WebAuthn，排查时很难想到。
  */
-async function decryptPasskeyKeyValue(raw: unknown, key: SymmetricKey): Promise<string | null> {
+async function decryptPasskeyKeyValue(raw: unknown, ctx: DecodeContext): Promise<string | null> {
   if (typeof raw !== 'string' || raw.length === 0) return null;
   if (!ENC_STRING.test(raw)) return raw;
-  return (await tryDecrypt(raw, key)).value;
+  return (await ctx.read(raw)).value;
 }
 
 /**
  * 读出条目上的 passkey 列表。
  *
- * ⚠️ 读不出来的凭据**直接丢掉**，而不是留一条空壳。
- * 缺私钥的凭据是**死凭据**：RP 那边还认得它，我们这边永远签不出名，
- * 用户点它只会得到一句语焉不详的失败。丢掉它，「这个站点没有可用的 passkey」
- * 就成为一个明确的结论 —— 用户可以据此重新注册一个。
+ * Unreadable credentials are omitted from usable views, retained in owner-only raw
+ * state, and cause saves to fail. Reading one broken row never destroys it.
  */
-async function decryptPasskeys(raw: unknown, key: SymmetricKey): Promise<StoredPasskey[]> {
-  if (!Array.isArray(raw)) return [];
+async function decryptPasskeys(raw: unknown, ctx: DecodeContext): Promise<StoredPasskey[]> {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) { ctx.failures.push('列表结构无法读取'); return []; }
   const out: StoredPasskey[] = [];
   for (const c of raw) {
-    if (c === null || typeof c !== 'object') continue;
-    const r = c as Record<string, unknown>;
+    if (c === null || typeof c !== 'object' || Array.isArray(c)) { ctx.failures.push('凭据无法读取'); continue; }
+    const r = { ...c } as Record<string, unknown>;
+    // Native Bitwarden encrypts metadata too. Accept our historical plaintext rows,
+    // but a broken EncString must never be treated as a plaintext credential.
+    for (const field of ['credentialId', 'keyType', 'keyAlgorithm', 'keyCurve', 'rpId', 'rpName',
+      'userHandle', 'userName', 'userDisplayName', 'counter', 'discoverable']) {
+      if (typeof r[field] === 'string' && ENC_STRING.test(r[field] as string)) {
+        r[field] = (await ctx.read(r[field])).value;
+      }
+    }
 
     const credentialId = str(r.credentialId);
-    if (credentialId === null) continue;
-    const keyValue = await decryptPasskeyKeyValue(r.keyValue, key);
-    if (keyValue === null) continue;
+    if (credentialId === null) { ctx.failures.push('凭据 ID 无法读取'); continue; }
+    const keyValue = await decryptPasskeyKeyValue(r.keyValue, ctx);
+    if (keyValue === null) { ctx.failures.push('凭据密钥无法读取'); continue; }
 
     const p: StoredPasskey = {
+      sourceId: await rowId('passkey', c, raw.indexOf(c)),
       credentialId,
       keyType: 'public-key',
       keyAlgorithm: 'ECDSA',
@@ -126,19 +156,20 @@ async function decryptPasskeys(raw: unknown, key: SymmetricKey): Promise<StoredP
   return out;
 }
 
-async function decryptLogin(raw: NonNullable<CipherDto['login']>, key: SymmetricKey): Promise<LoginFields> {
+async function decryptLogin(raw: NonNullable<CipherDto['login']>, ctx: DecodeContext): Promise<LoginFields> {
   const out = emptyLogin();
-  out.fido2Credentials = await decryptPasskeys(raw.fido2Credentials, key);
-  out.username = (await tryDecrypt(raw.username, key)).value;
-  out.password = (await tryDecrypt(raw.password, key)).value;
-  out.totp = (await tryDecrypt(raw.totp, key)).value;
+  out.fido2Credentials = await decryptPasskeys(raw.fido2Credentials, ctx);
+  out.username = (await ctx.read(raw.username)).value;
+  out.password = (await ctx.read(raw.password)).value;
+  out.totp = (await ctx.read(raw.totp)).value;
   // passwordRevisionDate 是**明文**（见 bitwarden-api-notes.md §2.2）
   out.passwordRevisionDate = raw.passwordRevisionDate ?? null;
+  out.autofillOnPageLoad = raw.autofillOnPageLoad ?? null;
 
-  const uris = Array.isArray(raw.uris) ? raw.uris : [];
+  const uris = rows(raw.uris, ctx);
   for (const u of uris) {
-    const uri = (await tryDecrypt(u.uri, key)).value;
-    out.uris.push({ uri: uri ?? '', match: typeof u.match === 'number' ? u.match : null });
+    const uri = (await ctx.read(u.uri)).value;
+    out.uris.push({ sourceId: await rowId('uri', u, uris.indexOf(u)), uri: uri ?? '', match: typeof u.match === 'number' ? u.match : null });
   }
   return out;
 }
@@ -149,62 +180,71 @@ async function decryptLogin(raw: NonNullable<CipherDto['login']>, key: Symmetric
  * ⚠️ 单独一个字段解不开**不该让整条条目打不开** —— 用户至少有公钥和指纹能用，
  * 而整条打不开他连「有这么一条」都看不见。所以逐个降级成 null。
  */
-async function decryptSshKey(raw: NonNullable<CipherDto['sshKey']>, key: SymmetricKey): Promise<SshKeyFields> {
+async function decryptSshKey(raw: NonNullable<CipherDto['sshKey']>, ctx: DecodeContext): Promise<SshKeyFields> {
   const out = emptySshKey();
   for (const f of ['privateKey', 'publicKey', 'fingerprint'] as const) {
-    out[f] = (await tryDecrypt(raw[f], key)).value;
+    out[f] = (await ctx.read(raw[f])).value;
   }
   return out;
 }
 
-async function decryptCard(raw: NonNullable<CipherDto['card']>, key: SymmetricKey): Promise<CardFields> {
+async function decryptCard(raw: NonNullable<CipherDto['card']>, ctx: DecodeContext): Promise<CardFields> {
   const out = emptyCard();
   for (const f of ['cardholderName', 'brand', 'number', 'expMonth', 'expYear', 'code'] as const) {
-    out[f] = (await tryDecrypt(raw[f], key)).value;
+    out[f] = (await ctx.read(raw[f])).value;
   }
   return out;
 }
 
-async function decryptIdentity(raw: NonNullable<CipherDto['identity']>, key: SymmetricKey): Promise<IdentityFields> {
+async function decryptIdentity(raw: NonNullable<CipherDto['identity']>, ctx: DecodeContext): Promise<IdentityFields> {
   const out = emptyIdentity();
   for (const f of Object.keys(out) as Array<keyof IdentityFields>) {
-    out[f] = (await tryDecrypt(raw[f], key)).value;
+    out[f] = (await ctx.read(raw[f])).value;
   }
   return out;
 }
 
-async function decryptFields(raw: CipherDto['fields'], key: SymmetricKey): Promise<CustomField[]> {
-  if (!Array.isArray(raw)) return [];
+async function decryptFields(raw: CipherDto['fields'], ctx: DecodeContext): Promise<CustomField[]> {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) { ctx.failures.push('列表结构无法读取'); return []; }
   const out: CustomField[] = [];
-  for (const f of raw as CipherFieldDto[]) {
-    const name = (await tryDecrypt(f.name, key)).value;
-    const value = (await tryDecrypt(f.value, key)).value;
+  for (const f of rows(raw as CipherFieldDto[], ctx)) {
+    const name = (await ctx.read(f.name)).value;
+    const value = (await ctx.read(f.value)).value;
     // 服务端在 type 缺失或不可解析时回退到 1（Hidden）—— 我们跟随，
     // 避免把本该隐藏的字段意外显示出来
     const type = (f.type === 0 || f.type === 1 || f.type === 2 || f.type === 3) ? f.type : 1;
-    out.push({ name: name ?? '', value: value ?? '', type, linkedId: f.linkedId ?? null });
+    out.push({ sourceId: await rowId('field', f, raw.indexOf(f)), name: name ?? '', value: value ?? '', type, linkedId: f.linkedId ?? null, ...(f.type === type ? {} : { unsupportedType: f.type }) });
   }
   return out;
 }
 
 async function decryptHistory(
-  raw: CipherDto['passwordHistory'], key: SymmetricKey,
+  raw: CipherDto['passwordHistory'], ctx: DecodeContext,
 ): Promise<PasswordHistoryEntry[]> {
-  if (!Array.isArray(raw)) return [];
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) { ctx.failures.push('列表结构无法读取'); return []; }
   const out: PasswordHistoryEntry[] = [];
-  for (const h of raw) {
-    const password = (await tryDecrypt(h.password, key)).value;
-    // 解不开的历史密码丢掉而不是留个空位 —— 空位对用户没有意义
-    if (password !== null) out.push({ lastUsedDate: h.lastUsedDate, password });
+  for (const h of rows(raw, ctx)) {
+    const password = (await ctx.read(h.password)).value;
+    // History passwords are required. A null/missing password is not an empty
+    // valid history entry: dropping it without a failure would compact baseline
+    // indexes and allow a subsequent save to select the wrong original row.
+    if (password === null) {
+      ctx.failures.push('历史密码无法读取');
+      continue;
+    }
+    out.push({ sourceId: await rowId('history', h, raw.indexOf(h)), lastUsedDate: h.lastUsedDate, password });
   }
   return out;
 }
 
-async function decryptAttachments(raw: CipherDto['attachments'], key: SymmetricKey): Promise<Attachment[]> {
-  if (!Array.isArray(raw)) return [];
+async function decryptAttachments(raw: CipherDto['attachments'], ctx: DecodeContext): Promise<Attachment[]> {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) { ctx.failures.push('列表结构无法读取'); return []; }
   const out: Attachment[] = [];
-  for (const a of raw) {
-    const fileName = await tryDecrypt(a.fileName, key);
+  for (const a of rows(raw, ctx)) {
+    const fileName = await ctx.read(a.fileName);
     out.push({
       id: a.id,
       fileName: fileName.value ?? '',
@@ -226,11 +266,24 @@ async function decryptAttachments(raw: CipherDto['attachments'], key: SymmetricK
  */
 export async function decryptCipher(dto: CipherDto, userKey: SymmetricKey): Promise<VaultItem> {
   const { key } = await resolveItemKey(dto, userKey);
+  const failures: string[] = [];
+  const ctx: DecodeContext = {
+    failures,
+    async read(enc) {
+      const result = await tryDecrypt(enc, key);
+      if (result.failed) failures.push('字段无法解密');
+      return result;
+    },
+  };
 
-  const name = await tryDecrypt(dto.name, key);
-  const notes = await tryDecrypt(dto.notes, key);
+  for (const field of ['login', 'card', 'identity', 'secureNote', 'sshKey'] as const) {
+    const value = dto[field];
+    if (value != null && (typeof value !== 'object' || Array.isArray(value))) failures.push(`${field} 无法读取`);
+  }
+  const name = await ctx.read(dto.name);
+  const notes = await ctx.read(dto.notes);
 
-  return {
+  const item: VaultItem = {
     id: dto.id,
     type: cipherTypeToItemType(dto.type),
     rawType: dto.type,
@@ -247,16 +300,18 @@ export async function decryptCipher(dto: CipherDto, userKey: SymmetricKey): Prom
     archivedAt: dto.archivedDate ?? null,
     wrappedKey: dto.key ?? null,
 
-    login: dto.login ? await decryptLogin(dto.login, key) : null,
-    card: dto.card ? await decryptCard(dto.card, key) : null,
-    identity: dto.identity ? await decryptIdentity(dto.identity, key) : null,
+    login: dto.login ? await decryptLogin(dto.login, ctx) : null,
+    card: dto.card ? await decryptCard(dto.card, ctx) : null,
+    identity: dto.identity ? await decryptIdentity(dto.identity, ctx) : null,
     secureNote: dto.secureNote ? { type: dto.secureNote.type ?? 0 } : null,
-    sshKey: dto.sshKey ? await decryptSshKey(dto.sshKey, key) : null,
+    sshKey: dto.sshKey ? await decryptSshKey(dto.sshKey, ctx) : null,
 
-    customFields: await decryptFields(dto.fields, key),
-    passwordHistory: await decryptHistory(dto.passwordHistory, key),
-    attachments: await decryptAttachments(dto.attachments, key),
+    customFields: await decryptFields(dto.fields, ctx),
+    passwordHistory: await decryptHistory(dto.passwordHistory, ctx),
+    attachments: await decryptAttachments(dto.attachments, ctx),
   };
+  item.preservation = { source: structuredClone(dto), baseline: structuredClone(item), failures };
+  return item;
 }
 
 export async function decryptFolder(dto: FolderDto, userKey: SymmetricKey): Promise<VaultFolder> {

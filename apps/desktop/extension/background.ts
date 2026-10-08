@@ -979,12 +979,14 @@ async function onSubmitted(tabId: number | undefined, url: string | undefined): 
 
   const fields = await readFieldsFrom(tabId);
   const plan = classifyFields(fields);
-  if (plan.password === undefined) {
+  // 注册和改密码要保存新密码；普通登录才读取当前密码。
+  const passwordIndex = plan.newPassword ?? plan.password;
+  if (passwordIndex === undefined) {
     console.debug(`[onewarden] 捕获跳过：页面上没识别出密码框（读到 ${fields.length} 个输入框）`);
     return;
   }
 
-  const indices = plan.username === undefined ? [plan.password] : [plan.username, plan.password];
+  const indices = plan.username === undefined ? [passwordIndex] : [plan.username, passwordIndex];
   const [injection] = await ext.scripting.executeScript({
     target: { tabId },
     func: readFieldValues,
