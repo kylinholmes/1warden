@@ -113,7 +113,7 @@ const seed = {
 let browser: any;
 let popup: any;
 async function screenshot(label: string): Promise<void> {
-  // Firefox 157 BiDi rejects captureScreenshot for privileged extension pages.
+  // Firefox 156/157 BiDi rejects captureScreenshot for privileged extension pages.
   // Keep interaction assertions active and report this limitation explicitly.
   if (name === 'chrome') {
     await popup.evaluate(() => Promise.all(document.getAnimations()
@@ -133,7 +133,7 @@ async function click(selector: string): Promise<void> {
     element = await popup.evaluateHandle((q: string, t: string) => Array.from(document.querySelectorAll(q))
       .find((node) => node.textContent?.trim().startsWith(t)), query, text);
   } else element = await popup.waitForSelector(selector, { visible: true });
-  // Firefox 157 also rejects BiDi input.performActions on extension pages.
+  // Firefox 156/157 also rejects BiDi input.performActions on extension pages.
   if (name === 'firefox') await element.evaluate((button: HTMLElement) => button.click());
   else {
     // The drawer slides in with CSS. A node can exist while still offscreen.
@@ -211,7 +211,7 @@ try {
   await popup.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('[data-brand-mark]')].every(node => node.complete && node.naturalWidth > 0));
   check('production brand asset loads inside extension CSP', await popup.$eval('[data-brand-mark]', (node: HTMLImageElement) => node.complete && node.naturalWidth > 0));
   await screenshot('empty-home-brand');
-  await popup.click('[data-add-server]');
+  await click('[data-add-server]');
   await popup.waitForSelector('input[type="email"]', { visible: true });
   check('shared connect screen renders', await popup.$('input[type="password"]') !== null);
   await screenshot('connect');

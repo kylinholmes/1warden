@@ -16,7 +16,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) 
 const browser = await puppeteer.launch({ headless: true, executablePath: process.env.ONEWARDEN_EDGE
   ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe' });
 const page = await browser.newPage(); page.setDefaultTimeout(5000);
-const checks: string[] = []; const errors: string[] = [];
+const checks: string[] = []; const errors: string[] = []; const dropdownGeometry: unknown[] = [];
 page.on('pageerror', (e: Error) => errors.push(e.message));
 const base = `http://127.0.0.1:${server.port}/`;
 function check(label: string, pass: boolean, data?: unknown) {
@@ -64,13 +64,15 @@ try {
     await appearance(width!, height!);
     check(`${width}x${height}: no content overflow`, await page.$eval('#settings-panel-appearance', (node: HTMLElement) => node.scrollWidth <= node.clientWidth));
     await page.click('.palette-trigger');
-    check(`${width}x${height}: dropdown and trigger are not clipped`, await page.evaluate(() => {
+    const bounds = await page.evaluate(() => {
       const list = document.querySelector('[role="listbox"]')!.getBoundingClientRect();
       const trigger = document.querySelector('.palette-trigger')!.getBoundingClientRect();
       const content = document.querySelector('#settings-panel-appearance')!.getBoundingClientRect();
       const hit = document.elementFromPoint(trigger.x + trigger.width / 2, trigger.y + trigger.height / 2);
-      return list.top >= content.top && list.bottom <= content.bottom && !!hit?.closest('.palette-trigger');
-    }));
+      return { list: list.toJSON(), trigger: trigger.toJSON(), content: content.toJSON(), triggerHit: !!hit?.closest('.palette-trigger') };
+    });
+    dropdownGeometry.push({ width, height, ...bounds });
+    check(`${width}x${height}: dropdown and trigger are not clipped`, bounds.list.top >= bounds.content.top && bounds.list.bottom <= bounds.content.bottom && bounds.triggerHit, bounds);
     await page.keyboard.press('End'); await page.keyboard.press('Enter');
     check(`${width}x${height}: last palette reachable`, await page.evaluate(() => document.documentElement.dataset.palette === 'linear'));
     if (width === 440) {
@@ -86,6 +88,11 @@ try {
   check('current identity uses a compact neutral row', geometry.height < 100 && geometry.background === 'rgba(0, 0, 0, 0)', geometry);
   await page.screenshot({ path: join(output, 'account-menu.png') });
   check('no runtime errors', errors.length === 0, errors);
-  writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, errors }, null, 2));
   console.log(`PASS appearance: ${checks.length} checks; ${output}`);
-} finally { await browser.close(); server.stop(true); }
+} catch (error) {
+  await page.screenshot({ path: join(output, 'failure.png') });
+  throw error;
+} finally {
+  writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, errors, dropdownGeometry, browser: await browser.version() }, null, 2));
+  await browser.close(); server.stop(true);
+}

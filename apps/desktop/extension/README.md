@@ -77,7 +77,7 @@ bun scripts/toolbar-popup-smoke.ts zen
 
 `ONEWARDEN_PANEL_PREVIEW=apps/desktop/dist-preview bun scripts/panel-motion-smoke.ts` 验证共享页面的窄屏全窗口卡片、宽屏居中面板、右滑进出、退出期间不可交互、焦点恢复、顶层 Esc 与减少动画偏好。先运行 `bun run --cwd apps/desktop preview:build`；它使用无界面 Edge 和人工预览数据。
 
-Firefox 157 / 当前 Zen 的 BiDi 不支持扩展页面的原生输入和截图；脚本在实际浏览器上通过 DOM 事件操作实际界面，并在报告中明确标记这一限制。Chrome / Edge 使用原生指针/键盘并保存截图。
+Firefox 156/157 / 当前 Zen 的 BiDi 不支持扩展页面的原生输入和截图；脚本在实际浏览器上通过 DOM 事件操作实际界面，并在报告中明确标记这一限制。所有扩展页面点击（包括首次添加服务器）必须经过脚本的引擎适配 helper，不能直接调用 `popup.click`。Chrome / Edge 使用原生指针/键盘并保存截图；测试断言与产品权限不因自动化方式而改变。
 
 扩展检查按需开启：`ONEWARDEN_SMOKE_ATTACHMENTS=1` 从本机下载加密附件，经真实后台解密和 UI Blob 下载后逐字节验证；Firefox / Zen 的 `saveAs` 需要原生 Save 对话框，可以加 `ONEWARDEN_SMOKE_HEADED=1` 手动确认。`ONEWARDEN_SMOKE_CLIPBOARD=1` 使用实际复制按钮，两次关闭页面 32 秒，分别检查到期清除与保留后来复制的内容；它会使用系统剪贴板，应单独运行，避免与其他剪贴板测试并行。
 

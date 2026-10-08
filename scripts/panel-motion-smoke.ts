@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /** Shared-screen motion checks against an isolated preview build and disposable headless browser. */
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -26,6 +26,8 @@ try { browser = await puppeteer.launch({
 const page = await browser.newPage();
 const checks: string[] = [];
 const errors: string[] = [];
+const safeAreaSamples: unknown[] = [];
+const browserVersion = await browser.version();
 page.on('pageerror', (error: Error) => errors.push(error.message));
 function check(label: string, passed: boolean, diagnostic?: unknown) {
   if (!passed) throw new Error(`${label}: ${JSON.stringify(diagnostic)}`);
@@ -59,6 +61,35 @@ async function geometry(selector: string) {
       overflow: document.documentElement.scrollWidth > innerWidth };
   });
 }
+async function safeAreaGeometry(phase: string) {
+  const sample = await page.evaluate(() => {
+    const panel = document.querySelector<HTMLElement>('.panel')!;
+    const head = document.querySelector<HTMLElement>('.panel-head')!;
+    const foot = document.querySelector<HTMLElement>('.panel-foot')!;
+    const probe = document.querySelector<HTMLElement>('[data-qa-safe-area]')!;
+    const env = getComputedStyle(probe);
+    return {
+      os: document.documentElement.dataset.os ?? null,
+      envTop: parseFloat(env.paddingTop), envBottom: parseFloat(env.paddingBottom),
+      reservedTop: getComputedStyle(panel, '::before').height,
+      reservedBottom: getComputedStyle(panel, '::after').height,
+      headerTop: head.getBoundingClientRect().top, footerBottom: foot.getBoundingClientRect().bottom,
+      viewportHeight: innerHeight, devicePixelRatio, visualViewportHeight: visualViewport?.height,
+    };
+  });
+  safeAreaSamples.push({ phase, ...sample });
+  return sample;
+}
+async function safeAreaReady(top: number, bottom: number) {
+  // A CDP acknowledgement can precede Blink's environment-variable update. Wait
+  // on an independent CSS-env probe, never on the product header/footer result:
+  // broken application padding must still fail the original geometry assertions.
+  await page.waitForFunction((expectedTop: number, expectedBottom: number) => {
+    const probe = document.querySelector<HTMLElement>('[data-qa-safe-area]')!;
+    const style = getComputedStyle(probe);
+    return parseFloat(style.paddingTop) === expectedTop && parseFloat(style.paddingBottom) === expectedBottom;
+  }, { timeout: 5000, polling: 'raf' }, top, bottom);
+}
 async function closePanel(selector: string, label: string, narrow: boolean) {
   await page.click(selector);
   await page.waitForSelector('.panel-out');
@@ -78,17 +109,30 @@ try {
   await page.evaluate(() => { document.documentElement.dataset.os = 'mac'; });
   check('native narrow header clears the 28px titlebar', await page.$eval('.panel-head', (element: HTMLElement) => element.getBoundingClientRect().top >= 28));
   const cdp = await page.createCDPSession();
+  await page.evaluate(() => {
+    const probe = document.createElement('div');
+    probe.dataset.qaSafeArea = 'true'; probe.setAttribute('aria-hidden', 'true');
+    probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;inset:0 auto auto 0;width:0;height:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)';
+    document.body.append(probe);
+  });
   await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, bottom: 34 } });
   await page.evaluate(() => { document.documentElement.dataset.os = 'ios'; });
-  check('mobile narrow header clears the emulated notch', await page.$eval('.panel-head', (element: HTMLElement) => element.getBoundingClientRect().top >= 47));
-  check('mobile narrow footer clears the home indicator', await page.$eval('.panel-foot', (element: HTMLElement) => element.getBoundingClientRect().bottom <= innerHeight - 34));
+  await safeAreaGeometry('notch-requested');
+  await safeAreaReady(47, 34);
+  const notch = await safeAreaGeometry('notch-ready');
+  check('mobile narrow header clears the emulated notch', notch.headerTop >= 47, notch);
+  check('mobile narrow footer clears the home indicator', notch.footerBottom <= notch.viewportHeight - 34, notch);
   const mobileBounds = await geometry('[role="dialog"]');
   check('safe-area spacing keeps the whole card covering the window', mobileBounds.x === 0 && mobileBounds.y === 0 && mobileBounds.width === 440 && mobileBounds.height === 600, mobileBounds);
   await page.screenshot({ path: join(output, 'generator-mobile-safe-area.png') });
   await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 0, bottom: 0 } });
   await page.evaluate(() => { delete document.documentElement.dataset.os; });
-  check('extension header has no native titlebar gap', await page.$eval('.panel-head', (element: HTMLElement) => element.getBoundingClientRect().top === 0));
-  check('extension footer keeps the complete viewport height', await page.$eval('.panel-foot', (element: HTMLElement) => element.getBoundingClientRect().bottom === innerHeight));
+  await safeAreaGeometry('clear-requested');
+  await safeAreaReady(0, 0);
+  const clear = await safeAreaGeometry('clear-ready');
+  check('extension header has no native titlebar gap', clear.headerTop === 0, clear);
+  check('extension footer keeps the complete viewport height', clear.footerBottom === clear.viewportHeight, clear);
+  await page.evaluate(() => document.querySelector('[data-qa-safe-area]')?.remove());
   await cdp.detach();
   for (const width of [440, 1280]) {
     const height = width === 440 ? 600 : 800;
@@ -213,9 +257,11 @@ try {
   check('no browser runtime errors', errors.length === 0, errors);
   console.log(JSON.stringify({ checks, screenshots: output }, null, 2));
 } catch (error) {
+  if (await page.$('[data-qa-safe-area]')) await safeAreaGeometry('failure');
   await page.screenshot({ path: join(output, 'failure.png') });
   throw error;
 } finally {
+  writeFileSync(join(output, 'report.json'), JSON.stringify({ browserVersion, checks, errors, safeAreaSamples }, null, 2));
   await browser.close();
   server.stop(true);
 }
