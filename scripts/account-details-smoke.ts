@@ -8,6 +8,7 @@ import { spawn } from 'node:child_process';
 import { deriveMasterKey, stretchMasterKey, makeUserKey } from '../packages/crypto/src/index';
 import { decryptCipher, parseProfile, parseProfileSettings } from '../packages/vault/src/index';
 import { createFakeServer } from '../packages/vault/src/testing/fake-server';
+import { connectNativeBrowser } from './native-smoke-startup.mjs';
 
 const native = process.argv.includes('--native');
 const { default: puppeteer } = await import(pathToFileURL(process.env.ONEWARDEN_PUPPETEER!).href);
@@ -139,8 +140,7 @@ async function nativePage() {
   const portServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') }); const port = portServer.port; portServer.stop(true);
   ownApp = spawn(process.env.ONEWARDEN_NATIVE_EXE!, [], { windowsHide: true, env: { ...process.env,
     WEBVIEW2_USER_DATA_FOLDER: join(output, 'native-profile'), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` } });
-  let browser: any;
-  await until(async () => { try { browser = await puppeteer.connect({ browserURL: `http://127.0.0.1:${port}`, defaultViewport: null }); return true; } catch { return false; } }, 'native devtools connection');
+  const browser = await connectNativeBrowser({ app: ownApp, connect: (options: any) => puppeteer.connect(options), browserURL: `http://127.0.0.1:${port}` });
   browsers.push(browser);
   let page: any; await until(async () => { page = (await browser.pages()).find((p: any) => p.url() === 'http://tauri.localhost/'); return page; }, 'native main page');
   page.setDefaultTimeout(10000); page.on('pageerror', (e: Error) => errors.push(e.message)); return page;

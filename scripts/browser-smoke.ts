@@ -197,31 +197,30 @@ async function screenshot(label: string): Promise<void> {
 }
 async function click(selector: string): Promise<void> {
   const textSelector = selector.match(/^(.*)::-p-text\((.*)\)$/);
-  let element;
-  if (textSelector) {
-    const query = textSelector[1]!;
-    const text = textSelector[2]!;
-    await popup.waitForFunction((q: string, t: string) => Array.from(document.querySelectorAll(q))
-      .some((node) => node.textContent?.trim().startsWith(t)), {}, query, text);
-    element = await popup.evaluateHandle((q: string, t: string) => Array.from(document.querySelectorAll(q))
-      .find((node) => node.textContent?.trim().startsWith(t)), query, text);
-  } else element = await popup.waitForSelector(selector, { visible: true });
-  await element.evaluate((node: HTMLElement) => node.scrollIntoView({ block: 'center' }));
-  // Firefox 156/157 also rejects BiDi input.performActions on extension pages.
-  if (name === 'firefox') await element.evaluate((button: HTMLElement) => button.click());
-  else {
-    // The drawer slides in with CSS. A node can exist while still offscreen.
-    await popup.waitForFunction((node: Element) => {
-      const rect = node.getBoundingClientRect();
+  // A saved revision remounts SelectedDetail. Resolve each polling frame so a
+  // detached pre-save button cannot keep the actionability wait stuck forever.
+  const element = await popup.waitForFunction((query: string, text: string | null, native: boolean) => {
+    const node = text === null ? document.querySelector<HTMLElement>(query)
+      : Array.from(document.querySelectorAll<HTMLElement>(query)).find(node => node.textContent?.trim().startsWith(text));
+    if (!node || node.closest('[inert], :disabled')) return false;
+    node.scrollIntoView({ block: 'center' });
+    const rect = node.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0 || getComputedStyle(node).visibility === 'hidden') return false;
+    if (native) {
       const hit = document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2);
-      return rect.width > 0 && rect.height > 0 && rect.left >= 0 && rect.right <= innerWidth
-        && rect.top >= 0 && rect.bottom <= innerHeight && hit !== null && node.contains(hit);
-    }, {}, element);
-    await element.click();
-  }
-  await element.dispose();
+      if (rect.left < 0 || rect.right > innerWidth || rect.top < 0 || rect.bottom > innerHeight
+        || hit === null || !node.contains(hit)) return false;
+    }
+    return node;
+  }, {}, textSelector?.[1] ?? selector, textSelector?.[2] ?? null, name === 'chrome');
+  try {
+    // Gecko BiDi rejects native input on privileged pages; activate its real DOM.
+    if (name === 'firefox') await element.evaluate((button: HTMLElement) => button.click());
+    else await element.click();
+  } finally { await element.dispose(); }
 }
 async function type(selector: string, value: string): Promise<void> {
+  await popup.waitForSelector(selector, { visible: true });
   if (name === 'chrome') return popup.type(selector, value);
   await popup.$eval(selector, (input: HTMLInputElement, text: string) => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
@@ -438,6 +437,10 @@ try {
       && await popup.$eval('#editor-add-more-menu', (menu: Element) => ['自定义 · 文本', '自定义 · 隐藏', '自定义 · 开关', '自定义 · 关联'].every(label => menu.textContent?.includes(label))));
   await screenshot('add-more-picker-440');
   await click('[data-add-field="login.totp"]');
+  await popup.waitForFunction(() => {
+    const input = document.querySelector<HTMLInputElement>('[aria-label="验证码"]');
+    return input !== null && document.activeElement === input;
+  });
   check('Add More selects and focuses the chosen native control',
     await popup.$eval('[aria-label="验证码"]', (input: HTMLInputElement) => document.activeElement === input && input.value === ''));
   await screenshot('optional-control-440');
