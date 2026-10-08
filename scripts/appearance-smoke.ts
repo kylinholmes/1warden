@@ -64,14 +64,26 @@ try {
     await appearance(width!, height!);
     check(`${width}x${height}: no content overflow`, await page.$eval('#settings-panel-appearance', (node: HTMLElement) => node.scrollWidth <= node.clientWidth));
     await page.click('.palette-trigger');
-    const bounds = await page.evaluate(() => {
-      const list = document.querySelector('[role="listbox"]')!.getBoundingClientRect();
-      const trigger = document.querySelector('.palette-trigger')!.getBoundingClientRect();
-      const content = document.querySelector('#settings-panel-appearance')!.getBoundingClientRect();
-      const hit = document.elementFromPoint(trigger.x + trigger.width / 2, trigger.y + trigger.height / 2);
-      return { list: list.toJSON(), trigger: trigger.toJSON(), content: content.toJSON(), triggerHit: !!hit?.closest('.palette-trigger') };
+    const samples = await page.evaluate(async () => {
+      function measure() {
+        const node = document.querySelector<HTMLElement>('[role="listbox"]')!;
+        const list = node.getBoundingClientRect();
+        const trigger = document.querySelector('.palette-trigger')!.getBoundingClientRect();
+        const content = document.querySelector('#settings-panel-appearance')!.getBoundingClientRect();
+        const hit = document.elementFromPoint(trigger.x + trigger.width / 2, trigger.y + trigger.height / 2);
+        return { list: list.toJSON(), trigger: trigger.toJSON(), content: content.toJSON(),
+          maxHeight: node.style.maxHeight, triggerHit: !!hit?.closest('.palette-trigger') };
+      }
+      const immediate = measure();
+      // Edge 152 can expose the initial 224px box before committing the layout
+      // effect's constrained height. Hosted failure screenshots showed the
+      // correct 183px box. Measure after a paint, not a protocol-timing race;
+      // keep both samples and the exact original clipping assertion.
+      await new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done())));
+      return { immediate, rendered: measure() };
     });
-    dropdownGeometry.push({ width, height, ...bounds });
+    dropdownGeometry.push({ width, height, ...samples });
+    const bounds = samples.rendered;
     check(`${width}x${height}: dropdown and trigger are not clipped`, bounds.list.top >= bounds.content.top && bounds.list.bottom <= bounds.content.bottom && bounds.triggerHit, bounds);
     await page.keyboard.press('End'); await page.keyboard.press('Enter');
     check(`${width}x${height}: last palette reachable`, await page.evaluate(() => document.documentElement.dataset.palette === 'linear'));

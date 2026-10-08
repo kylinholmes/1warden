@@ -15,7 +15,7 @@
 
 条目详情打开时，底层列表即使设置了 `inert`，列表中 `z-index: 30` 的导航按钮仍然会参与绘制，压到详情的返回按钮附近。详情层固定为 `z-index: 1`，且仅在窄窗口详情仍挂载期间为列表建立 `isolation: isolate` 绘制上下文。详情关闭后恢复 `auto`，避免影响抽屉菜单和触发按钮的正常层级。
 
-Windows 标题栏下，从用户详情返回主列表时，`EmptyDetail` 原来的 `screen-in` 位移和缩放动画会产生短暂的纵向溢出：实测约为 4 px → 2 px → 1 px → 0，导致最右侧滚动条闪现。详情和空详情改用不改变布局边界的 `fade-in`；`panel-motion-smoke.ts` 已先复现失败、再验证修复后通过。加入编辑器取消/继续/放弃草稿回归后，共 72 项检查。
+Windows 标题栏下，从用户详情返回主列表时，`EmptyDetail` 原来的 `screen-in` 位移和缩放动画会产生短暂的纵向溢出：实测约为 4 px → 2 px → 1 px → 0，导致最右侧滚动条闪现。详情和空详情改用不改变布局边界的 `fade-in`；`panel-motion-smoke.ts` 已先复现失败、再验证修复后通过。加入编辑器取消/继续/放弃草稿及退场中重新打开回归后，共 73 项检查。
 
 编辑器移除与底部“取消”重复的页头关闭按钮；未保存内容仍必须经过放弃确认，Escape 只取消确认，不丢弃草稿。连接表单和解锁页也复用 `BackButton`，保留各自清晰的文字标签。导入预览不再重复文件名；安全设置不再提供永远禁用的泄露检查开关，而是说明安全报告中的真实按需入口。
 
@@ -34,13 +34,15 @@ Windows 标题栏下，从用户详情返回主列表时，`EmptyDetail` 原来�
 - Windows 免安装程序：`C:\ProgramData\Temp\target_cache\x86_64-pc-windows-msvc\release\1warden.exe`，17:55:54 构建，6,486,016 字节；未生成安装包或归档。
 - Edge：`apps/desktop/dist-extension`；Firefox：`apps/desktop/dist-firefox`。已有扩展需要在扩展管理页重新加载。
 - 正式图标源、预览、平台资源与制作记录：`logos/production/README.md`。保留用户原始设计。
-- `bun run check`：97 个文件、1146 项通过（包含 14 项图标像素/容器检查及 CI 契约检查）。
+- `bun run check`：98 个文件、1149 项通过（包含 14 项图标像素/容器检查、CI 契约及 Firefox 点击适配防回归检查）。
 - Rust：41 项通过，2 项依赖开发服务器的集成检查按原设置跳过。
-- 最终桌面／移动／扩展预览：布局 490、导航 318、动效及草稿保护 72、外观 45、账户菜单 22、Zustand 生命周期 13 项通过。
+- 最终桌面／移动／扩展预览：布局 490、导航 318、动效及草稿保护 73、外观 45、账户菜单 22、Zustand 生命周期 13 项通过。
 - 真实 Edge 扩展：连接返回流程 25、核心 36、多账户资料 36、用户详情 37 项通过。
 - 实际 Windows WebView：用户详情/图片裁剪/跨端同步 31 项；快速搜索 12 项通过，未运行会替换用户剪贴板的可选检查。独立应用窗口按正常速度执行，无演示延时。
-- 所有账户测试使用合成数据和独立用户目录，没有访问个人保险库；macOS/iOS 原生运行及 Firefox 运行未在此 Windows 主机验收。
+- 所有账户测试使用合成数据和独立用户目录，没有访问个人保险库；macOS/iOS 原生交互未在此 Windows 主机验收。Firefox 使用官方签名验证后的临时解压程序，未全局安装，34 项真实扩展检查通过。
 
 2026-10-08：Windows Edge 桌面预览完成 318 项检查，包含每种页头无重复关闭按钮的断言；运行时异常为 0。已目视核对 320 px 设置目录、完整三级用户详情面包屑和 1280 px 设置面板。报告与截图保存在 `C:\ProgramData\Temp\1warden-navigation-header`（临时验证产物）。
 
-最终通过与 CI 相同的 `test:ui` / `test:windows` 包装器重跑，证据分别位于 `C:\ProgramData\Temp\1warden-ci-final-ui`、`1warden-ci-final-extensions`、`1warden-ci-final-native`。本机未安装 Firefox，扩展包装器本次明确只选 Edge 相关步骤；正式 CI 保留 Firefox 必需检查。工作流另通过 actionlint v1.7.12 的 YAML/schema/表达式校验（本机未安装 shellcheck/pyflakes，未执行这两项附加检查）。托管构建结果以对应 Actions 运行记录为准。
+最终通过与 CI 相同的 `test:ui` / `test:windows` 包装器重跑，证据分别位于 `C:\ProgramData\Temp\1warden-ci-final-ui`、`1warden-ci-final-extensions`、`1warden-ci-final-native`。第一轮本机扩展包装器明确只选 Edge 相关步骤，后续使用临时 Firefox 补跑并通过专属包装器入口；正式 CI 始终保留 Firefox 必需检查。工作流另通过 actionlint v1.7.12 的 YAML/schema/表达式校验（本机未安装 shellcheck/pyflakes，未执行这两项附加检查）。
+
+托管验证发现的脚本兼容问题没有通过跳过检查处理：Firefox 首页按钮复用现有的 Gecko 扩展页 DOM 激活适配；安全区模拟等待独立 CSS 环境探针更新后才测量实际页头；下拉框保留即时和渲染帧后的几何数据，仍严格要求不裁切。短动效在浏览器内触发并逐帧记录仍连接的节点，避免跨调试协议取得已卸载节点的空样式；动画时长、交互禁用和内容保留断言不变。Windows WebView2 的 12 项快速窗口和 31 项资料回归、Windows 两种产物、macOS 产物及真实 Edge/Firefox 扩展已在[托管运行](https://github.com/kylinholmes/1warden/actions/runs/37762632057)通过；修正后的最终整体状态以后续 Actions 运行记录为准。

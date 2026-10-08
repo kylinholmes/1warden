@@ -27,6 +27,7 @@ const page = await browser.newPage();
 const checks: string[] = [];
 const errors: string[] = [];
 const safeAreaSamples: unknown[] = [];
+const exitTraces: unknown[] = [];
 const browserVersion = await browser.version();
 page.on('pageerror', (error: Error) => errors.push(error.message));
 function check(label: string, passed: boolean, diagnostic?: unknown) {
@@ -90,16 +91,57 @@ async function safeAreaReady(top: number, bottom: number) {
     return parseFloat(style.paddingTop) === expectedTop && parseFloat(style.paddingBottom) === expectedBottom;
   }, { timeout: 5000, polling: 'raf' }, top, bottom);
 }
+async function sampleExit(label: string, options: {
+  click?: string; escape?: boolean; exiting: string; content?: string; contentText?: string; reopen?: string;
+}) {
+  // Click/Escape and all frame observations run in one renderer task chain.
+  // Separate CDP calls can consume the entire 160ms exit and return a stale
+  // element handle whose getComputedStyle() is empty after it is detached.
+  const trace = await page.evaluate(async (options: {
+    click?: string; escape?: boolean; exiting: string; content?: string; contentText?: string; reopen?: string;
+  }) => {
+    const started = performance.now();
+    const samples: Array<{ at: number; connected: boolean; name: string; inactive: boolean; pointerEvents: string; retained: boolean }> = [];
+    let reopenedWhileConnected = false;
+    if (options.click) {
+      const trigger = document.querySelector<HTMLButtonElement>(options.click);
+      if (!trigger) throw new Error(`Missing close trigger: ${options.click}`);
+      trigger.click();
+    } else if (options.escape) {
+      (document.activeElement ?? document).dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true }));
+    }
+    while (performance.now() - started < 2000) {
+      const element = document.querySelector<HTMLElement>(options.exiting);
+      if (element?.isConnected && element.parentElement?.isConnected) {
+        const content = options.content ? element.querySelector(options.content) : element;
+        samples.push({
+          at: performance.now() - started, connected: element.isConnected,
+          name: getComputedStyle(element).animationName,
+          inactive: element.closest('[inert]') !== null,
+          pointerEvents: getComputedStyle(element.parentElement).pointerEvents,
+          retained: Boolean(content?.isConnected && (!options.contentText || content.textContent?.includes(options.contentText))),
+        });
+        if (options.reopen && !reopenedWhileConnected) {
+          const reopen = document.querySelector<HTMLButtonElement>(options.reopen);
+          if (!reopen) throw new Error(`Missing reopen trigger: ${options.reopen}`);
+          // Reopen before returning over CDP, while the outgoing card still exists.
+          reopenedWhileConnected = element.isConnected;
+          reopen.click();
+        }
+      } else if (samples.length) break;
+      await new Promise<void>(done => requestAnimationFrame(() => done()));
+    }
+    return { samples, reopenedWhileConnected };
+  }, options);
+  exitTraces.push({ label, ...trace });
+  return trace;
+}
 async function closePanel(selector: string, label: string, narrow: boolean) {
-  await page.click(selector);
-  await page.waitForSelector('.panel-out');
-  const exit = await page.$eval('.panel-out', (element: HTMLElement) => ({
-    name: getComputedStyle(element).animationName,
-    inactive: element.closest('[inert]') !== null,
-    pointerEvents: getComputedStyle(element.parentElement!).pointerEvents,
-  }));
-  check(`${label}: outgoing card remains mounted and inactive`, exit.inactive && exit.pointerEvents === 'none', exit);
-  check(`${label}: close animation direction`, exit.name === (narrow ? 'onewarden-card-out' : 'onewarden-panel-out'), exit);
+  const exit = await sampleExit(label, { click: selector, exiting: '.panel-out' });
+  check(`${label}: outgoing card remains mounted and inactive`, exit.samples.length > 0
+    && exit.samples.every(sample => sample.connected && sample.inactive && sample.pointerEvents === 'none'), exit);
+  check(`${label}: close animation direction`, exit.samples.length > 0
+    && exit.samples.every(sample => sample.name === (narrow ? 'onewarden-card-out' : 'onewarden-panel-out')), exit);
   await page.waitForSelector('[role="dialog"]', { hidden: true });
   check(`${label}: overlay removed after close`, await page.$('.floating-layer') === null);
 }
@@ -150,9 +192,8 @@ try {
     }
   }
   await visit('generator');
-  await page.click('[aria-labelledby="generator-title"] [data-page-back]');
-  await page.waitForSelector('.panel-out');
-  await page.click('button.fixed');
+  const reopen = await sampleExit('reopen during exit', { click: '[aria-labelledby="generator-title"] [data-page-back]', exiting: '.panel-out', reopen: 'button.fixed' });
+  check('reopen is triggered while the outgoing card is still connected', reopen.samples.length > 0 && reopen.reopenedWhileConnected, reopen);
   await page.waitForSelector('.panel-in');
   await settle();
   await new Promise((done) => setTimeout(done, 450));
@@ -199,9 +240,9 @@ try {
   check('underlying list controls cannot paint above the detail', await page.$eval('.vault-list', (element: HTMLElement) => getComputedStyle(element).isolation === 'isolate'));
   check('detail uses the shared back control', await page.$('[aria-label="返回列表"][data-page-back]') !== null);
   await page.screenshot({ path: join(output, 'detail-440.png') });
-  await page.click('[aria-label="返回列表"]');
-  await page.waitForSelector('.vault-detail[data-state="closing"] article');
-  check('detail content retained while sliding out', (await geometry('.vault-detail')).animation === 'onewarden-card-out');
+  const detailExit = await sampleExit('detail back', { click: '[aria-label="返回列表"]', exiting: '.vault-detail[data-state="closing"]', content: 'article' });
+  check('detail content retained while sliding out', detailExit.samples.length > 0
+    && detailExit.samples.every(sample => sample.connected && sample.retained && sample.name === 'onewarden-card-out'), detailExit);
   await page.waitForSelector('.vault-detail article', { hidden: true });
   check('back restores selected row focus', await page.evaluate(() => document.activeElement?.closest('.vault-list') !== null));
   check('list stacking is restored after detail exits', await page.$eval('.vault-list', (element: HTMLElement) => getComputedStyle(element).isolation === 'auto'));
@@ -213,9 +254,9 @@ try {
   await page.waitForSelector('[aria-labelledby="delete-title"]');
   await settle();
   check('delete confirmation also covers narrow window', (await geometry('[aria-labelledby="delete-title"]')).height === 600);
-  await page.keyboard.press('Escape');
-  await page.waitForSelector('.panel-out');
-  check('delete confirmation retains title during exit', await page.$eval('#delete-title', (element: HTMLElement) => Boolean(element.textContent?.includes('删除'))));
+  const deleteExit = await sampleExit('delete confirmation Escape', { escape: true, exiting: '.panel-out', content: '#delete-title', contentText: '删除' });
+  check('delete confirmation retains title during exit', deleteExit.samples.length > 0
+    && deleteExit.samples.every(sample => sample.connected && sample.retained), deleteExit);
   await page.waitForSelector('[role="dialog"]', { hidden: true });
   check('closing confirmation does not close underlying detail', await page.$('.vault-detail article') !== null);
   await page.keyboard.press('Escape');
@@ -261,7 +302,7 @@ try {
   await page.screenshot({ path: join(output, 'failure.png') });
   throw error;
 } finally {
-  writeFileSync(join(output, 'report.json'), JSON.stringify({ browserVersion, checks, errors, safeAreaSamples }, null, 2));
+  writeFileSync(join(output, 'report.json'), JSON.stringify({ browserVersion, checks, errors, safeAreaSamples, exitTraces }, null, 2));
   await browser.close();
   server.stop(true);
 }
