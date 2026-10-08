@@ -8,6 +8,7 @@ import { mkdtemp, mkdir } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { connectNativeBrowser } from './native-smoke-startup.mjs';
 const { default: puppeteer } = await import(pathToFileURL(process.env.ONEWARDEN_PUPPETEER).href);
 const output = await mkdtemp(join(tmpdir(), '1warden-native-quick-'));
 const server = createServer(); server.listen(0, '127.0.0.1'); await once(server, 'listening');
@@ -15,8 +16,6 @@ const port = server.address().port; await new Promise(resolve => server.close(re
 await mkdir(join(output, 'profile'));
 const app = spawn(process.env.ONEWARDEN_NATIVE_EXE, [], { windowsHide: true, env: { ...process.env,
   WEBVIEW2_USER_DATA_FOLDER: join(output, 'profile'), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` } });
-app.stderr.on('data', chunk => console.log('native:', chunk.toString()));
-app.on('exit', (code, signal) => console.log('native exit:', { code, signal, at: new Date().toISOString() }));
 const probePath = resolve('scripts/windows-quick-probe.ps1');
 function probe(action, expected = '') {
   const result = spawnSync('powershell.exe', ['-NoProfile', '-File', probePath, '-AppProcessId', String(app.pid), '-Action', action, '-Expected', expected], { encoding: 'utf8', windowsHide: true });
@@ -29,8 +28,7 @@ const invoke = (page, command, args = {}) => page.evaluate(({ command, args }) =
 const visible = () => invoke(quick, 'plugin:window|is_visible', { label: 'quick' });
 async function until(fn, label) { for (let i=0;i<80;i++) { if(await fn())return; await pause(100); } throw Error(label); }
 try {
-  for (let i=0;i<100;i++) { try { browser=await puppeteer.connect({ browserURL:`http://127.0.0.1:${port}`, defaultViewport:null }); break; } catch { await pause(100); } }
-  if (!browser) throw Error('No QA WebView');
+  browser = await connectNativeBrowser({ app, connect: options => puppeteer.connect(options), browserURL: `http://127.0.0.1:${port}` });
   await until(async()=> { const pages=await browser.pages(); main=pages.find(p=>p.url()==='http://tauri.localhost/'); quick=pages.find(p=>p.url().endsWith('/quick.html')); return main&&quick; }, 'missing pages');
   await main.waitForSelector('main'); await quick.waitForSelector('[aria-label="固定快速搜索"]');
   original = await invoke(main, 'quick_status');
