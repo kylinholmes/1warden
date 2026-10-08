@@ -7,9 +7,12 @@ function errorDetails(error, depth = 0) {
   return [error.code, error.message ?? String(error), error.cause && `cause: ${errorDetails(error.cause, depth + 1)}`].filter(Boolean).join(': ');
 }
 
-/** Keep both native suites' 10-second budget, retaining the error at the failing boundary. */
-export async function connectNativeBrowser({ app, connect, browserURL, timeoutMs = 10000, retryMs = 100 }) {
-  console.log(`Native startup: pid=${app.pid ?? 'unavailable'} endpoint=${browserURL}`);
+/** The opt-in probe measures late readiness; ordinary smoke retains its 10-second limit. */
+export async function connectNativeBrowser({ app, connect, browserURL,
+  timeoutMs = process.env.ONEWARDEN_NATIVE_STARTUP_PROBE === '1' ? 60000 : 10000, retryMs = 100 }) {
+  const started = Date.now(); let attempts = 0;
+  const probeMode = process.env.ONEWARDEN_NATIVE_STARTUP_PROBE === '1';
+  console.log(`Native startup: pid=${app.pid ?? 'unavailable'} endpoint=${browserURL} timeoutMs=${timeoutMs} probe=${probeMode}`);
   for (const [name, stream] of [['stdout', app.stdout], ['stderr', app.stderr]]) {
     stream?.on('data', chunk => console.log(`native ${name}:`, chunk.toString()));
   }
@@ -21,13 +24,15 @@ export async function connectNativeBrowser({ app, connect, browserURL, timeoutMs
       resolve({ failure: `exited with code=${code} signal=${signal}` });
     });
   });
-  const deadline = Date.now() + timeoutMs;
+  const deadline = started + timeoutMs;
   let timer;
   const expired = new Promise(resolve => { timer = setTimeout(() => resolve({ failure: `timed out after ${timeoutMs} ms` }), timeoutMs); });
+  const progress = probeMode ? setInterval(() => console.log(`Native startup pending: elapsedMs=${Date.now() - started} attempts=${attempts} last CDP error=${lastError ? errorDetails(lastError) : 'connection attempt did not settle'}`), 10000) : undefined;
   let reason = `timed out after ${timeoutMs} ms`;
   try {
     while (Date.now() < deadline) {
       if (app.exitCode !== null || app.signalCode !== null) { reason = `exited with code=${app.exitCode} signal=${app.signalCode}`; break; }
+      attempts++;
       const attempt = Promise.resolve().then(() => connect({ browserURL, defaultViewport: null }))
         .then(browser => {
           // A connection resolving after timeout must not keep the owned WebView attached.
@@ -35,7 +40,7 @@ export async function connectNativeBrowser({ app, connect, browserURL, timeoutMs
           return { browser };
         }, error => ({ error }));
       const result = await Promise.race([attempt, ended, expired]);
-      if (result.browser) { console.log('Native DevTools connected'); return result.browser; }
+      if (result.browser) { console.log(`Native DevTools connected: elapsedMs=${Date.now() - started} attempts=${attempts}`); return result.browser; }
       if (result.failure) { reason = result.failure; break; }
       lastError = result.error;
       const wait = await Promise.race([pause(retryMs), ended, expired]);
@@ -46,12 +51,14 @@ export async function connectNativeBrowser({ app, connect, browserURL, timeoutMs
       const probe = spawnSync('powershell.exe', ['-NoProfile', '-NonInteractive', '-File',
         fileURLToPath(new URL('./windows-native-startup-probe.ps1', import.meta.url)), '-AppProcessId', String(app.pid)],
       { encoding: 'utf8', windowsHide: true, timeout: 5000 });
-      console.log('Native startup process diagnostics:', probe.stdout?.trim() || probe.stderr?.trim() || errorDetails(probe.error));
+      console.log('Native startup process diagnostics:', { stdout: probe.stdout?.trim(), stderr: probe.stderr?.trim(),
+        error: probe.error && errorDetails(probe.error), status: probe.status, signal: probe.signal });
     }
     const status = spawnError ? `spawn failed: ${errorDetails(spawnError)}`
       : app.exitCode === null && app.signalCode === null ? 'alive' : `exited code=${app.exitCode} signal=${app.signalCode}`;
     throw Error(`Native WebView ${reason}; pid=${app.pid ?? 'unavailable'} ${status}; endpoint=${browserURL}; last CDP error: ${lastError ? errorDetails(lastError) : 'connection attempt did not settle'}`);
   } finally {
     clearTimeout(timer);
+    clearInterval(progress);
   }
 }
