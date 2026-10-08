@@ -1,8 +1,13 @@
 # Encrypted account Profile
 
+Follow-up: [User details and encrypted account metadata](../../account-details.md)
+extends this design with preferences, device history and manual avatar cropping.
+The user now authorizes automatic device registration to create the special note
+after verified unlock; display-name/avatar and preference edits remain explicit.
+
 The user requests a special vault record as their Profile, with a Base64 avatar and display name in its encrypted notes. After unlock, decrypt and cache the presentation locally. The ongoing 1Password-inspired palette refresh remains independent.
 
-Use an ordinary secure note marked by encrypted custom field `coffer:record-type=user-profile`. Notes are a versioned JSON object (`schema: coffer.profile`, `version: 1`, `displayName`, `avatarDataUrl`), retaining unknown properties during edits. Only explicit saves create/update records. Profile notes are hidden from ordinary 1Warden browse/search/reports; other Bitwarden clients can see the secure note. Newest active marked record wins deterministically; never delete duplicates. Invalid/newer schema prevents overwrite. Saved revisions prevent stale editor writes.
+Use an ordinary secure note marked by encrypted custom field `1warden:record-type=user-profile`. Notes are a versioned JSON object (`schema: 1warden.profile`, `version: 1`, `displayName`, `avatarDataUrl`), retaining unknown properties during edits. Only explicit saves create/update records. Profile notes are hidden from ordinary 1Warden browse/search/reports; other Bitwarden clients can see the secure note. Newest active marked record wins deterministically; never delete duplicates. Invalid/newer schema prevents overwrite. Saved revisions prevent stale editor writes.
 
 Compress uploaded raster avatars locally to a square JPEG, up to 128 px, adapt quality/dimensions to <= 5600 data-URL characters. Cap JSON UTF-8 size at 7000 bytes to fit Vaultwarden's default encrypted-note limit. Reject unsupported image inputs and oversize data before writes.
 
@@ -16,4 +21,4 @@ The user explicitly selected working multi-account switching in this iteration. 
 
 The shared light/dark palette uses blue primary controls, pale blue/light paper surfaces or navy dark surfaces, and violet/teal/rose/amber semantic icons. Existing narrow full-window cards and right-slide motion remain. Tests use synthetic records and the explicitly supplied local test account, never the user's personal vault; temporary test records and disposable backend data are cleaned up.
 
-The product is now named **1Warden**. Existing storage, protocol, bundle identifiers and encrypted Profile schema/marker stay compatible with installed Coffer data. The avatar menu exposes only 登出; automatic locking, keyboard/native lock commands and expiry remain available.
+The product is now named **1Warden**. Existing storage, protocol, bundle identifiers and encrypted Profile schema/marker stay compatible with installed 1Warden data. The avatar menu exposes only 登出; automatic locking, keyboard/native lock commands and expiry remain available.

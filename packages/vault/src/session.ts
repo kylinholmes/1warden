@@ -1,5 +1,5 @@
-import { zeroizeKey } from '@coffer/crypto';
-import type { SymmetricKey, KdfConfig } from '@coffer/crypto';
+import { zeroizeKey } from '@1warden/crypto';
+import type { SymmetricKey, KdfConfig } from '@1warden/crypto';
 import type { VaultItem, VaultFolder } from './model';
 
 export type SessionStatus = 'loggedOut' | 'locked' | 'unlocking' | 'unlocked';
@@ -191,7 +191,7 @@ export class VaultSession {
   }
 }
 
-/** 存储里的会话形态。`@coffer/vault` 不认识存储，这个类型只是恢复路径的入参。 */
+/** 存储里的会话形态。`@1warden/vault` 不认识存储，这个类型只是恢复路径的入参。 */
 export interface StoredSession {
   account: AccountInfo;
   userKey: SymmetricKey;

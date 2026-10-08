@@ -132,7 +132,7 @@ function moduleSpecifiers(source: string): string[] {
 
 /** 把 `./a/b` 这种相对说明符解析成 SOURCES 里的键 */
 function resolveSpecifier(fromPath: string, spec: string): string | null {
-  if (!spec.startsWith('.')) return null;   // @coffer/* 之类的包依赖，不是本目录源码
+  if (!spec.startsWith('.')) return null;   // @1warden/* 之类的包依赖，不是本目录源码
   const base = fromPath.slice(0, fromPath.lastIndexOf('/'));
   const parts: string[] = [];
   for (const seg of `${base}/${spec}`.split('/')) {
@@ -246,7 +246,7 @@ describe('扩展只通过 ext 访问浏览器 API', () => {
  * `import { ext } from './ext-api'` 是「合法」的写法。这条不变量此前只写在
  * `webauthn-wire.ts` 的注释里（「只能依赖标准 Web API」），靠人记得。
  *
- * MAIN world 的入口在 `vite.content.config.ts` 里指定（`COFFER_ENTRY=webauthn`
+ * MAIN world 的入口在 `vite.content.config.ts` 里指定（`ONEWARDEN_ENTRY=webauthn`
  * → `src/webauthn-inject.ts` → `webauthn.js`）。
  */
 const MAIN_WORLD_ENTRY = './webauthn-inject.ts';
@@ -274,7 +274,7 @@ describe('MAIN world 的脚本不依赖扩展 API', () => {
     expect(resolveSpecifier('./popup/Popup.tsx', '../ext-api')).toBe('./ext-api.ts');
     expect(resolveSpecifier('./popup/Popup.tsx', './main')).toBe('./popup/main.tsx');
     // 包依赖不是本目录源码，不该解析
-    expect(resolveSpecifier('./a.ts', '@coffer/vault')).toBeNull();
+    expect(resolveSpecifier('./a.ts', '@1warden/vault')).toBeNull();
     // 指向不存在的文件时返回 null，而不是编一个路径出来
     expect(resolveSpecifier('./popup/Popup.tsx', './does-not-exist')).toBeNull();
   });

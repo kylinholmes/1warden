@@ -32,7 +32,7 @@
  * 只报「有没有」，不报值本身。弹窗要填充时再让 background 自己去取 ——
  * 少送出去一次就少一分风险，而列表本来也没有任何理由需要看到它们。
  */
-import { avatarOf, hasTotp, iconDomainOf, summaryOf, type VaultItem } from '@coffer/vault';
+import { avatarOf, hasTotp, iconDomainOf, summaryOf, type VaultItem } from '@1warden/vault';
 
 export interface ItemSummary {
   id: string;
@@ -90,7 +90,7 @@ export function summarise(i: VaultItem): ItemSummary {
     uris: i.login?.uris.map((u) => u.uri) ?? [],
     favorite: i.favorite,
     /*
-     * 文件夹只带 id，不带名字：名字是**整个库**的一份（`coffer:folders`
+     * 文件夹只带 id，不带名字：名字是**整个库**的一份（`1warden:folders`
      * 那条消息单独给），跟着每条摘要重复几十遍没道理。
      */
     folderId: i.folderId,

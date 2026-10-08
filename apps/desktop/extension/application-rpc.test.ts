@@ -1,34 +1,68 @@
 import { describe, expect, it } from 'vitest';
 import type { ApplicationService } from '../src/application/types';
-import { authorizeRequest, createApplicationDispatcher, serializeError } from './application-rpc';
+import { authorizeRequest, createApplicationDispatcher, createSerialRunner, serializeError } from './application-rpc';
 
-const runtime = { id: 'coffer-id', getURL: (path: string) => `moz-extension://installed-uuid/${path}` };
-const page = { id: 'coffer-id', url: runtime.getURL('popup.html') };
-const content = { id: 'coffer-id', url: 'https://example.com', tab: { id: 7 } };
+const runtime = { id: 'onewarden-id', getURL: (path: string) => `moz-extension://installed-uuid/${path}` };
+const page = { id: 'onewarden-id', url: runtime.getURL('popup.html') };
+const content = { id: 'onewarden-id', url: 'https://example.com', tab: { id: 7 } };
 
 describe('application message authority', () => {
   it('accepts only the installed extension UI page for vault operations', () => {
-    expect(() => authorizeRequest('coffer:application', page, runtime)).not.toThrow();
+    expect(() => authorizeRequest('1warden:application', page, runtime)).not.toThrow();
     for (const sender of [content, { ...page, id: 'other' }, { ...page, url: 'moz-extension://other/popup.html' },
-      { ...page, url: runtime.getURL('offscreen.html') }, { id: 'coffer-id' },
+      { ...page, url: runtime.getURL('offscreen.html') }, { id: 'onewarden-id' },
       { ...page, url: 'https://installed-uuid/popup.html' }]) {
-      expect(() => authorizeRequest('coffer:application', sender, runtime)).toThrow();
-      expect(() => authorizeRequest('coffer:list', sender, runtime)).toThrow();
-      expect(() => authorizeRequest('coffer:copy', sender, runtime)).toThrow();
+      expect(() => authorizeRequest('1warden:application', sender, runtime)).toThrow();
+      expect(() => authorizeRequest('1warden:list', sender, runtime)).toThrow();
+      expect(() => authorizeRequest('1warden:copy', sender, runtime)).toThrow();
     }
   });
 
   it('limits content scripts to field reports, submissions and WebAuthn', () => {
-    for (const type of ['coffer:fields', 'coffer:submitted', 'coffer:webauthn']) {
+    for (const type of ['1warden:fields', '1warden:submitted', '1warden:webauthn']) {
       expect(() => authorizeRequest(type, content, runtime)).not.toThrow();
       expect(() => authorizeRequest(type, { ...content, id: 'foreign' }, runtime)).toThrow();
       expect(() => authorizeRequest(type, { ...content, url: 'file:///etc/passwd' }, runtime)).toThrow();
     }
-    expect(() => authorizeRequest('coffer:clipboard-copied', content, runtime)).toThrow();
+    expect(() => authorizeRequest('1warden:clipboard-copied', content, runtime)).toThrow();
   });
 });
 
 describe('application dispatcher', () => {
+  it('search and detail remain available while a webpage operation holds the shared queue', async () => {
+    const run = createSerialRunner();
+    let release!: () => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const webpage = run(async () => { started(); await new Promise<void>((resolve) => { release = resolve; }); });
+    await entered;
+    const dispatch = createApplicationDispatcher({
+      search: async () => [{ id: 'github' }],
+      getItem: async () => ({ summary: { id: 'github' } }),
+    } as unknown as ApplicationService, { run });
+    try {
+      await expect(Promise.race([
+        Promise.all([dispatch({ method: 'search', args: ['github'] }), dispatch({ method: 'getItem', args: ['github'] })]),
+        new Promise((resolve) => setTimeout(() => resolve('blocked'), 100)),
+      ])).resolves.toEqual([[{ id: 'github' }], { summary: { id: 'github' } }]);
+    } finally { release(); await webpage; }
+  });
+
+  it('rejects an in-flight local read when the account changes', async () => {
+    let finish!: () => void;
+    let started!: () => void;
+    const entered = new Promise<void>((resolve) => { started = resolve; });
+    const dispatch = createApplicationDispatcher({
+      getItem: async () => { started(); await new Promise<void>((resolve) => { finish = resolve; }); return { secret: 'old' }; },
+      switchAccount: async () => {},
+    } as unknown as ApplicationService);
+    const reading = dispatch({ method: 'getItem', args: ['github'] });
+    const rejected = expect(reading).rejects.toThrow(/取消/);
+    await entered;
+    await dispatch({ method: 'switchAccount', args: [null] });
+    finish(); await rejected;
+  });
+
   it('returns snapshots while authentication is waiting for the server', async () => {
     let finish!: () => void;
     let markStarted!: () => void;

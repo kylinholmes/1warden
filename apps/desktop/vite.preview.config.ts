@@ -24,7 +24,7 @@ import tailwindcss from '@tailwindcss/vite';
  *
  * 默认 desktop，保持既有的 `preview:build` / 文档里的命令不变。
  */
-const PLATFORM = process.env['COFFER_PREVIEW_PLATFORM'] ?? 'desktop';
+const PLATFORM = process.env['ONEWARDEN_PREVIEW_PLATFORM'] ?? 'desktop';
 
 export default defineConfig({
   /*
@@ -36,7 +36,7 @@ export default defineConfig({
   root: resolve(__dirname, 'preview'),
   publicDir: false,
   plugins: [react(), tailwindcss()],
-  resolve: { alias: { '@coffer/vault': resolve(__dirname, '../../packages/vault/src/index.ts') } },
+  resolve: { alias: { '@1warden/vault': resolve(__dirname, '../../packages/vault/src/index.ts') } },
   build: {
     // 桌面端仍然是 `dist-preview`（文档和已有的截图命令都指着它）
     outDir: resolve(__dirname, PLATFORM === 'desktop' ? 'dist-preview' : `dist-preview-${PLATFORM}`),

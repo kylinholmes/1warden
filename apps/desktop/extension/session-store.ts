@@ -23,14 +23,14 @@
  * 这样它能在 node 里测，也让「用的是哪个存储区」变成一个显式、可审查的选择，
  * 而不是散落在代码里的一行 `ext.storage.local`。
  */
-import { fromBase64, toBase64 } from '@coffer/crypto';
-import type { AccountInfo, VaultFolder, VaultItem, VaultClientState } from '@coffer/vault';
+import { fromBase64, toBase64 } from '@1warden/crypto';
+import type { AccountInfo, VaultFolder, VaultItem, VaultClientState } from '@1warden/vault';
 import { accountKey } from '../src/application/account-target';
 
 /** 存储键。带前缀，避免与其他扩展数据撞名 */
-const KEY = 'coffer.session';
-const ACCOUNT_KEY = 'coffer.account';
-const ACCOUNTS_KEY = 'coffer.sessions';
+const KEY = '1warden.session';
+const ACCOUNT_KEY = '1warden.account';
+const ACCOUNTS_KEY = '1warden.sessions';
 export const SESSION_DURATION_MS = 15 * 60 * 1000;
 
 /** `ext.storage` 里用得到的那几个方法 */

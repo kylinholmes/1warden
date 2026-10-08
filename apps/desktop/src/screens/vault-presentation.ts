@@ -1,5 +1,5 @@
-import { sortItems, type SortBy } from '@coffer/vault';
-import type { ItemSummary } from '@coffer/ui';
+import { sortItems, type SortBy } from '@1warden/vault';
+import type { ItemSummary } from '@1warden/ui';
 
 export type VaultCategory =
   | { kind: 'all' }
@@ -8,6 +8,7 @@ export type VaultCategory =
   | { kind: 'folder'; id: string }
   | { kind: 'type'; type: string }
   | { kind: 'security' }
+  | { kind: 'profile' }
   | { kind: 'import' };
 
 /** Apply navigation to the current search results, keeping the session array intact. */

@@ -79,7 +79,7 @@ use security_framework_sys::keychain_item::{SecItemAdd, SecItemCopyMatching, Sec
 use std::ffi::c_void;
 
 /// 钥匙串里的服务名。换个名字就等于换一条记录，旧的自然失效
-const SERVICE: &str = "app.coffer.desktop.biometric";
+const SERVICE: &str = "app.onewarden.desktop.biometric";
 const ACCOUNT: &str = "vault-unlock";
 
 /// `errSecInteractionNotAllowed`：条目在，但需要认证才能取。
@@ -257,7 +257,7 @@ fn make_access_control() -> Result<OwnedCf, String> {
 
 /// 把解锁材料存进钥匙串，用指纹把住。
 ///
-/// `secret` 是 `@coffer/vault` 那边的一份**精简**快照（用户密钥、账户信息、
+/// `secret` 是 `@1warden/vault` 那边的一份**精简**快照（用户密钥、账户信息、
 /// 刷新令牌）—— 不含明文条目，那些解锁后同步回来。
 #[tauri::command]
 pub fn biometric_enroll(secret: String) -> Result<(), String> {
@@ -356,7 +356,7 @@ mod tests {
     /// 共用一个名字的话它们互相清场，表现是随机的「写完查不到」
     /// 或者「删完还在」。这类失败看起来像功能坏了，其实是测试在抢资源。
     fn scratch_service(case: &str) -> String {
-        format!("app.coffer.desktop.biometric.selftest.{case}")
+        format!("app.onewarden.desktop.biometric.selftest.{case}")
     }
 
     /// 试着读那条记录，但明确跳过任何认证界面。返回 OSStatus。

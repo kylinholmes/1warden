@@ -24,17 +24,17 @@ import { getProfile } from './accounts';
 import { CIPHER_TYPE } from './types';
 import {
   deriveMasterKey, hashMasterPassword, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
-} from '@coffer/crypto';
+} from '@1warden/crypto';
 
 // 本地自签证书需要跳过 TLS 校验（官方 CLI 拒绝明文 HTTP，所以本地也走 HTTPS）。
 // 必须在任何 fetch 之前设置。
 process.env.NODE_TLS_REJECT_UNAUTHORIZED ??= '0';
 
 const BASE = process.env.VW_URL ?? 'https://localhost:8443';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 
-const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'contract-test', name: 'coffer-contract' };
+const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'contract-test', name: 'onewarden-contract' };
 
 let http: HttpClient;
 let userId: string;

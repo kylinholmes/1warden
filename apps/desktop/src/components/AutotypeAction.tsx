@@ -1,10 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useEffect, useRef } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import {
   autotypeStatus, autotypeType, autotypeOpenSettings,
   AUTOTYPE_SUCCESS_NOTE, type PermissionState,
 } from '../autotype';
-import { IconAlert, IconKeyboard } from '@coffer/ui';
+import { IconAlert, IconKeyboard } from '@1warden/ui';
 
 /**
  * 「输入到其他应用」。
@@ -28,9 +29,15 @@ export function AutotypeAction({ username, getPassword }: {
   username: string | null;
   getPassword: () => Promise<string>;
 }) {
-  const [permission, setPermission] = useState<PermissionState | null>(null);
-  const [count, setCount] = useState<number | null>(null);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const viewStore = useLocalStore(() => {
+    const permission = (null) as PermissionState | null;
+    const count = (null) as number | null;
+    const result = (null) as { ok: boolean; message: string } | null;
+    return { permission, count, result };
+  });
+  const [permission, setPermission] = useStoreField(viewStore, 'permission');
+  const [count, setCount] = useStoreField(viewStore, 'count');
+  const [result, setResult] = useStoreField(viewStore, 'result');
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
   useEffect(() => {

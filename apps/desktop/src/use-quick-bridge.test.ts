@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
-import { VaultClient, buildProfileItem, emptyLogin } from '@coffer/vault';
-import { makeUserKey } from '@coffer/crypto';
-import { installClipboardScheduler } from '@coffer/ui';
+import { VaultClient, buildProfileItem, emptyLogin } from '@1warden/vault';
+import { makeUserKey } from '@1warden/crypto';
+import { installClipboardScheduler } from '@1warden/ui';
 import { useQuickBridge } from './use-quick-bridge';
 
 const harness = vi.hoisted(() => ({
@@ -51,18 +51,37 @@ it('queries and copies from the current account after a retained-session switch'
   const copied: string[] = [];
   vi.stubGlobal('navigator', { clipboard: { writeText: async (text: string) => { copied.push(text); } } });
   useQuickBridge(() => active, (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; });
-  harness.handlers.get('coffer:query')!({ payload: { query: '', seq: 3 } });
+  harness.handlers.get('1warden:query')!({ payload: { query: '', seq: 3 } });
   expect(harness.replies.at(-1)?.payload).toMatchObject({ seq: 3, serverUrl: 'https://a.example', items: [{ id: 'login-A' }] });
   active = clientB; for (const listener of listeners) listener();
   expect(harness.replies.at(-1)?.payload).toMatchObject({ seq: 3, serverUrl: 'https://b.example', items: [{ id: 'login-B' }] });
   expect(JSON.stringify(harness.replies)).not.toContain('password-A');
   expect(JSON.stringify(harness.replies)).not.toContain('password-B');
   expect(JSON.stringify(harness.replies)).not.toContain('JBSWY3DPEHPK3PXP');
-  const replied = deferred(); harness.onReply = (event) => { if (event === 'coffer:action-result') replied.resolve(); };
-  harness.handlers.get('coffer:action')!({ payload: { itemId: 'login-B', action: 'copy-password' } });
+  const replied = deferred(); harness.onReply = (event) => { if (event === '1warden:action-result') replied.resolve(); };
+  harness.handlers.get('1warden:action')!({ payload: { itemId: 'login-B', action: 'copy-password' } });
   await replied.promise;
   expect(copied).toEqual(['password-B']);
   expect(clientA.isUnlocked()).toBe(true);
+});
+
+it('quick search excludes profile, trash and archived records just like the main vault', () => {
+  const client = vault('A'); const session = client.getSession(); const login = session.items[0]!;
+  session.replaceData([login, { ...login, id: 'trash', deletedAt: '2026-01-01' },
+    { ...login, id: 'archive', archivedAt: '2026-01-01' },
+    { ...buildProfileItem({ displayName: 'Name', avatarDataUrl: null }), id: 'profile' }], []);
+  useQuickBridge(client);
+  harness.handlers.get('1warden:query')!({ payload: { query: '', seq: 1 } });
+  expect(harness.replies.at(-1)?.payload).toMatchObject({ items: [{ id: 'login-A' }] });
+  expect((harness.replies.at(-1)?.payload as { items: unknown[] }).items).toHaveLength(1);
+});
+
+it('clears a pinned window immediately when the observed vault locks', () => {
+  const client = vault('A'); const listeners = new Set<() => void>();
+  useQuickBridge(client, listener => { listeners.add(listener); return () => { listeners.delete(listener); }; });
+  harness.handlers.get('1warden:query')!({ payload: { query: '', seq: 7 } });
+  client.lock(); for (const listener of listeners) listener();
+  expect(harness.replies.at(-1)?.payload).toMatchObject({ seq: 7, locked: true, items: [] });
 });
 
 it('cancels a pending OTP across A → B → A even though A remains unlocked', async () => {
@@ -75,9 +94,9 @@ it('cancels a pending OTP across A → B → A even though A remains unlocked', 
   vi.spyOn(crypto.subtle, 'sign').mockImplementation(async (...args) => {
     started.resolve(); await release.promise; return sign(...args);
   });
-  harness.onReply = (event) => { if (event === 'coffer:action-result') replied.resolve(); };
+  harness.onReply = (event) => { if (event === '1warden:action-result') replied.resolve(); };
   useQuickBridge(() => active, (listener) => { listeners.add(listener); return () => { listeners.delete(listener); }; });
-  harness.handlers.get('coffer:action')!({ payload: { itemId: 'login-A', action: 'copy-totp' } });
+  harness.handlers.get('1warden:action')!({ payload: { itemId: 'login-A', action: 'copy-totp' } });
   await started.promise;
   active = clientB; for (const listener of listeners) listener();
   active = clientA; for (const listener of listeners) listener();
@@ -98,9 +117,9 @@ it('does not copy an OTP that finishes after the selected session locks', async 
   });
   harness.onReply = replied.resolve;
   useQuickBridge(client);
-  harness.handlers.get('coffer:action')!({ payload: { itemId: 'login-A', action: 'copy-totp' } });
+  harness.handlers.get('1warden:action')!({ payload: { itemId: 'login-A', action: 'copy-totp' } });
   await started.promise; client.lock(); release.resolve(); await replied.promise;
   expect(copied).toEqual([]);
-  expect(harness.replies.at(-1)?.event).toBe('coffer:action-result');
+  expect(harness.replies.at(-1)?.event).toBe('1warden:action-result');
   expect(harness.replies.at(-1)?.payload).toMatchObject({ ok: false });
 });

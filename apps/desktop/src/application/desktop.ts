@@ -1,6 +1,6 @@
-import { VaultClient } from '@coffer/vault';
-import { host, IS_DESKTOP, kdfCache, syncCache } from '@coffer/ui';
-import { fromBase64 } from '@coffer/crypto';
+import { VaultClient } from '@1warden/vault';
+import { host, IS_DESKTOP, kdfCache, syncCache } from '@1warden/ui';
+import { fromBase64 } from '@1warden/crypto';
 import { canSaveFiles, saveFile } from '../save';
 import { tauriAvailable } from '../capabilities';
 import type { ConnectionDraft } from './types';
@@ -44,5 +44,7 @@ export function createDesktopApplication() {
     await switchAccount(target);
   };
   return { client, get vault() { return sessions.getActiveVault(); },
-    getActiveVault: sessions.getActiveVault, subscribeActiveVault: sessions.subscribeActiveVault };
+    getActiveVault: sessions.getActiveVault, subscribeActiveVault: sessions.subscribeActiveVault,
+    subscribeVaultChanges(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+  };
 }

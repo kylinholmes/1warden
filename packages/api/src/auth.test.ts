@@ -6,7 +6,7 @@ import {
 
 type FetchMock = ReturnType<typeof vi.fn<typeof fetch>>;
 
-const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'dev-1', name: 'coffer-test' };
+const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'dev-1', name: 'onewarden-test' };
 
 const OK_TOKEN = {
   access_token: 'at', refresh_token: 'rt', expires_in: 7200,

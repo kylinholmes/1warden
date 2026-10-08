@@ -1,5 +1,5 @@
 import { expect, it } from 'vitest';
-import { TwoFactorRequiredError } from '@coffer/api';
+import { TwoFactorRequiredError } from '@1warden/api';
 import { serializeError } from '../../extension/application-rpc';
 import { twoFactorChallenge } from './auth-error';
 

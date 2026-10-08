@@ -7,7 +7,7 @@ const fromB64 = (s: string): Uint8Array => new Uint8Array(Buffer.from(s, 'base64
 const utf8 = (s: string): Uint8Array => new TextEncoder().encode(s);
 
 /** ⚠️ TS 5.7 起 `Uint8Array` 带 buffer 类型参数，裸的 `Uint8Array` 是 `<ArrayBufferLike>`，
- *  而 WebCrypto 要 `<ArrayBuffer>`。仓库的约定是就地断言（见 @coffer/crypto 的 bytes.ts）。 */
+ *  而 WebCrypto 要 `<ArrayBuffer>`。仓库的约定是就地断言（见 @1warden/crypto 的 bytes.ts）。 */
 const bs = (u: Uint8Array): BufferSource => u as BufferSource;
 const digest = async (d: Uint8Array): Promise<Uint8Array> =>
   new Uint8Array(await crypto.subtle.digest('SHA-256', bs(d)));

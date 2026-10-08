@@ -1,5 +1,5 @@
-import { validateProfile, type UserProfile } from '@coffer/vault';
-import type { HostStorage } from '@coffer/ui';
+import { validateProfile, type UserProfile } from '@1warden/vault';
+import type { HostStorage } from '@1warden/ui';
 
 type Account = { serverUrl: string; email: string };
 export interface ProfileCache {

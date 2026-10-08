@@ -25,10 +25,10 @@ import {
   VaultClient, classifyFields, matchItemsByUrl, decideCapture,
     type AccountInfo, type FieldDescriptor, type VaultItem, type CaptureDecision,
   totpCode,
-} from '@coffer/vault';
-import { host } from '@coffer/ui';
+} from '@1warden/vault';
+import { host } from '@1warden/ui';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
-import { syncCache, kdfCache, summarise } from '@coffer/ui';
+import { syncCache, kdfCache, summarise } from '@1warden/ui';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
 import { handleWebauthn, type WebauthnPayload } from './webauthn';
 import { createProfileCache } from '../src/application/profile-cache';
@@ -37,7 +37,7 @@ import type { ApplicationMethod, ApplicationRequest, SiteContext } from '../src/
 import { authorizeRequest, createApplicationDispatcher, createSerialRunner, serializeError } from './application-rpc';
 import { createClipboardStore } from './clipboard-store';
 import { CONNECTION_DRAFT_KEY } from './connection-draft';
-import { CLIPBOARD_CLEAR_MS } from '@coffer/ui/clipboard';
+import { CLIPBOARD_CLEAR_MS } from '@1warden/ui/clipboard';
 import type { InlineAccounts, InlineRequest } from './inline-accounts';
 
 /** 会话区：只在内存、浏览器重启即清空 */
@@ -51,9 +51,9 @@ const sessionArea: StorageArea = {
 
 const sessions = new SessionStore(sessionArea);
 
-/** 本次模块求值的随机标识 —— 排查用。见 `coffer:webauthn` 的幂等说明 */
+/** 本次模块求值的随机标识 —— 排查用。见 `1warden:webauthn` 的幂等说明 */
 const INSTANCE = Math.random().toString(36).slice(2, 6);
-console.debug('[coffer] SW 实例 ' + INSTANCE + ' 启动');
+console.debug('[onewarden] SW 实例 ' + INSTANCE + ' 启动');
 
 /**
  * 追踪缓冲 —— 把诊断写进 `ext.storage.session` 而不是只打控制台。
@@ -66,7 +66,7 @@ console.debug('[coffer] SW 实例 ' + INSTANCE + ' 启动');
  * 写进 session 区之后，无论哪个实例产生的都能在**任意一个**扩展上下文里读到。
  * 只留最近 120 行，且只在 passkey 路径上写 —— 那不是高频操作。
  */
-const TRACE_KEY = 'coffer.trace';
+const TRACE_KEY = '1warden.trace';
 
 async function trace(line: string): Promise<void> {
   try {
@@ -80,7 +80,7 @@ async function trace(line: string): Promise<void> {
     // 排查时分不出来。只报第一次。
     if (!traceBroken) {
       traceBroken = true;
-      console.warn('[coffer] 追踪写入失败（之后不再报）：', e);
+      console.warn('[onewarden] 追踪写入失败（之后不再报）：', e);
     }
   }
 }
@@ -102,14 +102,14 @@ installExtensionHost();
 /** 设备标识不是秘密，落盘无妨；但也不能每次启动都换（会在设备列表里堆一堆） */
 const deviceStore = {
   async get(): Promise<string | null> {
-    const got = await ext.storage.local.get('coffer.deviceId');
-    return typeof got['coffer.deviceId'] === 'string' ? got['coffer.deviceId'] : null;
+    const got = await ext.storage.local.get('1warden.deviceId');
+    return typeof got['1warden.deviceId'] === 'string' ? got['1warden.deviceId'] : null;
   },
   async set(id: string): Promise<void> {
-    await ext.storage.local.set({ 'coffer.deviceId': id });
+    await ext.storage.local.set({ '1warden.deviceId': id });
   },
   async clear(): Promise<void> {
-    await ext.storage.local.remove('coffer.deviceId');
+    await ext.storage.local.remove('1warden.deviceId');
   },
 };
 
@@ -124,7 +124,7 @@ function newClient(): VaultClient {
   const c = new VaultClient({
     /*
      * 走宿主。扩展端这一步是直接 `fetch`（有 host permission，不受 CORS 限制），
-     * 桌面端走 Rust —— 差异只在这一行，见 `@coffer/ui/host`。
+     * 桌面端走 Rust —— 差异只在这一行，见 `@1warden/ui/host`。
      */
     fetchImpl: host().fetch,
     deviceStore,
@@ -310,7 +310,7 @@ const tabFields = new Map<number, FieldsState>();
  * 用户在弹窗里点「保存」时可能已经是几分钟之后了。
  * 那里面**有明文密码**，所以只能用 session 区（内存、content script 读不到）。
  */
-const PENDING_KEY = 'coffer.pending';
+const PENDING_KEY = '1warden.pending';
 
 interface PendingCapture {
   tabId: number;
@@ -341,21 +341,21 @@ async function getPending(tabId: number): Promise<PendingCapture | null> {
 type Request =
   | ApplicationRequest
   | InlineRequest
-  | { type: 'coffer:connect'; serverUrl: string; email: string; masterPassword: string }
-  | { type: 'coffer:lock' }
-  | { type: 'coffer:list' }
-  | { type: 'coffer:matches'; url: string }
-  | { type: 'coffer:context' }
-  | { type: 'coffer:fill'; itemId: string; tabId: number; application?: boolean }
-  | { type: 'coffer:pending'; tabId?: number }
-  | { type: 'coffer:save-capture'; tabId?: number }
-  | { type: 'coffer:dismiss-capture'; tabId?: number }
-  | { type: 'coffer:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
-  | { type: 'coffer:clipboard-copied'; value: string }
-  | { type: 'coffer:webauthn'; payload: unknown };
+  | { type: '1warden:connect'; serverUrl: string; email: string; masterPassword: string }
+  | { type: '1warden:lock' }
+  | { type: '1warden:list' }
+  | { type: '1warden:matches'; url: string }
+  | { type: '1warden:context' }
+  | { type: '1warden:fill'; itemId: string; tabId: number; application?: boolean }
+  | { type: '1warden:pending'; tabId?: number }
+  | { type: '1warden:save-capture'; tabId?: number }
+  | { type: '1warden:dismiss-capture'; tabId?: number }
+  | { type: '1warden:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
+  | { type: '1warden:clipboard-copied'; value: string }
+  | { type: '1warden:webauthn'; payload: unknown };
 
-const AUTO_LOCK_ALARM = 'coffer:auto-lock';
-const CLIPBOARD_ALARM = 'coffer:clipboard-clear';
+const AUTO_LOCK_ALARM = '1warden:auto-lock';
+const CLIPBOARD_ALARM = '1warden:clipboard-clear';
 const runSerialized = createSerialRunner();
 let service = serviceFor(getClient());
 const dispatchApplication = createApplicationDispatcher(() => service, {
@@ -366,11 +366,11 @@ const dispatchApplication = createApplicationDispatcher(() => service, {
 });
 
 function reportFailure(error: unknown): void {
-  console.error('[coffer] 后台操作失败：', error);
+  console.error('[onewarden] 后台操作失败：', error);
 }
 
 function notifyChanged(): void {
-  void ext.runtime.sendMessage({ type: 'coffer-internal:changed' }).catch(() => {});
+  void ext.runtime.sendMessage({ type: '1warden-internal:changed' }).catch(() => {});
 }
 
 async function scheduleAutoLock(): Promise<void> {
@@ -430,9 +430,9 @@ ext.alarms.onAlarm.addListener((alarm) => {
 
 ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
   const req = msg as { type?: unknown; application?: boolean } | null;
-  if (typeof req?.type !== 'string' || !req.type.startsWith('coffer:')) return undefined;
-  const application = req.type === 'coffer:application' || req.type === 'coffer:context'
-    || req.type === 'coffer:clipboard-copied' || req.application === true;
+  if (typeof req?.type !== 'string' || !req.type.startsWith('1warden:')) return undefined;
+  const application = req.type === '1warden:application' || req.type === '1warden:context'
+    || req.type === '1warden:clipboard-copied' || req.application === true;
   const fail = (error: unknown) => {
     const serialized = serializeError(error);
     respond(application ? { ok: false, error: serialized } : { error: serialized.message, ...serialized });
@@ -441,7 +441,7 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
 
   // Preserve the originating button's gesture on browsers that require it.
   // Unlock happens only in the trusted extension popup, never in page DOM.
-  if (req.type === 'coffer:inline-unlock') {
+  if (req.type === '1warden:inline-unlock') {
     try {
       if (!ext.action.openPopup) throw new Error('unsupported');
       void ext.action.openPopup().then(() => respond({ ok: true })).catch(() =>
@@ -452,7 +452,7 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
     return true;
   }
 
-  if (req.type === 'coffer:fields') {
+  if (req.type === '1warden:fields') {
     const m = msg as { fields?: FieldDescriptor[]; isLoginForm?: boolean };
     const from = sender.tab!.id!;
     if (Array.isArray(m.fields) && typeof m.isLoginForm === 'boolean') {
@@ -461,7 +461,7 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
     }
     return undefined;
   }
-  if (req.type === 'coffer:submitted') {
+  if (req.type === '1warden:submitted') {
     void runSerialized(async () => {
       const owner = getClient();
       await restoreFromStorage();
@@ -473,11 +473,11 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
   }
 
   // Vault mutations share a queue; lock retires the current generation immediately.
-  const result = req.type === 'coffer:application'
+  const result = req.type === '1warden:application'
     ? dispatchApplication(msg)
-    : req.type === 'coffer:clipboard-copied'
+    : req.type === '1warden:clipboard-copied'
     ? handle(msg as Request, sender)
-    : req.type === 'coffer:lock'
+    : req.type === '1warden:lock'
     ? dispatchApplication({ method: 'lock', args: [] }).then(() => ({ ok: true }))
     : runSerialized(async () => {
       const owner = getClient();
@@ -509,7 +509,7 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
  * 但**跨 SW 重启存活** —— 正是这里需要的那一档。存进去的都是要给页面的东西
  * （credentialId / clientDataJSON / 签名），本来就不是秘密。
  */
-const WA_DONE_KEY = 'coffer.webauthnDone';
+const WA_DONE_KEY = '1warden.webauthnDone';
 
 /** Request counters restart on navigation; include the browser's document identity and origin. */
 function waKey(sender: chrome.runtime.MessageSender, id: number): string {
@@ -581,7 +581,7 @@ async function releaseClaim(key: string, owner: VaultClient): Promise<void> {
   requireCurrentClient(owner);
 }
 
-const WA_CLAIM_KEY = 'coffer.webauthnClaim';
+const WA_CLAIM_KEY = '1warden.webauthnClaim';
 
 /** 认领的有效期。超过它视为持有者已死，后来者可以接管 */
 const CLAIM_TTL_MS = 30_000;
@@ -629,14 +629,14 @@ async function runWebauthn(payload: unknown, senderOrigin: string | undefined, c
   // passkey 失败在页面上只会表现成一句「NotAllowedError」，
   // 看不出是 rpId 被拒、没有可用凭据、还是存不进保险库。
   // 这里是唯一能留下原因的地方。
-  if (result['ok'] === false) console.warn('[coffer] passkey 失败：', result['error']);
+  if (result['ok'] === false) console.warn('[onewarden] passkey 失败：', result['error']);
   return result;
 }
 
 async function handle(req: Request, sender: chrome.runtime.MessageSender): Promise<unknown> {
   const activeClient = getClient();
   switch (req.type) {
-    case 'coffer:inline-accounts': {
+    case '1warden:inline-accounts': {
       await requireInlineDocument(sender);
       const session = activeClient.getSession();
       requireInlineOwner(activeClient);
@@ -647,7 +647,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
           .map((item) => ({ id: item.id, title: item.name, username: item.login!.username ?? '' })) : [],
       } satisfies InlineAccounts;
     }
-    case 'coffer:inline-fill': {
+    case '1warden:inline-fill': {
       await requireInlineDocument(sender);
       requireCurrentClient(activeClient);
       if (typeof req.itemId !== 'string') throw new Error('无效的账号选择');
@@ -672,26 +672,26 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       // Do not echo entries, item details, or page values to the content script.
       return { ok: true };
     }
-    case 'coffer:connect':
+    case '1warden:connect':
       await service.connect({ serverUrl: req.serverUrl, email: req.email, masterPassword: req.masterPassword });
       requireCurrentClient(activeClient);
       await persistState('connect');
       notifyChanged();
       return { ok: true, itemCount: getClient().getSession().items.length };
-    case 'coffer:lock':
+    case '1warden:lock':
       await service.lock();
       await persistState('lock');
       notifyChanged();
       return { ok: true };
-    case 'coffer:list': {
+    case '1warden:list': {
       const snapshot = await service.snapshot();
       return { unlocked: snapshot.status === 'unlocked', account: snapshot.account, items: snapshot.items };
     }
-    case 'coffer:matches': {
+    case '1warden:matches': {
       const session = getClient().getSession();
       return { unlocked: session.isUnlocked(), items: matchItemsByUrl(session.items, req.url).map(summarise) };
     }
-    case 'coffer:context': {
+    case '1warden:context': {
       const [tab] = await ext.tabs.query({ active: true, currentWindow: true });
       const tabId = tab?.id ?? null;
       const url = tab?.url ?? '';
@@ -706,11 +706,11 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
         } : null,
       } satisfies SiteContext;
     }
-    case 'coffer:clipboard-copied':
+    case '1warden:clipboard-copied':
       if (typeof req.value !== 'string') throw new Error('无效的剪贴板内容');
       await scheduleClipboard(req.value);
       return;
-    case 'coffer:copy': {
+    case '1warden:copy': {
       // Compatibility for browser regression scripts. Shared UI reveals then copies locally.
       const detail = await service.getItem(req.itemId);
       const value = req.field === 'username' ? detail.login?.username
@@ -719,7 +719,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       if (value == null) throw new Error('找不到这个字段');
       return { value, clearAfterSeconds: CLIPBOARD_CLEAR_MS / 1000 };
     }
-    case 'coffer:fill': {
+    case '1warden:fill': {
       const session = await sessions.load();
       if (!session) throw new Error('保险库未解锁');
 
@@ -748,7 +748,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       return { ok: failed.length === 0, outcomes, failed };
     }
 
-    case 'coffer:pending': {
+    case '1warden:pending': {
       const tabId = req.tabId ?? sender.tab?.id;
       if (tabId === undefined) return { pending: null };
       const p = await getPending(tabId);
@@ -766,7 +766,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       };
     }
 
-    case 'coffer:save-capture': {
+    case '1warden:save-capture': {
       const tabId = req.tabId ?? sender.tab?.id;
       if (tabId === undefined) throw new Error('找不到标签页');
       const p = await getPending(tabId);
@@ -810,7 +810,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       return { ok: true };
     }
 
-    case 'coffer:webauthn': {
+    case '1warden:webauthn': {
       /**
        * ⚠️ **幂等：同一个请求 id 只执行一次。**
        *
@@ -864,7 +864,7 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       return result;
     }
 
-    case 'coffer:dismiss-capture': {
+    case '1warden:dismiss-capture': {
       const tabId = req.tabId ?? sender.tab?.id;
       if (tabId === undefined) return { ok: true };
       await setPending(null, tabId, activeClient);
@@ -967,20 +967,20 @@ async function onSubmitted(tabId: number | undefined, url: string | undefined): 
   // 这条链路上每一步都可能「合理地」放弃，而每一个放弃都必须是**可诊断的** ——
   // 否则用户那边表现为「提交了但没提示保存」，我们这边什么都看不到。
   if (tabId === undefined || url === undefined) {
-    console.debug('[coffer] 捕获跳过：拿不到标签页或地址');
+    console.debug('[onewarden] 捕获跳过：拿不到标签页或地址');
     return;
   }
 
   const session = await sessions.load();
   if (!session) {
-    console.debug('[coffer] 捕获跳过：保险库未解锁');
+    console.debug('[onewarden] 捕获跳过：保险库未解锁');
     return;
   }
 
   const fields = await readFieldsFrom(tabId);
   const plan = classifyFields(fields);
   if (plan.password === undefined) {
-    console.debug(`[coffer] 捕获跳过：页面上没识别出密码框（读到 ${fields.length} 个输入框）`);
+    console.debug(`[onewarden] 捕获跳过：页面上没识别出密码框（读到 ${fields.length} 个输入框）`);
     return;
   }
 
@@ -993,17 +993,17 @@ async function onSubmitted(tabId: number | undefined, url: string | undefined): 
   const values = (injection?.result ?? []) as (string | null)[];
   requireCurrentClient(owner);
   if (values.length === 0) {
-    console.debug('[coffer] 捕获跳过：注入读取没有返回结果');
+    console.debug('[onewarden] 捕获跳过：注入读取没有返回结果');
     return;
   }
 
   const username = plan.username === undefined ? null : values[0] ?? null;
   const password = plan.username === undefined ? values[0] : values[1];
   if (typeof password !== 'string') {
-    console.debug('[coffer] 捕获跳过：读到的密码不是字符串');
+    console.debug('[onewarden] 捕获跳过：读到的密码不是字符串');
     return;
   }
-  console.debug(`[coffer] 捕获到登录信息（用户名 ${username === null ? '空' : '有'}，密码长度 ${password.length}）`);
+  console.debug(`[onewarden] 捕获到登录信息（用户名 ${username === null ? '空' : '有'}，密码长度 ${password.length}）`);
 
   const decision = decideCapture({ url, username, password }, session.items);
   if (decision.kind === 'none') {
@@ -1093,7 +1093,7 @@ async function scheduleClipboard(value: string): Promise<void> {
     return;
   }
   await ensureOffscreen();
-  await ext.runtime.sendMessage({ type: 'coffer-internal:schedule-clear', value, deadline: Date.now() + CLIPBOARD_CLEAR_MS });
+  await ext.runtime.sendMessage({ type: '1warden-internal:schedule-clear', value, deadline: Date.now() + CLIPBOARD_CLEAR_MS });
 }
 
 // Recreate a Firefox event page's timer from its absolute deadline when it wakes up.
@@ -1120,20 +1120,29 @@ async function updateBadge(tabId: number, isLoginForm: boolean): Promise<void> {
  * 但直接问各标签页拿得到当前状态。
  */
 async function refreshBadges(): Promise<void> {
+  const owner = getClient();
   const session = await sessions.load();
   const tabs = await ext.tabs.query({});
 
   await Promise.all(tabs.map(async (t) => {
     if (t.id === undefined) return;
     let isLoginForm = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
     try {
-      const res = await ext.tabs.sendMessage(t.id, { type: 'coffer:read-fields' }) as
-        { isLoginForm?: boolean } | undefined;
+      // Edge sleeping/frozen tabs can leave sendMessage pending indefinitely.
+      // Decorative badges must never hold up persistence, login or account switching.
+      const res = await Promise.race([
+        ext.tabs.sendMessage(t.id, { type: '1warden:read-fields' }) as Promise<{ isLoginForm?: boolean } | undefined>,
+        new Promise<undefined>((resolve) => { timer = setTimeout(() => resolve(undefined), 1_500); }),
+      ]);
       isLoginForm = res?.isLoginForm === true;
     } catch {
       // 这个标签页没有我们的 content script（chrome:// 之类）—— 正常
       return;
+    } finally {
+      if (timer !== undefined) clearTimeout(timer);
     }
+    if (owner !== client || !owner.isUnlocked()) return;
     await ext.action.setBadgeText({
       tabId: t.id, text: session !== null && isLoginForm ? '•' : '',
     }).catch(() => {});

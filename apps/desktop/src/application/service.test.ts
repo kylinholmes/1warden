@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import { VaultClient, emptyLogin, buildProfileItem, type VaultItem } from '@coffer/vault';
-import { concatBytes, deriveMasterKey, encryptBytes, makeUserKey, stretchMasterKey } from '@coffer/crypto';
+import { VaultClient, emptyLogin, buildProfileItem, buildPreferencesItem, parseProfileSettings, type VaultItem } from '@1warden/vault';
+import { concatBytes, deriveMasterKey, encryptBytes, makeUserKey, stretchMasterKey } from '@1warden/crypto';
 import { createVaultService, editableDraft, mergeEditableDraft } from './service';
 import { createProfileCache } from './profile-cache';
 
@@ -235,6 +235,53 @@ describe('Profile service', () => {
     client.getSession().setSyncing(true);
     expect((await service.snapshot()).profileReady).toBe(false);
     await expect(service.saveProfile(profile, null)).rejects.toThrow(/同步/);
+  });
+});
+
+describe('account settings ownership', () => {
+  const prefs = { mode: 'dark' as const, palette: 'github', showTypes: true };
+  const device = { id: 'device-a', name: 'Windows · 桌面端', platform: 'windows' as const, client: 'desktop' as const };
+  function fixture() {
+    const { client, service } = restored([]);
+    const save = vi.spyOn(client, 'saveItem').mockImplementation(async item => {
+      const result = { ...item, id: 'account-profile', updatedAt: item.updatedAt + '1' };
+      client.getSession().replaceData([result], []); return result;
+    });
+    return { client, service, save };
+  }
+  it('serializes device and preference edits to one record, preserving both', async () => {
+    const { service, save } = fixture();
+    await Promise.all([service.recordDevice(device), service.savePreferences(prefs, null)]);
+    expect(save).toHaveBeenCalledTimes(2);
+    const snapshot = await service.snapshot();
+    expect(snapshot.profileSettings?.preferences).toEqual(prefs);
+    expect(snapshot.profileSettings?.devices[0]).toMatchObject(device);
+    expect(snapshot.items).toEqual([]);
+    await service.recordDevice(device); expect(save).toHaveBeenCalledTimes(2);
+    await service.lock(); expect((await service.snapshot()).profileSettings).toBeNull();
+    await expect(service.recordDevice(device)).rejects.toThrow(/解锁/);
+  });
+  it('rejects changed preference baselines but allows unrelated profile/device changes', async () => {
+    const { service } = fixture(); await service.savePreferences(prefs, null);
+    await service.recordDevice(device);
+    await service.savePreferences({ ...prefs, palette: 'dracula' }, prefs);
+    await expect(service.savePreferences(prefs, prefs)).rejects.toThrow(/更新/);
+  });
+  it('does not write from queued work after lock or before verified sync', async () => {
+    const { service, save, client } = fixture();
+    const pending = service.recordDevice(device); await service.lock();
+    await expect(pending).rejects.toThrow(/解锁/); expect(save).not.toHaveBeenCalled();
+    const other = fixture(); other.client.getSession().setSyncing(true);
+    await expect(other.service.savePreferences(prefs, null)).rejects.toThrow(/同步/);
+    expect(other.save).not.toHaveBeenCalled();
+  });
+  it('keeps account settings out of the presentation profile cache', async () => {
+    const item = { ...buildPreferencesItem(prefs, buildProfileItem({ displayName: 'A', avatarDataUrl: null })), id: 'p' };
+    const { client } = restored([item]);
+    const cache = { load: vi.fn(async () => null), save: vi.fn(async (_account: unknown, _profile: unknown) => {}), clear: vi.fn(async () => {}) };
+    await createVaultService(client, cache).snapshot();
+    expect(cache.save.mock.calls[0]?.[1]).toEqual({ displayName: 'A', avatarDataUrl: null });
+    expect(parseProfileSettings(item).preferences).toEqual(prefs);
   });
 });
 

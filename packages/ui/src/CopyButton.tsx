@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useEffect, useRef } from 'react';
 import { IconCheck, IconCopy } from './icons';
 import { CLIPBOARD_CLEAR_MS } from './clipboard';
 
@@ -71,7 +72,11 @@ export function CopyButton({
   getValue, onCopied, onError, className = 'btn btn-ghost shrink-0 gap-1.5',
   iconOnly = false, iconSize = 13, label = '复制',
 }: CopyButtonProps) {
-  const [copied, setCopied] = useState(false);
+  const viewStore = useLocalStore(() => {
+    const copied = false;
+    return { copied };
+  });
+  const [copied, setCopied] = useStoreField(viewStore, 'copied');
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);

@@ -1,4 +1,4 @@
-import { classifyFields, type FieldDescriptor } from '@coffer/vault';
+import { classifyFields, type FieldDescriptor } from '@1warden/vault';
 import { ext } from './ext-api';
 import type { InlineAccounts, InlineReply } from './inline-accounts';
 
@@ -66,35 +66,35 @@ export function installInlinePicker(readFields: () => FieldDescriptor[]): void {
 
   function createHost(): void {
     host = document.createElement('div');
-    host.dataset['cofferInline'] = '';
+    host.dataset['onewardenInline'] = '';
     // Closed shadow DOM isolates labels/styles from ordinary page scripts.
     const shadow = host.attachShadow({ mode: 'closed' });
     host.style.cssText = 'all:initial!important;position:fixed!important;inset:auto!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;z-index:2147483647!important;color-scheme:light dark!important;';
     const style = document.createElement('style');
     style.textContent = `
       :host { font: 14px/1.4 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
-        --coffer-paper:#fff; --coffer-ink:#202b3c; --coffer-muted:#43556e;
-        --coffer-border:#bbcee8; --coffer-accent:#0667e8; --coffer-tint:#ecf3ff;
-        --coffer-hover:#dbeaff; --coffer-ring:#2779ee; --coffer-shadow:#26458029; }
+        --onewarden-paper:#fff; --onewarden-ink:#202b3c; --onewarden-muted:#43556e;
+        --onewarden-border:#bbcee8; --onewarden-accent:#0667e8; --onewarden-tint:#ecf3ff;
+        --onewarden-hover:#dbeaff; --onewarden-ring:#2779ee; --onewarden-shadow:#26458029; }
       @media (prefers-color-scheme:dark) {
-        :host { --coffer-paper:#24344a; --coffer-ink:#f1f6ff; --coffer-muted:#c5d2e4;
-          --coffer-border:#4b6382; --coffer-accent:#8ac0ff; --coffer-tint:#243f62;
-          --coffer-hover:#244c7a; --coffer-ring:#6ba8ff; --coffer-shadow:#030b1d66; }
+        :host { --onewarden-paper:#24344a; --onewarden-ink:#f1f6ff; --onewarden-muted:#c5d2e4;
+          --onewarden-border:#4b6382; --onewarden-accent:#8ac0ff; --onewarden-tint:#243f62;
+          --onewarden-hover:#244c7a; --onewarden-ring:#6ba8ff; --onewarden-shadow:#030b1d66; }
       }
       * { box-sizing: border-box; }
-      .panel { overflow:auto; background:var(--coffer-paper); color:var(--coffer-ink); border:1px solid var(--coffer-border);
-        border-radius:12px; box-shadow:0 8px 30px var(--coffer-shadow); padding:6px; }
-      .heading { padding:8px 10px 6px; font-size:12px; font-weight:650; color:var(--coffer-accent); }
-      .status { margin:0; padding:8px 10px; color:var(--coffer-muted); font-size:13px; }
+      .panel { overflow:auto; background:var(--onewarden-paper); color:var(--onewarden-ink); border:1px solid var(--onewarden-border);
+        border-radius:12px; box-shadow:0 8px 30px var(--onewarden-shadow); padding:6px; }
+      .heading { padding:8px 10px 6px; font-size:12px; font-weight:650; color:var(--onewarden-accent); }
+      .status { margin:0; padding:8px 10px; color:var(--onewarden-muted); font-size:13px; }
       .status:empty { display:none; }
       button { display:block; width:100%; border:0; border-radius:7px; padding:10px;
         background:transparent; color:inherit; text-align:left; cursor:pointer; font:inherit; }
-      :host([data-state='locked']) button { background:var(--coffer-tint); color:var(--coffer-accent); }
-      button:hover,button:focus-visible { background:var(--coffer-hover); outline:2px solid var(--coffer-ring); outline-offset:-2px; }
+      :host([data-state='locked']) button { background:var(--onewarden-tint); color:var(--onewarden-accent); }
+      button:hover,button:focus-visible { background:var(--onewarden-hover); outline:2px solid var(--onewarden-ring); outline-offset:-2px; }
       button:disabled { cursor:wait; opacity:.6; }
       .title,.username { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .title { font-weight:600; }
-      .username { margin-top:2px; color:var(--coffer-muted); font-size:12px; }
+      .username { margin-top:2px; color:var(--onewarden-muted); font-size:12px; }
     `;
     panel = document.createElement('div');
     panel.className = 'panel';
@@ -172,7 +172,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[]): void {
     buttons.forEach((button) => { button.disabled = true; });
     message('正在填充…');
     try {
-      const reply = await ext.runtime.sendMessage({ type: 'coffer:inline-fill', itemId }) as InlineReply;
+      const reply = await ext.runtime.sendMessage({ type: '1warden:inline-fill', itemId }) as InlineReply;
       if (version !== request || !host) return;
       if (!reply || 'error' in reply) throw new Error(reply && 'error' in reply ? reply.error : '扩展没有响应，请重试');
       close();
@@ -201,7 +201,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[]): void {
     scheduleRefresh();
     // Send directly from this click; some browsers require a live user gesture.
     try {
-      const reply = await ext.runtime.sendMessage({ type: 'coffer:inline-unlock' }) as InlineReply;
+      const reply = await ext.runtime.sendMessage({ type: '1warden:inline-unlock' }) as InlineReply;
       if (!host || !awaitingUnlock) return;
       if (reply && 'error' in reply) message(reply.error);
     } catch {
@@ -214,7 +214,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[]): void {
     const version = ++request;
     if (!quiet) message('正在查找账号…');
     try {
-      const reply = await ext.runtime.sendMessage({ type: 'coffer:inline-accounts' }) as InlineAccounts | { error: string };
+      const reply = await ext.runtime.sendMessage({ type: '1warden:inline-accounts' }) as InlineAccounts | { error: string };
       if (version !== request || !host) return;
       if (!reply || 'error' in reply) throw new Error(reply && 'error' in reply ? reply.error : '扩展没有响应，请重试');
       if (!reply.unlocked && quiet) { scheduleRefresh(); return; }

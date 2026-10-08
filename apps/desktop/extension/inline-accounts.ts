@@ -11,8 +11,8 @@ export interface InlineAccounts {
 }
 
 export type InlineRequest =
-  | { type: 'coffer:inline-accounts' }
-  | { type: 'coffer:inline-fill'; itemId: string }
-  | { type: 'coffer:inline-unlock' };
+  | { type: '1warden:inline-accounts' }
+  | { type: '1warden:inline-fill'; itemId: string }
+  | { type: '1warden:inline-unlock' };
 
 export type InlineReply = { ok: true } | { error: string };

@@ -8,11 +8,11 @@
 import { useEffect } from 'react';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import {
-  searchItems, totpCode, summaryOf, iconDomainOf, avatarOf,
+  searchItems, totpCode, summaryOf, iconDomainOf, avatarOf, isProfileItem,
   type VaultClient, type VaultItem,
-} from '@coffer/vault';
+} from '@1warden/vault';
 import { QUICK_WINDOW, type QuickItem, type QuickAction } from './quick-bridge';
-import { copyWithAutoClear } from '@coffer/ui';
+import { copyQuickValue } from './quick-copy';
 
 /** 面板一次最多列这么多 —— 再多就得靠搜索了，列满反而看不清 */
 const MAX_RESULTS = 8;
@@ -55,11 +55,11 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
       const session = getClient().getSession();
       const locked = !session.isUnlocked();
 
-      const items = locked ? [] : searchItems(session.items, session.folders, query.query)
+      const items = locked ? [] : searchItems(session.items.filter(item => !item.deletedAt && !item.archivedAt && !isProfileItem(item)), session.folders, query.query)
         .map((h) => h.item)
         .slice(0, MAX_RESULTS);
 
-      void emitTo(QUICK_WINDOW, 'coffer:results', {
+      void emitTo(QUICK_WINDOW, '1warden:results', {
         seq: query.seq,
         locked,
         items: items.map(summarise),
@@ -69,15 +69,15 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
     if (subscribeActive) unlisteners.push(subscribeActive(() => { selection++; sendResults(); }));
 
     // ── 面板要搜索结果 ──
-    void listen<{ query: string; seq: number }>('coffer:query', (e) => {
+    void listen<{ query: string; seq: number }>('1warden:query', (e) => {
       query = e.payload; sendResults();
     }).then(rememberUnlisten);
 
     // ── 面板要执行动作 ──
-    void listen<{ itemId: string; action: QuickAction }>('coffer:action', (e) => {
+    void listen<{ itemId: string; action: QuickAction; requestId?: number }>('1warden:action', (e) => {
       void (async () => {
         const reply = async (ok: boolean, message: string): Promise<void> => {
-          await emitTo(QUICK_WINDOW, 'coffer:action-result', { ok, message });
+          await emitTo(QUICK_WINDOW, '1warden:action-result', { ok, message, requestId: e.payload.requestId });
         };
 
         const client = getClient();
@@ -95,13 +95,13 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
           switch (e.payload.action) {
             case 'copy-password': {
               if (item.login.password === null) { await reply(false, '这条记录没有密码'); return; }
-              await copyWithAutoClear(item.login.password);
+              await copyQuickValue(item.login.password);
               await reply(true, '密码已复制，30 秒后清空');
               return;
             }
             case 'copy-username': {
               if (item.login.username === null) { await reply(false, '这条记录没有用户名'); return; }
-              await copyWithAutoClear(item.login.username);
+              await copyQuickValue(item.login.username);
               await reply(true, '用户名已复制，30 秒后清空');
               return;
             }
@@ -109,7 +109,7 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
               const code = await totpCode(item);
               if (!stillSelected()) { await reply(false, '账户已切换或保险库已锁定'); return; }
               if (code === null) { await reply(false, '这条记录没有验证码'); return; }
-              await copyWithAutoClear(code.code);
+              await copyQuickValue(code.code);
               await reply(true, '验证码已复制');
               return;
             }

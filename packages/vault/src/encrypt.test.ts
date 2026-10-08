@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeUserKey } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherDto } from '@coffer/api';
+import { makeUserKey } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import type { CipherDto } from '@1warden/api';
 import { decryptCipher } from './decrypt';
 import { encryptCipher } from './encrypt';
 import { emptyLogin, emptyCard } from './model';
@@ -46,7 +46,7 @@ function asDto(original: VaultItem, body: Record<string, unknown>): CipherDto {
 }
 
 describe('encryptCipher — 必填与两个致命约定', () => {
-  // ⚠️ `encryptedFor` 由 @coffer/api 的 createCipher/updateCipher 从**已认证的 userId**
+  // ⚠️ `encryptedFor` 由 @1warden/api 的 createCipher/updateCipher 从**已认证的 userId**
   // 填入，这一层刻意不碰它。两层各司其职：vault 管加密，api 管身份。
   // 让这一层也加一份会造成重复，而且可能填进一个与当前登录用户不符的值 ——
   // 服务端会以 422 "Invalid user cipher" 拒绝，且很难看出为什么。

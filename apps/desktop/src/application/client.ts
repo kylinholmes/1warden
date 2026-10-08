@@ -1,3 +1,4 @@
+import { createStore } from '@1warden/state';
 import {
   EMPTY_SNAPSHOT, type ApplicationCapabilities, type ApplicationClient,
   type ApplicationMethod, type ApplicationService, type ApplicationSnapshot, type BrowserActions,
@@ -5,13 +6,13 @@ import {
 
 export const APPLICATION_METHODS = [
   'snapshot', 'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'search',
-  'getItem', 'getDraft', 'saveProfile', 'saveItem', 'toggleFavorite', 'moveToTrash', 'deletePermanently',
+  'getItem', 'getDraft', 'saveProfile', 'savePreferences', 'recordDevice', 'saveItem', 'toggleFavorite', 'moveToTrash', 'deletePermanently',
   'createFolder', 'renameFolder', 'deleteFolder', 'reveal', 'totp', 'downloadAttachment',
   'securityReport', 'checkBreaches', 'parseImport', 'importData',
 ] as const satisfies readonly ApplicationMethod[];
 
 const MUTATIONS = new Set<ApplicationMethod>([
-  'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile',
+  'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'savePreferences', 'recordDevice',
   'toggleFavorite', 'moveToTrash', 'deletePermanently', 'createFolder', 'renameFolder',
   'deleteFolder', 'importData',
 ]);
@@ -25,20 +26,20 @@ interface Options {
 
 /** Stable external-store snapshots and cancellation at account/lock boundaries. */
 export function createApplicationClient(service: ApplicationService, options: Options): ApplicationClient {
-  let current: ApplicationSnapshot = { ...EMPTY_SNAPSHOT };
+  const state = createStore<ApplicationSnapshot>(() => ({ ...EMPTY_SNAPSHOT }));
   let epoch = 0;
   let request = 0;
   let disposed = false;
   let locking = 0;
   let unsubscribeRemote: (() => void) | null = null;
-  const listeners = new Set<() => void>();
+  const subscriptions = new Set<() => void>();
 
   function publish(snapshot: ApplicationSnapshot) {
+    const current = state.getState();
     const changedAccount = current.account !== null && (current.account.serverUrl !== snapshot.account?.serverUrl
       || current.account.email !== snapshot.account?.email);
     if (changedAccount || (current.status === 'unlocked' && (snapshot.status === 'locked' || snapshot.status === 'loggedOut'))) epoch++;
-    current = snapshot;
-    for (const listener of listeners) listener();
+    state.setState(snapshot, true);
   }
 
   async function refresh(): Promise<void> {
@@ -54,6 +55,7 @@ export function createApplicationClient(service: ApplicationService, options: Op
     if (disposed) throw new Error('当前界面已关闭');
     const isLock = method === 'lock' || method === 'logout' || method === 'switchAccount';
     if (isLock) {
+      const current = state.getState();
       epoch++;
       locking++;
       publish({ ...EMPTY_SNAPSHOT, revision: current.revision + 1,
@@ -82,8 +84,11 @@ export function createApplicationClient(service: ApplicationService, options: Op
     ...operations,
     capabilities: options.capabilities,
     ...(options.browser ? { browser: options.browser } : {}),
-    getSnapshot: () => current,
-    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    getSnapshot: state.getState,
+    subscribe(listener) {
+      const stop = state.subscribe(listener); subscriptions.add(stop);
+      return () => { stop(); subscriptions.delete(stop); };
+    },
     async initialize() {
       disposed = false;
       if (!unsubscribeRemote && options.subscribeRemote) {
@@ -98,8 +103,8 @@ export function createApplicationClient(service: ApplicationService, options: Op
       request++;
       unsubscribeRemote?.();
       unsubscribeRemote = null;
-      current = { ...EMPTY_SNAPSHOT };
-      listeners.clear();
+      for (const stop of subscriptions) stop(); subscriptions.clear();
+      state.setState({ ...EMPTY_SNAPSHOT }, true);
     },
     saveFile: options.saveFile,
   };

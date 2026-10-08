@@ -1,11 +1,16 @@
-import { useState, useSyncExternalStore } from 'react';
+import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
+
 import type { AppUpdater } from '../updates/controller';
 import { desktopUpdater } from '../updates/desktop';
 
 /** A polite notification; it never takes focus, closes the app, or touches the vault. */
 export default function AppUpdateNotice({ updater = desktopUpdater }: { updater?: AppUpdater }) {
-  const state = useSyncExternalStore(updater.subscribe, updater.getSnapshot, updater.getSnapshot);
-  const [dismissed, setDismissed] = useState<ReadonlySet<string>>(() => new Set());
+  const state = useStoreSnapshot(updater.subscribe, updater.getSnapshot, updater.getSnapshot);
+  const viewStore = useLocalStore(() => {
+    const dismissed: ReadonlySet<string> = new Set();
+    return { dismissed };
+  });
+  const [dismissed, setDismissed] = useStoreField(viewStore, 'dismissed');
   const version = state.targetVersion;
   if (state.phase !== 'ready' || !version || dismissed.has(version)) return null;
 

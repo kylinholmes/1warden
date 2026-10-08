@@ -3,7 +3,7 @@
  *
  * ⚠️ 单独一个模块而不是塞在 `CopyButton.tsx` 里：离屏文档是个极小的脚本，
  * 为了一个常量把 React 和整套图标打进去是不划算的。所以这里走
- * `@coffer/ui/clipboard` 这个独立入口（见 package.json 的 exports）。
+ * `@1warden/ui/clipboard` 这个独立入口（见 package.json 的 exports）。
  *
  * ## 这里定义的是一条**安全规则**，不是一个可调参数
  *

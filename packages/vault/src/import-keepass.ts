@@ -12,7 +12,7 @@
  * 2. **分组是嵌套的，文件夹要用最内层那层名字。** 用最外层的话，
  *    「工作 / 客户 A / 服务器」全都挤进「工作」一个文件夹里。
  */
-import { fromBase64 } from '@coffer/crypto';
+import { fromBase64 } from '@1warden/crypto';
 import { parseXml, xmlChildren, xmlText, type XmlElement } from './xml';
 import type { ImportedField, ImportedItem, ImportResult } from './import';
 

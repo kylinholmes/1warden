@@ -1,8 +1,8 @@
-import { installHost, type Host } from '@coffer/ui';
+import { installHost, type Host } from '@1warden/ui';
 import { ext } from './ext-api';
 
 /**
- * 扩展端的宿主实现 —— 见 `@coffer/ui/host` 的说明。
+ * 扩展端的宿主实现 —— 见 `@1warden/ui/host` 的说明。
  *
  * 两处实现在这里，别处全是共享的：
  *

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeUserKey, encryptString } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherDto } from '@coffer/api';
+import { makeUserKey, encryptString } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import type { CipherDto } from '@1warden/api';
 import { decryptCipher } from './decrypt';
 import { encryptCipher } from './encrypt';
 import { emptySshKey, type VaultItem } from './model';

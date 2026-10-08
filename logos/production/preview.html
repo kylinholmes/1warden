@@ -1,0 +1,91 @@
+<!doctype html>
+<html lang="zh-CN" data-theme="dark">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>1Warden · 生产图标预览</title>
+  <style>
+    :root { color-scheme: dark; --page: #101821; --panel: #1b2734; --text: #e7e1cf; --muted: #a7b0b7; --line: #43515b; }
+    :root[data-theme="light"] { color-scheme: light; --page: #f4f1e8; --panel: #fffdf7; --text: #1b2734; --muted: #58616a; --line: #c6c7bd; }
+    * { box-sizing: border-box; }
+    body { margin: 0 auto; padding: 40px 24px 64px; max-width: 1040px; background: var(--page); color: var(--text); font: 15px/1.65 system-ui, sans-serif; }
+    header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; margin-bottom: 34px; }
+    h1 { margin: 0; font-size: 27px; letter-spacing: -.04em; }
+    h2 { margin: 0 0 12px; font-size: 19px; }
+    p { margin: 8px 0 0; color: var(--muted); }
+    a { color: inherit; text-underline-offset: 4px; }
+    button { flex-shrink: 0; border: 1px solid var(--line); border-radius: 8px; padding: 8px 13px; color: var(--text); background: var(--panel); cursor: pointer; font: inherit; }
+    button:focus-visible, a:focus-visible { outline: 3px solid #c6a765; outline-offset: 4px; }
+    .variants { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+    figure { margin: 0; min-width: 0; }
+    .art { min-height: 246px; display: grid; place-items: center; background: var(--panel); border: 1px solid var(--line); border-radius: 12px; }
+    .art img { width: min(76%, 220px); height: auto; image-rendering: pixelated; }
+    .checker { background-color: #e3e7e8; background-image: conic-gradient(#c8ced0 25%, transparent 0 50%, #c8ced0 0 75%, transparent 0); background-size: 24px 24px; }
+    figcaption { padding-top: 12px; font-weight: 600; }
+    figcaption small { display: block; font-weight: 400; color: var(--muted); }
+    section { margin-top: 36px; }
+    .samples { border: 1px solid var(--line); border-radius: 12px; overflow: hidden; }
+    .sample-row { display: flex; gap: 24px; align-items: center; flex-wrap: wrap; min-height: 120px; padding: 20px 24px; }
+    .sample-row + .sample-row { border-top: 1px solid #43515b; }
+    .sample-row.dark { background: #111820; color: #e7e1cf; }
+    .sample-row.light { background: #f8f6ef; color: #1b2734; }
+    .sample-row.checker { color: #1b2734; }
+    .sample-label { width: 84px; font-size: 13px; }
+    .sample { width: 72px; min-height: 80px; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: 8px; }
+    .sample img { display: block; }
+    .sample small { font-size: 12px; }
+    .note { border-left: 3px solid #8d7953; padding-left: 16px; }
+    footer { margin-top: 36px; font-size: 13px; color: var(--muted); }
+    @media (max-width: 640px) {
+      body { padding: 24px 18px 40px; }
+      header { flex-direction: column; }
+      .variants { grid-template-columns: 1fr; gap: 24px; }
+      .art { min-height: 240px; }
+      .sample-row { gap: 14px; padding: 18px 12px; }
+      .sample-label { width: 100%; }
+      .sample { width: 52px; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div><h1>1Warden · 图标精修</h1><p>深蓝 / 象牙白 / 黄铜 · 保留原设计方向，按显示尺寸做光学校正。</p></div>
+    <button id="theme" type="button" aria-pressed="false">切换浅色背景</button>
+  </header>
+  <main>
+    <div class="variants">
+      <figure><div class="art checker"><img src="app-1024.png" alt="大尺寸深蓝像素盾牌，带黄铜阴影与数字 1" width="220" height="220"></div><figcaption>完整应用图标<small>保留细边与黄铜阴影 · <a href="app.svg">SVG 源文件</a></small></figcaption></figure>
+      <figure><div class="art checker"><img src="compact-128.png" alt="简化盾牌与数字 1，去除阴影以适应小尺寸" width="220" height="220"></div><figcaption>小尺寸光学校正版<small>简化阴影、加粗笔画 · <a href="compact.svg">SVG 源文件</a></small></figcaption></figure>
+      <figure><div class="art checker"><img src="tray-template-32.png" alt="用于系统菜单栏的黑色透明盾牌与数字 1" width="220" height="220"></div><figcaption>菜单栏模板<small>纯黑与透明，由系统着色 · <a href="tray-template.svg">SVG 源文件</a></small></figcaption></figure>
+    </div>
+    <section aria-labelledby="actual-size">
+      <h2 id="actual-size">实际显示尺寸</h2>
+      <p>下面按原始 CSS 像素显示。16–48 px 使用简化版；64 px 开始使用完整图标。</p>
+      <div class="samples" id="samples"></div>
+    </section>
+    <section class="note"><h2>透明的是背景，不是画上去的棋盘格</h2><p>棋盘格只存在于此预览页。PNG 四角是真实透明；iOS 应用图标单独导出为不透明深蓝背景。最终生产图标由 SVG 精修与本地脚本生成。</p></section>
+  </main>
+  <footer><a href="README.md">导出与校验说明</a> · <a href="../1warden-retro-navy-brass-v6.png">用户原始设计（未修改）</a></footer>
+  <script>
+    const samples = document.getElementById('samples');
+    for (const [type, label] of [['dark', '深色背景'], ['light', '浅色背景'], ['checker', '透明预览']]) {
+      const row = document.createElement('div'); row.className = `sample-row ${type}`;
+      const title = document.createElement('span'); title.className = 'sample-label'; title.textContent = label; row.append(title);
+      for (const size of [16, 24, 32, 48, 64]) {
+        const item = document.createElement('div'); item.className = 'sample';
+        const img = document.createElement('img'); img.src = `../../apps/desktop/extension/public/icons/${size}.png`;
+        img.width = size; img.height = size; img.alt = `${size} 像素 1Warden 图标`;
+        const caption = document.createElement('small'); caption.textContent = `${size} px`;
+        item.append(img, caption); row.append(item);
+      }
+      samples.append(row);
+    }
+    document.getElementById('theme').addEventListener('click', event => {
+      const light = document.documentElement.dataset.theme !== 'light';
+      document.documentElement.dataset.theme = light ? 'light' : 'dark';
+      event.currentTarget.setAttribute('aria-pressed', String(light));
+      event.currentTarget.textContent = light ? '切换深色背景' : '切换浅色背景';
+    });
+  </script>
+</body>
+</html>

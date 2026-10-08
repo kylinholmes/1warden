@@ -87,12 +87,12 @@ html[data-traffic] body::before {
  * 只是不经过计时器。退场动画的形态照样是被证明了，只是入口换了一个。
  */
 html[data-freeze-out] .panel {
-  animation: coffer-panel-out var(--dur-fast) var(--ease-move) both;
+  animation: onewarden-panel-out var(--dur-fast) var(--ease-move) both;
   animation-delay: calc(var(--freeze-out) * -1ms);
   animation-play-state: paused;
 }
 html[data-freeze-out] .scrim {
-  animation: coffer-fade-in var(--dur-fast) var(--ease-move) reverse both;
+  animation: onewarden-fade-in var(--dur-fast) var(--ease-move) reverse both;
   animation-delay: calc(var(--freeze-out) * -1ms);
   animation-play-state: paused;
 }

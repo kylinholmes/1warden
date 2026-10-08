@@ -1,7 +1,7 @@
 import { createApplicationClient } from '../src/application/client';
 import type { ApplicationClient, ApplicationMethod, ApplicationRequest, ApplicationService, SiteContext } from '../src/application/types';
 import { ext } from './ext-api';
-import type { SerializedError } from './application-rpc';
+import { LOCAL_READS, type SerializedError } from './application-rpc';
 import { createConnectionDraftStore } from './connection-draft';
 import { lockedAccount } from '../src/application/account-target';
 
@@ -31,20 +31,22 @@ async function request<T>(message: unknown, timeoutMs?: number): Promise<T> {
 }
 
 function call<K extends ApplicationMethod>(method: K, ...args: Parameters<ApplicationService[K]>): ReturnType<ApplicationService[K]> {
-  // Only the local snapshot has a short deadline. Never time out/replay a server mutation here.
-  return request({ type: 'coffer:application', method, args } as ApplicationRequest,
-    method === 'snapshot' ? 5_000 : undefined) as ReturnType<ApplicationService[K]>;
+  // Local reads are bounded. Never time out/replay a server mutation here.
+  return request({ type: '1warden:application', method, args } as ApplicationRequest,
+    LOCAL_READS.has(method) ? 5_000 : undefined) as ReturnType<ApplicationService[K]>;
 }
 
 /** Called only after the clipboard write succeeds, from the shared clipboard helper. */
 export function scheduleExtensionClipboardClear(value: string): Promise<void> {
-  return request({ type: 'coffer:clipboard-copied', value });
+  return request({ type: '1warden:clipboard-copied', value });
 }
 
 export function createExtensionApplicationClient(): ApplicationClient {
   const service: ApplicationService = {
     snapshot: () => call('snapshot'),
     saveProfile: (...args) => call('saveProfile', ...args),
+    savePreferences: (...args) => call('savePreferences', ...args),
+    recordDevice: (...args) => call('recordDevice', ...args),
     connect: (...args) => call('connect', ...args),
     connectWithTwoFactor: (...args) => call('connectWithTwoFactor', ...args),
     unlock: (...args) => call('unlock', ...args),
@@ -63,10 +65,10 @@ export function createExtensionApplicationClient(): ApplicationClient {
   const client = createApplicationClient(service, {
     capabilities: { native: false, browser: true, saveAttachments: true },
     browser: {
-      context: () => request<SiteContext>({ type: 'coffer:context' }),
-      fill: (itemId, tabId) => request({ type: 'coffer:fill', itemId, tabId, application: true }),
-      saveCapture: (tabId) => request({ type: 'coffer:save-capture', tabId, application: true }),
-      dismissCapture: (tabId) => request({ type: 'coffer:dismiss-capture', tabId, application: true }),
+      context: () => request<SiteContext>({ type: '1warden:context' }),
+      fill: (itemId, tabId) => request({ type: '1warden:fill', itemId, tabId, application: true }),
+      saveCapture: (tabId) => request({ type: '1warden:save-capture', tabId, application: true }),
+      dismissCapture: (tabId) => request({ type: '1warden:dismiss-capture', tabId, application: true }),
     },
     async saveFile(fileName, dataBase64) {
       const bytes = Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0));
@@ -82,7 +84,7 @@ export function createExtensionApplicationClient(): ApplicationClient {
     subscribeRemote(listener) {
       const onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
         if (sender.id === ext.runtime.id && sender.tab === undefined && typeof message === 'object' && message !== null
-          && (message as { type?: string }).type === 'coffer-internal:changed') listener();
+          && (message as { type?: string }).type === '1warden-internal:changed') listener();
         return undefined;
       };
       ext.runtime.onMessage.addListener(onMessage);

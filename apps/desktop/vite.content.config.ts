@@ -8,7 +8,7 @@ import { resolve } from 'node:path';
  * 出现任何 `import` 都会在加载时直接失败，而且失败是静默的 ——
  * 页面上什么都不会发生，控制台也不一定有声。
  *
- * 两个入口分两次构建（`COFFER_ENTRY` 选），而不是一次多入口：
+ * 两个入口分两次构建（`ONEWARDEN_ENTRY` 选），而不是一次多入口：
  * Rollup 的 `iife` 格式**不支持代码分割**，多入口一旦产生共享 chunk 就直接报错，
  * 而「这两个入口恰好没有共享依赖」是个会随重构失效的隐式前提。
  *
@@ -19,9 +19,9 @@ import { resolve } from 'node:path';
  * 所以这里的 `emptyOutDir` 必须是 `false` —— 否则第二次构建会把
  * popup / background 删掉。
  */
-const WHICH = process.env['COFFER_ENTRY'] === 'webauthn'
-  ? { entry: 'webauthn-inject.ts', name: 'CofferWebauthn', file: 'webauthn.js' }
-  : { entry: 'content.ts', name: 'CofferContent', file: 'content.js' };
+const WHICH = process.env['ONEWARDEN_ENTRY'] === 'webauthn'
+  ? { entry: 'webauthn-inject.ts', name: 'OneWardenWebauthn', file: 'webauthn.js' }
+  : { entry: 'content.ts', name: 'OneWardenContent', file: 'content.js' };
 
 export default defineConfig({
   /*

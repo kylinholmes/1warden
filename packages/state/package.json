@@ -1,0 +1,9 @@
+{
+  "name": "@1warden/state",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "exports": { ".": "./src/index.ts", "./react": "./src/react.ts" },
+  "dependencies": { "zustand": "5.0.15", "react": "^19.0.0" },
+  "devDependencies": { "@types/react": "^19.0.0" }
+}

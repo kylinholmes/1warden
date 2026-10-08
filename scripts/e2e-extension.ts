@@ -38,9 +38,9 @@ const PAGE_PORT = 8899;
  * 要么把证书装进系统信任库，要么就得走明文（不该鼓励）。桌面端有 TOFU
  * 指纹确认可以处理自签证书，扩展没有这条路 —— 因为 TLS 校验在浏览器手里。
  */
-const SERVER = process.env.COFFER_EXT_SERVER ?? 'http://127.0.0.1:8080';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const SERVER = process.env.ONEWARDEN_EXT_SERVER ?? 'http://127.0.0.1:8080';
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 
 const SITE = `http://127.0.0.1:${PAGE_PORT}`;
 const PAGE_URL = `${SITE}/login.html`;
@@ -198,7 +198,7 @@ function startSiteServer(): { stop: () => void } {
 
 // ── passkey 验证用的小 CBOR 解码器 ──
 //
-// 只解 WebAuthn 会出现的那几种类型。放在这里而不是 import @coffer/vault：
+// 只解 WebAuthn 会出现的那几种类型。放在这里而不是 import @1warden/vault：
 // 端到端测试的意义在于**不复用**被测代码的解析逻辑 —— 用同一份解码器去读
 // 同一份编码器的产出，编码器错了两边一起错，测了等于没测。
 function cborDecode(b: Uint8Array, at = { i: 0 }): unknown {
@@ -259,7 +259,7 @@ async function cleanupItems(ids: string[]): Promise<number> {
   const token = await api.loginWithPassword(bare, {
     email: EMAIL,
     masterPasswordHash: await crypto.hashMasterPassword(masterKey, PASSWORD),
-    device: { type: api.DEVICE_TYPE.macOSDesktop, identifier: 'e2e-ext', name: 'coffer-e2e' },
+    device: { type: api.DEVICE_TYPE.macOSDesktop, identifier: 'e2e-ext', name: 'onewarden-e2e' },
   });
   const http = new api.HttpClient({
     baseUrl: SERVER,
@@ -282,7 +282,7 @@ async function probeContentScript(page: Cdp, ext: Cdp): Promise<string> {
       const t = tabs.find((x) => (x.url || '').startsWith(${JSON.stringify(SITE)}));
       if (!t) return 'ERR 找不到标签页';
       try {
-        await chrome.tabs.sendMessage(t.id, { type: 'coffer:read-fields' });
+        await chrome.tabs.sendMessage(t.id, { type: '1warden:read-fields' });
         return 'OK';
       } catch (e) { return 'ERR ' + (e && e.message ? e.message : String(e)); }
     })()
@@ -331,7 +331,7 @@ async function main(): Promise<void> {
   console.log(`  扩展 ID: ${extId}`);
 
   const site = startSiteServer();
-  const profile = mkdtempSync(join(tmpdir(), 'coffer-e2e-'));
+  const profile = mkdtempSync(join(tmpdir(), 'onewarden-e2e-'));
 
   const edge = Bun.spawn([
     EDGE,
@@ -421,7 +421,7 @@ async function main(): Promise<void> {
      * 而失败原因从这一行输出就能看出来。
      */
     const probeOnce = () => ext!.eval<string>(`
-      chrome.tabs.sendMessage(${tabId}, { type: 'coffer:read-fields' })
+      chrome.tabs.sendMessage(${tabId}, { type: '1warden:read-fields' })
         .then((r) => 'OK ' + JSON.stringify(r).slice(0, 160))
         .catch((e) => 'ERR ' + (e && e.message ? e.message : String(e)))
     `);
@@ -439,7 +439,7 @@ async function main(): Promise<void> {
 
     const connect = await ext.eval<{ ok?: boolean; itemCount?: number; error?: string }>(`
       chrome.runtime.sendMessage({
-        type: 'coffer:connect',
+        type: '1warden:connect',
         serverUrl: ${JSON.stringify(SERVER)},
         email: ${JSON.stringify(EMAIL)},
         masterPassword: ${JSON.stringify(PASSWORD)},
@@ -471,7 +471,7 @@ async function main(): Promise<void> {
      */
     {
       const stale = await ext.eval<{ items: { id: string; name: string }[] }>(
-        `chrome.runtime.sendMessage({ type: 'coffer:matches', url: ${JSON.stringify(PAGE_URL)} })`,
+        `chrome.runtime.sendMessage({ type: '1warden:matches', url: ${JSON.stringify(PAGE_URL)} })`,
       );
       const swept = await cleanupItems(stale.items.map((i) => i.id));
       if (swept > 0) console.log(`  （清掉了上一次残留的 ${swept} 条测试条目）`);
@@ -488,7 +488,7 @@ async function main(): Promise<void> {
      * 于是把正确行为报成缺陷。测试跑在真实账户上时，清理是断言能确定的前提。
      */
     const stale = (await ext.eval<{ items: { id: string }[] }>(
-      `chrome.runtime.sendMessage({ type: 'coffer:matches', url: ${JSON.stringify(PAGE_URL)} })`,
+      `chrome.runtime.sendMessage({ type: '1warden:matches', url: ${JSON.stringify(PAGE_URL)} })`,
     )).items;
     if (stale.length > 0) {
       await cleanupItems(stale.map((i) => i.id));
@@ -496,7 +496,7 @@ async function main(): Promise<void> {
     }
 
     const baseline = await ext.eval<number>(`
-      chrome.runtime.sendMessage({ type: 'coffer:list' })
+      chrome.runtime.sendMessage({ type: '1warden:list' })
         .then((r) => (r.items || []).length)
     `);
 
@@ -531,7 +531,7 @@ async function main(): Promise<void> {
 
     const pending = await waitFor('捕获结果', async () => {
       const r = await ext.eval<{ pending: { action?: string; username?: string | null } | null }>(
-        `chrome.runtime.sendMessage({ type: 'coffer:pending', tabId: ${tabId} })`,
+        `chrome.runtime.sendMessage({ type: '1warden:pending', tabId: ${tabId} })`,
       );
       return r?.pending ?? null;
     }, 30_000);
@@ -542,18 +542,18 @@ async function main(): Promise<void> {
 
     // ⚠️ 待保存结构里**不该有密码** —— 它会被送进界面
     const rawPending = await ext.eval<string>(
-      `chrome.runtime.sendMessage({ type: 'coffer:pending', tabId: ${tabId} })
+      `chrome.runtime.sendMessage({ type: '1warden:pending', tabId: ${tabId} })
          .then((r) => JSON.stringify(r))`,
     );
     check('待保存提示里不含密码', !rawPending.includes(SITE_PASSWORD));
 
     const saved = await ext.eval<{ ok?: boolean; error?: string }>(
-      `chrome.runtime.sendMessage({ type: 'coffer:save-capture', tabId: ${tabId} })`,
+      `chrome.runtime.sendMessage({ type: '1warden:save-capture', tabId: ${tabId} })`,
     );
     check('保存成功', saved?.ok === true, JSON.stringify(saved));
 
     const after = await ext.eval<number>(`
-      chrome.runtime.sendMessage({ type: 'coffer:list' })
+      chrome.runtime.sendMessage({ type: '1warden:list' })
         .then((r) => (r.items || []).length)
     `);
     check('保险库里多了一条', after === baseline + 1, `${baseline} → ${after}`);
@@ -574,7 +574,7 @@ async function main(): Promise<void> {
 
     const matches = await waitFor('按站点匹配到条目', async () => {
       const r = await ext.eval<{ items: { id: string; name: string }[] }>(
-        `chrome.runtime.sendMessage({ type: 'coffer:matches', url: ${JSON.stringify(PAGE_URL)} })`,
+        `chrome.runtime.sendMessage({ type: '1warden:matches', url: ${JSON.stringify(PAGE_URL)} })`,
       );
       return r?.items?.length ? r.items : null;
     });
@@ -582,7 +582,7 @@ async function main(): Promise<void> {
 
     const fill = await ext.eval<{ ok?: boolean; failed?: unknown[]; error?: string }>(`
       chrome.runtime.sendMessage({
-        type: 'coffer:fill', itemId: ${JSON.stringify(matches[0]!.id)}, tabId: ${tabId},
+        type: '1warden:fill', itemId: ${JSON.stringify(matches[0]!.id)}, tabId: ${tabId},
       })
     `);
     check('填充执行成功（含读回校验）', fill?.ok === true, JSON.stringify(fill));
@@ -600,7 +600,7 @@ async function main(): Promise<void> {
       method: K, ...args: Parameters<ApplicationService[K]>
     ): Promise<Awaited<ReturnType<ApplicationService[K]>>> {
       const reply = await ext!.eval<{ ok: boolean; result?: unknown; error?: { message: string } }>(
-        `chrome.runtime.sendMessage(${JSON.stringify({ type: 'coffer:application', method, args })})`,
+        `chrome.runtime.sendMessage(${JSON.stringify({ type: '1warden:application', method, args })})`,
       );
       if (!reply.ok) throw new Error(reply.error?.message ?? `${method} failed`);
       return reply.result as Awaited<ReturnType<ApplicationService[K]>>;
@@ -608,7 +608,7 @@ async function main(): Promise<void> {
     const capturedId = matches[0]!.id;
     const draft = await application('getDraft', capturedId);
     check('显式编辑取得密码且不包含后台密钥', draft.login?.password === SITE_PASSWORD && draft.wrappedKey === null);
-    draft.name = 'Coffer E2E edited login';
+    draft.name = '1Warden E2E edited login';
     const savedSummary = await application('saveItem', draft);
     check('编辑通过服务端保存并返回安全摘要', savedSummary.name === draft.name && !('login' in savedSummary));
     const detail = await application('getItem', capturedId);
@@ -619,7 +619,7 @@ async function main(): Promise<void> {
     let testFolder: string | undefined;
     let testItem: string | undefined;
     try {
-      const folderName = `Coffer E2E ${Date.now()}`;
+      const folderName = `1Warden E2E ${Date.now()}`;
       await application('createFolder', folderName);
       testFolder = (await application('snapshot')).folders.find((f) => f.name === folderName)?.id;
       check('新建文件夹保存到服务端', typeof testFolder === 'string');
@@ -629,7 +629,7 @@ async function main(): Promise<void> {
       }
       const newDraft = await application('getDraft', capturedId);
       newDraft.id = '';
-      newDraft.name = 'Coffer E2E temporary item';
+      newDraft.name = '1Warden E2E temporary item';
       newDraft.folderId = testFolder ?? null;
       testItem = (await application('saveItem', newDraft)).id;
       check('共享编辑器的新建路径保存成功', testItem !== capturedId && (await application('getItem', testItem)).summary.name === newDraft.name);
@@ -649,7 +649,7 @@ async function main(): Promise<void> {
     // 直接断言 background 返回 ok 是不够的 —— 那不证明值真的到了剪贴板。
     const copied = await ext.eval<{ value?: string; error?: string }>(`
       chrome.runtime.sendMessage({
-        type: 'coffer:copy', itemId: ${JSON.stringify(matches[0]!.id)}, field: 'password',
+        type: '1warden:copy', itemId: ${JSON.stringify(matches[0]!.id)}, field: 'password',
       })
     `);
     check('background 取出了要复制的密码', copied?.value === SITE_PASSWORD,
@@ -663,7 +663,7 @@ async function main(): Promise<void> {
 
     const scheduled = await ext.eval<{ ok?: boolean }>(`
       chrome.runtime.sendMessage({
-        type: 'coffer:clipboard-copied', value: ${JSON.stringify(SITE_PASSWORD)},
+        type: '1warden:clipboard-copied', value: ${JSON.stringify(SITE_PASSWORD)},
       })
     `);
     check('写入成功后后台接受清理安排', scheduled?.ok === true);
@@ -691,7 +691,7 @@ async function main(): Promise<void> {
     await page.eval(`document.getElementById('f').requestSubmit()`);
     await new Promise((r) => setTimeout(r, 1500));
     const second = await ext.eval<{ pending: unknown }>(
-      `chrome.runtime.sendMessage({ type: 'coffer:pending', tabId: ${tabId} })`,
+      `chrome.runtime.sendMessage({ type: '1warden:pending', tabId: ${tabId} })`,
     );
     check('密码没变时不再提示保存', second?.pending === null, JSON.stringify(second));
 
@@ -903,8 +903,8 @@ async function main(): Promise<void> {
         if (!c) return [];
         try {
           return await Promise.race([
-            c.eval<string[]>(`chrome.storage.session.get('coffer.trace')`
-              + `.then((g) => JSON.parse(JSON.stringify(g['coffer.trace'] ?? [])))`),
+            c.eval<string[]>(`chrome.storage.session.get('1warden.trace')`
+              + `.then((g) => JSON.parse(JSON.stringify(g['1warden.trace'] ?? [])))`),
             new Promise<string[]>((r) => setTimeout(() => r([]), 3000)),
           ]);
         } catch { return []; }
@@ -927,7 +927,7 @@ async function main(): Promise<void> {
     // ── 7. 收尾：删掉这次造的条目 ──
     console.log('\n7. 清理');
     const created = (await ext.eval<{ items: { id: string; name: string }[] }>(
-      `chrome.runtime.sendMessage({ type: 'coffer:matches', url: ${JSON.stringify(PAGE_URL)} })`,
+      `chrome.runtime.sendMessage({ type: '1warden:matches', url: ${JSON.stringify(PAGE_URL)} })`,
     )).items;
     const removed = await cleanupItems(created.map((i) => i.id));
     check('清理测试条目', removed === created.length, `删了 ${removed}/${created.length}`);
@@ -958,8 +958,8 @@ async function main(): Promise<void> {
         if (!c) return [];
         try {
           return await Promise.race([
-            c.eval<string[]>(`chrome.storage.session.get('coffer.trace')`
-              + `.then((g) => JSON.parse(JSON.stringify(g['coffer.trace'] ?? [])))`),
+            c.eval<string[]>(`chrome.storage.session.get('1warden.trace')`
+              + `.then((g) => JSON.parse(JSON.stringify(g['1warden.trace'] ?? [])))`),
             new Promise<string[]>((r) => setTimeout(() => r([]), 3000)),
           ]);
         } catch {
@@ -975,10 +975,10 @@ async function main(): Promise<void> {
           ext!.eval<string>(`(async () => {
             try {
               await chrome.storage.session.set({ '__probe': 'v' });
-              const g = await chrome.storage.session.get(['__probe', 'coffer.trace', 'coffer.pending']);
-              return '往返=' + (g['__probe'] === 'v') + ' trace键=' + (typeof g['coffer.trace'])
-                + '(' + (Array.isArray(g['coffer.trace']) ? g['coffer.trace'].length : '-') + ')'
-                + ' pending键=' + (typeof g['coffer.pending']);
+              const g = await chrome.storage.session.get(['__probe', '1warden.trace', '1warden.pending']);
+              return '往返=' + (g['__probe'] === 'v') + ' trace键=' + (typeof g['1warden.trace'])
+                + '(' + (Array.isArray(g['1warden.trace']) ? g['1warden.trace'].length : '-') + ')'
+                + ' pending键=' + (typeof g['1warden.pending']);
             } catch (e) { return 'ERR ' + e.message; }
           })()`),
           new Promise<string>((r) => setTimeout(() => r('超时'), 3000)),

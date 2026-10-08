@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import type { ScoreGrade, SecurityReport } from '@coffer/vault';
+import type { ScoreGrade, SecurityReport } from '@1warden/vault';
 import { GRADE_LABEL, WEAK_REASON } from './report-labels';
 import { IconAlert, IconCheck, IconSpinner } from './icons';
 

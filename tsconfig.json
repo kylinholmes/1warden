@@ -11,6 +11,7 @@
   ],
   "files": [],
   "references": [
+    { "path": "./packages/state" },
     {
       "path": "./packages/crypto"
     },

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { deriveMasterKey, makeUserKey, stretchMasterKey } from '@coffer/crypto';
+import { deriveMasterKey, makeUserKey, stretchMasterKey } from '@1warden/crypto';
 import { VaultClient, type VaultClientState } from './client';
 import { createFakeServer } from './testing/fake-server';
 

@@ -1,5 +1,5 @@
 /**
- * 把 `@coffer/api` 的 `fetchImpl` 接缝接到 Rust 侧的原生 HTTP 上。
+ * 把 `@1warden/api` 的 `fetchImpl` 接缝接到 Rust 侧的原生 HTTP 上。
  *
  * ## 为什么不能直接用 WebView 的 fetch
  *

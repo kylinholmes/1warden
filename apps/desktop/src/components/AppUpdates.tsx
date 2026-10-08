@@ -1,12 +1,17 @@
-import { useEffect, useState, useSyncExternalStore } from 'react';
-import { IconSpinner } from '@coffer/ui';
+import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
+import { useEffect } from 'react';
+import { IconSpinner } from '@1warden/ui';
 import type { AppUpdater } from '../updates/controller';
 import { desktopUpdater, desktopUpdatesSupported } from '../updates/desktop';
 
 export default function AppUpdates({ updater: supplied }: { updater?: AppUpdater }) {
   const updater = supplied ?? desktopUpdater;
-  const state = useSyncExternalStore(updater.subscribe, updater.getSnapshot, updater.getSnapshot);
-  const [available, setAvailable] = useState(Boolean(supplied));
+  const state = useStoreSnapshot(updater.subscribe, updater.getSnapshot, updater.getSnapshot);
+  const viewStore = useLocalStore(() => {
+    const available = Boolean(supplied);
+    return { available };
+  });
+  const [available, setAvailable] = useStoreField(viewStore, 'available');
   useEffect(() => {
     if (supplied) { setAvailable(true); return; }
     let alive = true;

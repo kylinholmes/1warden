@@ -8,7 +8,7 @@ import { pathToFileURL } from 'node:url';
 const root = resolve(import.meta.dir, '..');
 const fixture = mkdtempSync(join(tmpdir(), '1warden-updater-ui-'));
 const profile = mkdtempSync(join(tmpdir(), '1warden-updater-browser-'));
-const output = process.env.COFFER_UPDATER_UI_OUTPUT ?? '/tmp/1warden-updater-ui-review';
+const output = process.env.ONEWARDEN_UPDATER_UI_OUTPUT ?? '/tmp/1warden-updater-ui-review';
 mkdirSync(output, { recursive: true });
 const entry = join(fixture, 'main.tsx');
 writeFileSync(entry, `
@@ -49,8 +49,8 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
   if (new URL(request.url).pathname === '/styles.css') return new Response(css, { headers: { 'Content-Type': 'text/css' } });
   return new Response('<!doctype html><html data-theme="light"><meta charset="utf-8"><link rel="stylesheet" href="/styles.css"><style>body{padding:24px}#root{width:380px}#outside{margin-top:24px}</style><div id="root"></div><button class="btn btn-quiet" id="outside">继续工作</button><script src="/bundle.js"></script></html>', { headers: { 'Content-Type': 'text/html' } });
 } });
-const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.COFFER_PUPPETEER
-  ?? '/tmp/coffer-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
+const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.ONEWARDEN_PUPPETEER
+  ?? '/tmp/onewarden-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
 const checks: string[] = [];
 const errors: string[] = [];
 let browser: any;
@@ -59,7 +59,7 @@ function check(name: string, passed: boolean) {
   checks.push(name); console.log(`PASS: ${name}`);
 }
 try {
-  browser = await puppeteer.launch({ executablePath: process.env.COFFER_EDGE
+  browser = await puppeteer.launch({ executablePath: process.env.ONEWARDEN_EDGE
     ?? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', headless: true, userDataDir: profile });
   const page = await browser.newPage(); page.setDefaultTimeout(5000);
   page.on('pageerror', (error: Error) => errors.push(error.message));

@@ -1,13 +1,13 @@
 # Uncomment the next line to define a global platform for your project
 
-target 'coffer_iOS' do
+target 'onewarden_iOS' do
 platform :ios, '15.0'
-  # Pods for coffer_iOS
+  # Pods for onewarden_iOS
 end
 
-target 'coffer_macOS' do
+target 'onewarden_macOS' do
 platform :osx, '11.0'
-  # Pods for coffer_macOS
+  # Pods for onewarden_macOS
 end
 
 # Delete the deployment target for iOS and macOS, causing it to be inherited from the Podfile

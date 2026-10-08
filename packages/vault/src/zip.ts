@@ -20,7 +20,7 @@
  * 我们读的是本地文件，而校验它会引入一张查表、一个循环和一处可能出错的判断。
  * deflate 本身有自己的校验和，真损坏会在解压时炸出来。
  */
-import { concatBytes } from '@coffer/crypto';
+import { concatBytes } from '@1warden/crypto';
 
 const SIG_EOCD = 0x06054b50;
 const SIG_CENTRAL = 0x02014b50;
@@ -47,7 +47,7 @@ async function inflateRaw(data: Uint8Array): Promise<Uint8Array> {
   const stream = new DecompressionStream('deflate-raw');
   const writer = stream.writable.getWriter();
   // ⚠️ TS 5.7 起 `Uint8Array` 带 buffer 类型参数，裸的是 `<ArrayBufferLike>`，
-  // 而流 API 要 `<ArrayBuffer>`。仓库的约定是就地断言（见 @coffer/crypto 的 bytes.ts）
+  // 而流 API 要 `<ArrayBuffer>`。仓库的约定是就地断言（见 @1warden/crypto 的 bytes.ts）
   void writer.write(data as BufferSource);
   void writer.close();
   return new Uint8Array(await new Response(stream.readable).arrayBuffer());

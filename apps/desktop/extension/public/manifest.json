@@ -1,6 +1,7 @@
 {
   "manifest_version": 3,
   "name": "1Warden",
+  "key": "MIIBIjANBgkqhkiG9w0BAQEFAAOCAQ8AMIIBCgKCAQEAx7yhcCpGb1UjNj2xYzwNZjmpzgYSUjhQ7+5tLnV8bZL/2Bg4ZSYNdFD4B6G111s/9GFjEJqcJlUoN8OvTIQIB+kBwG2V8k25k0m4oFAQTOICZy+zg6J1EwoERpbH51iBPe39gudxZ1KmFUyGTwd2ca+xH60I2DbPiIe1UDJAmnDCovoMSDYGh/Cz1SMyqM14TH2GVU8JLR1nC39LSRsvbD6wHwdDZliuhRZb+lnPo89La+fhLJX3kqkFZhJ/yx+3aV4rGNxVw+KxY/7+iGnGSHxkBcFziBX/e4P2uzLQtikDXiSJ1dBO+FnFGlpuLvbdf1Czgeq6QTu7qOnUG1PGNQIDAQAB",
   "version": "0.1.0",
   "description": "个人密码管理器 —— 自动填充、密码生成、自建 Vaultwarden",
   "minimum_chrome_version": "116",
@@ -13,8 +14,10 @@
   },
   "action": {
     "default_title": "1Warden",
+    "default_icon": { "16": "icons/16.png", "24": "icons/24.png", "32": "icons/32.png", "48": "icons/48.png" },
     "default_popup": "popup.html"
   },
+  "icons": { "16": "icons/16.png", "32": "icons/32.png", "48": "icons/48.png", "128": "icons/128.png" },
   "permissions": [
     "storage",
     "scripting",

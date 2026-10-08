@@ -94,7 +94,7 @@
     /*
      * 彩色字母徽标 / 着色的类型图标。
      *
-     * ⚠️ 色相 `--h` 由**条目**算出来（见 @coffer/vault 的 avatarOf），
+     * ⚠️ 色相 `--h` 由**条目**算出来（见 @1warden/vault 的 avatarOf），
      * 明度和彩度走共享主题令牌，领域层只负责每个条目的稳定色相。
      * 白色文字所需的对比度也由主题令牌统一控制。
      */
@@ -121,22 +121,10 @@
      * 侧栏折叠改用**桌面端自己的**容器（见那边 styles.css 的 `.app-sidebar`
      * 区块），不占用共享的外壳。
      *
-     * ⚠️ 用**容器查询**，不是视口 `@media`。这一条是这段布局里唯一
-     * 真正要紧的决定：
-     *
-     * - 浏览器弹窗的宽度是**浏览器给的**，和视口没关系（用户在宽屏上
-     *   开一个小弹窗，视口是 2560px，弹窗是 440px）
-     * - 桌面端窗口是可拖拽缩放的，同样和视口没关系
-     *
-     * 用 `@media` 会看着「在本机上是对的」，然后在另一种使用方式下全错 ——
-     * 而且错得没有规律，因为触发条件（视口）和要解决的问题（可用宽度）
-     * 根本是两回事。
-     *
-     * ⚠️ 容器挂在**内容区**而不是整个外壳上：rail 是可折叠的（80 ↔ 200），
-     * 挂在外壳上的话，rail 一展开就会算错 —— 外壳还是 800，但内容只剩 600，
-     * 查询却仍然认为「够宽，并排吧」。量错对象的容器查询比没有更糟。
-     *
-     * 620px 这条线是量出来的：列表 336 + 详情至少 280。
+     * 当前规则是可用窗口宽度：900px 起容纳侧栏、列表与详情。
+     * 扩展弹窗有自己的 440×600 视口，媒体查询不会读取浏览器主窗口尺寸。
+     * 所有平台与 layout.ts 的宽度查询一致：窄窗口单页、宽窗口分栏。
+     * 内容容器只用于局部密度与可用空间，不负责判断设备类型。
      */
     .vault-shell {
       display: flex;
@@ -167,6 +155,7 @@
      */
     .vault-detail {
       position: absolute;
+      z-index: 1;
       inset: 0;
       display: flex;
       flex-direction: column;
@@ -219,10 +208,12 @@
      * 而那是**系统**画的、在 WebView 之上，应用控件抢不过。
      */
     .nav-trigger {
+      position: relative;
+      z-index: 30;
       display: grid;
       place-items: center;
-      width: 28px;
-      height: 28px;
+      width: 32px;
+      height: 32px;
       flex: none;
       border-radius: var(--radius-sm);
       color: var(--ink-secondary);
@@ -231,15 +222,13 @@
     }
     .nav-trigger:hover { background: var(--surface-hover); color: var(--ink-primary); }
 
-    /*
-     * 悬停联动：鼠标在**开关**上，或者已经移进**面板**里，面板就保持展开。
-     *
-     * ⚠️ 用 `:has()` 而不是让开关和面板做兄弟 —— 开关现在住在顶栏里、
-     * 面板是外壳的直接子元素，两者在 DOM 上离得很远。`:has()` 是唯一
-     * 能把「这两个离得远的东西算作一次悬停」表达出来的东西。
-     */
-    .vault-shell:has(.nav-trigger:hover) .nav-drawer-panel,
-    .vault-shell:has(.nav-drawer-panel:hover) .nav-drawer-panel { transform: none; }
+    /* Only explicit clicks/keyboard activation change this state. */
+    .nav-drawer[data-open='true'] .nav-drawer-panel { transform: none; }
+    .nav-drawer-scrim {
+      position: fixed;
+      inset: var(--titlebar-h, 0px) 0 0;
+      background: rgb(0 0 0 / 0.12);
+    }
 
     .nav-drawer-panel {
       position: absolute;
@@ -257,8 +246,10 @@
        */
       background: var(--surface-paper);
     }
-    .nav-drawer:hover .nav-drawer-panel,
-    .nav-drawer:focus-within .nav-drawer-panel { transform: none; }
+    @media (width < 900px) {
+      /* Keep the same trigger reachable while the drawer is open. */
+      .nav-drawer-panel .nav-band { padding-left: 56px; }
+    }
 
     /* 抽屉里的导航栏不受折叠态影响 —— 它只在滑出来时可见 */
     .nav-drawer-panel .vault-rail { height: 100%; }
@@ -267,8 +258,7 @@
      * ── 宽屏时，抽屉变回**常驻侧栏** ──────────────────────────
      *
      * 这一步是「不同端本质是一个东西」的落点：
-     * 桌面端拖宽 → 侧栏；拖窄 → 抽屉；扩展弹窗 → 恒为抽屉
-     * （它 440px，永远低于这条线，所以**永远停在这一档**）。
+     * 宽度充足 → 侧栏；宽度不足 → 点击抽屉；设备与构建平台不参与判断。
      *
      * ⚠️ 上面那句原本接着写的是「所以不需要开关」—— 那是错的，而且已经把
      * 弹窗的导航**整个挡死过**。抽屉在这一档是**状态**，开关是**入口**：
@@ -281,7 +271,7 @@
      * ⚠️ 容器是 `.app-shell`（桌面端自己的类），不是共享的 `.vault-shell` ——
      * 后者是弹窗的根元素，而弹窗按内容撑开，inline-size 容器会让它塌成 0 宽。
      */
-    @container shell (min-width: 900px) {
+    @media (width >= 900px) {
       .nav-drawer { display: flex; flex: none; }
       /* 触发器藏起来：这一档导航常驻，不需要入口 */
       .nav-trigger { display: none; }
@@ -292,6 +282,7 @@
         /* 常驻侧栏背后是壁纸，所以这一档才用玻璃（见 --surface-glass） */
         background: var(--surface-glass);
       }
+      .nav-drawer-panel .vault-rail { width: min(214px, 24vw); }
     }
 
     .vault-rail { width: var(--nav-w, 80px); }
@@ -301,17 +292,22 @@
     .vault-content[data-detail='false'][data-detail-mounted='false'] .vault-detail {
       display: none;
     }
-    .vault-detail[data-state='open'] { animation: coffer-card-in var(--dur-base) var(--ease-enter) both; }
+    .vault-detail[data-state='open'] { animation: onewarden-card-in var(--dur-base) var(--ease-enter) both; }
     .vault-detail[data-state='closing'] {
-      animation: coffer-card-out var(--dur-base) var(--ease-move) both;
+      animation: onewarden-card-out var(--dur-base) var(--ease-move) both;
       pointer-events: none;
     }
+    @media (width < 900px) {
+      /* Contain the list trigger's z-index while the detail overlays it.
+         inert blocks input but does not stop underlying controls painting above it. */
+      .vault-content[data-detail-mounted='true'] .vault-list { isolation: isolate; }
+    }
 
-    @container vault (min-width: 620px) {
+    @media (width >= 900px) {
       .detail-back { display: none; }
       .vault-list {
         flex: none;
-        width: var(--list-w);
+        width: min(var(--list-w), 42%);
         border-right: 1px solid var(--border-subtle);
       }
       /* 宽的时候并排 —— 详情不再是浮层，所以背景交给它下面那一栏 */
@@ -348,6 +344,7 @@
     z-index: 50;
     display: grid;
     place-items: center;
+    padding-top: var(--titlebar-h, 0px);
     overflow: hidden;
     container: floating / inline-size;
     overscroll-behavior: contain;
@@ -355,7 +352,7 @@
   .floating-layer[data-open='false'] { pointer-events: none; }
   .floating-layer > .panel {
     width: calc(100% - 32px);
-    max-height: min(680px, calc(100dvh - 32px));
+    max-height: min(680px, calc(100dvh - var(--titlebar-h, 0px) - 32px));
     overflow-y: auto;
     overscroll-behavior: contain;
   }
@@ -391,31 +388,31 @@
     inset: 0;
     background: oklch(0 0 0 / 0.28);
   }
-@keyframes coffer-panel-in {
+@keyframes onewarden-panel-in {
   from { opacity: 0; transform: translateY(4px) scale(0.97); }
   to { opacity: 1; transform: none; }
 }
-@keyframes coffer-card-in {
+@keyframes onewarden-card-in {
   from { transform: translateX(100%); }
   to { transform: translateX(0); }
 }
-@keyframes coffer-card-out {
+@keyframes onewarden-card-out {
   from { transform: translateX(0); }
   to { transform: translateX(100%); }
 }
-@keyframes coffer-panel-out {
+@keyframes onewarden-panel-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: scale(0.985); }
 }
 
-@keyframes coffer-fade-in {
+@keyframes onewarden-fade-in {
   from { opacity: 0; }
   to { opacity: 1; }
 }
-.panel-in { animation: coffer-panel-in var(--dur-base) var(--ease-enter) both; }
-.panel-out { animation: coffer-panel-out var(--dur-fast) var(--ease-move) both; }
-.scrim-in { animation: coffer-fade-in var(--dur-base) var(--ease-enter) both; }
-.scrim-out { animation: coffer-fade-in var(--dur-fast) var(--ease-move) reverse both; }
+.panel-in { animation: onewarden-panel-in var(--dur-base) var(--ease-enter) both; }
+.panel-out { animation: onewarden-panel-out var(--dur-fast) var(--ease-move) both; }
+.scrim-in { animation: onewarden-fade-in var(--dur-base) var(--ease-enter) both; }
+.scrim-out { animation: onewarden-fade-in var(--dur-fast) var(--ease-move) reverse both; }
 
 
   /* ── 表面 ───────────────────────────────────────────── */
@@ -428,6 +425,12 @@
     min-height: var(--band-h);
     padding-inline: 14px;
     border-bottom: 1px solid var(--border-subtle);
+  }
+  .page-header {
+    flex-shrink: 0;
+    min-height: 56px;
+    gap: 8px;
+    padding-inline: 12px;
   }
 
   /* 分组卡片：填充 + 描边，**不投影** */
@@ -556,8 +559,9 @@
   .field-bare::placeholder { color: var(--ink-tertiary); }
 }
 
-/* Full-window cards are a narrow-layout invariant, overriding per-dialog utility sizes. */
-@container floating (width < 620px) {
+/* Usable viewport width is shared by every build and useCompactLayout (layout.ts).
+ * Narrow cards fill the window, regardless of orientation or platform. */
+@media (width < 900px) {
   .floating-layer > .panel {
     position: absolute;
     inset: 0;
@@ -568,8 +572,8 @@
     border: 0;
     border-radius: 0;
   }
-  .floating-layer > .panel-in { animation: coffer-card-in var(--dur-base) var(--ease-enter) both; }
-  .floating-layer > .panel-out { animation: coffer-card-out var(--dur-base) var(--ease-move) both; }
+  .floating-layer > .panel-in { animation: onewarden-card-in var(--dur-base) var(--ease-enter) both; }
+  .floating-layer > .panel-out { animation: onewarden-card-out var(--dur-base) var(--ease-move) both; }
   /* Reserve native safe areas without replacing a dialog's existing content padding. */
   .floating-layer > .panel::before,
   .floating-layer > .panel::after {

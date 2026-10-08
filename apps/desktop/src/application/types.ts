@@ -1,9 +1,9 @@
 import type { AccountTarget } from './account-target';
 import type {
-  UserProfile, AccountInfo, Attachment, CardFields, ConnectParams, IdentityFields,
+  UserProfile, ProfilePreferences, ProfileDeviceInput, ProfileSettings, AccountInfo, Attachment, CardFields, ConnectParams, IdentityFields,
   ImportFormatId, LoginUri, SessionStatus, VaultFolder, VaultItem,
-} from '@coffer/vault';
-import type { ImportOutcome, ImportPreview, ItemSummary, ReportBrief } from '@coffer/ui';
+} from '@1warden/vault';
+import type { ImportOutcome, ImportPreview, ItemSummary, ReportBrief } from '@1warden/ui';
 
 /** The UI sees a stable snapshot of display data, never a session or its keys. */
 export interface ApplicationSnapshot {
@@ -15,6 +15,9 @@ export interface ApplicationSnapshot {
   profileVersion: string | null;
   profileError: string | null;
   profileReady: boolean;
+  /** Decrypted only while unlocked; device history is never cached in presentation storage. */
+  profileSettings?: ProfileSettings | null;
+  profileSettingsError?: string | null;
   items: ItemSummary[];
   folders: VaultFolder[];
   /** Canonical identity keys whose independent sessions are still unlocked. */
@@ -77,6 +80,8 @@ export interface ApplicationService {
   /** Explicit edit action: editable fields only, without keys/passkeys/history/attachment internals. */
   getDraft(id: string): Promise<VaultItem>;
   saveProfile(profile: UserProfile, expectedVersion: string | null): Promise<void>;
+  savePreferences(preferences: ProfilePreferences, expected: ProfilePreferences | null): Promise<void>;
+  recordDevice(device: ProfileDeviceInput): Promise<void>;
   saveItem(draft: VaultItem): Promise<ItemSummary>;
   toggleFavorite(id: string): Promise<void>;
   moveToTrash(id: string): Promise<void>;
@@ -129,7 +134,7 @@ export interface ApplicationClient extends ApplicationService {
 
 export type ApplicationMethod = keyof ApplicationService;
 export type ApplicationRequest = {
-  [K in ApplicationMethod]: { type: 'coffer:application'; method: K; args: Parameters<ApplicationService[K]> }
+  [K in ApplicationMethod]: { type: '1warden:application'; method: K; args: Parameters<ApplicationService[K]> }
 }[ApplicationMethod];
 
 export const EMPTY_SNAPSHOT: ApplicationSnapshot = {

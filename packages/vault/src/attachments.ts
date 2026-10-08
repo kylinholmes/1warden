@@ -24,8 +24,8 @@
  * 那串 base64 的 UTF-8 文本（88 字节），长度就不对。
  * 好在下面的长度检查会拦住它。
  */
-import { decryptBytes, decryptString, DecryptError } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
+import { decryptBytes, decryptString, DecryptError } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
 
 /** 附件密钥的长度：32 字节 enc + 32 字节 mac */
 const ATTACHMENT_KEY_BYTES = 64;

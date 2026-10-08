@@ -20,7 +20,7 @@
  *    大整数编码偶尔会掉一个前导零字节，那对密钥就废了。
  */
 
-import { concatBytes, randomBytes, sha256, toBase64Url, fromBase64Url, utf8Encode } from '@coffer/crypto';
+import { concatBytes, randomBytes, sha256, toBase64Url, fromBase64Url, utf8Encode } from '@1warden/crypto';
 import { cborBytes, cborInt, cborMap, cborText, encodeCbor, type CborValue } from './cbor';
 
 /** 认证器数据里的标志位（WebAuthn §6.1） */

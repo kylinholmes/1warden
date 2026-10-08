@@ -1,5 +1,5 @@
 {
-  "name": "@coffer/vault",
+  "name": "@1warden/vault",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -8,8 +8,8 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@coffer/api": "workspace:*",
-    "@coffer/crypto": "workspace:*",
+    "@1warden/api": "workspace:*",
+    "@1warden/crypto": "workspace:*",
     "tldts": "7.4.16"
   }
 }

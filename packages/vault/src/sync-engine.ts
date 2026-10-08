@@ -1,6 +1,6 @@
-import { partitionCiphers } from '@coffer/api';
-import type { CipherDto, FolderDto, SyncResult as ApiSyncResult } from '@coffer/api';
-import type { SymmetricKey, KdfConfig } from '@coffer/crypto';
+import { partitionCiphers } from '@1warden/api';
+import type { CipherDto, FolderDto, SyncResult as ApiSyncResult } from '@1warden/api';
+import type { SymmetricKey, KdfConfig } from '@1warden/crypto';
 import { decryptCipher, decryptFolder } from './decrypt';
 import type { VaultSession, AccountInfo } from './session';
 import type { VaultItem, VaultFolder } from './model';

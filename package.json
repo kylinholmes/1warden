@@ -7,7 +7,9 @@
     "apps/*"
   ],
   "scripts": {
+    "build:icons": "bun scripts/build-icons.ts",
     "build:desktop": "cd apps/desktop && bun run tauri build",
+    "build:windows": "cd apps/desktop && bun run tauri build --target x86_64-pc-windows-msvc --bundles nsis",
     "build:extension": "cd apps/desktop && bun run build:extension",
     "build:mobile": "cd apps/desktop && bun run build:mobile",
     "build:extension-firefox": "bun run build:extension && bun run scripts/build-extension-firefox.ts",
@@ -23,12 +25,16 @@
     "test:contract": "vitest run --config vitest.contract.config.ts",
     "test:interop": "bun scripts/interop-test.ts",
     "test:watch": "vitest",
+    "test:ui": "bun scripts/ci-smoke.ts",
+    "test:windows": "bun scripts/ci-smoke.ts native",
+    "check:ci": "bun scripts/ci-validate.ts",
     "typecheck": "tsc -b --force && tsc -p apps/desktop --noEmit",
     "ui:shot": "bun run scripts/ui-shot.ts"
   },
   "devDependencies": {
     "@bitwarden/cli": "2025.2.0",
     "@types/node": "24.9.2",
+    "puppeteer-core": "25.11.0",
     "typescript": "5.9.3",
     "vitest": "5.0.3"
   }

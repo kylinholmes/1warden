@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
-import { makeUserKey, toBase64 } from '@coffer/crypto';
-import type { VaultItem } from '@coffer/vault';
+import { makeUserKey, toBase64 } from '@1warden/crypto';
+import type { VaultItem } from '@1warden/vault';
 
 /** 内存版存储区，行为对齐 chrome.storage.session */
 function memoryArea(): StorageArea & { dump(): Record<string, unknown> } {
@@ -113,7 +113,7 @@ describe('SessionStore —— 清理', () => {
     await store.clear();
     expect(await store.load()).toBeNull();
     expect(await store.loadAccount()).toEqual(account);
-    expect(Object.keys(area.dump())).toEqual(['coffer.account']);
+    expect(Object.keys(area.dump())).toEqual(['1warden.account']);
   });
 
   it('locking leaves no key material behind', async () => {
@@ -172,9 +172,9 @@ describe('SessionStore absolute expiry', () => {
 
   it('refuses legacy sessions without an absolute deadline', async () => {
     await store.save({ account, userKey: makeUserKey(), items: [], folders: [], token: null });
-    const raw = area.dump()['coffer.session'] as Record<string, unknown>;
+    const raw = area.dump()['1warden.session'] as Record<string, unknown>;
     delete raw['expiresAt'];
-    await area.set({ 'coffer.session': raw });
+    await area.set({ '1warden.session': raw });
     expect(await store.load()).toBeNull();
   });
 
@@ -195,13 +195,13 @@ describe('SessionStore —— 损坏的数据不能把扩展卡死', () => {
   // 否则 revive 会因为别的原因先返回 null，测试通过得毫无意义 ——
   // 这个坑是变异检验抓出来的：删掉密钥长度校验后测试照样绿。
   it('treats a record missing the key as no session', async () => {
-    await area.set({ 'coffer.session': { account, items: [], folders: [] } });
+    await area.set({ '1warden.session': { account, items: [], folders: [] } });
     expect(await store.load()).toBeNull();
   });
 
   it('treats a record with a malformed key as no session', async () => {
     await area.set({
-      'coffer.session': {
+      '1warden.session': {
         account, userKey: { encKey: 'not base64!!', macKey: 'x' }, items: [], folders: [],
       },
     });
@@ -209,13 +209,13 @@ describe('SessionStore —— 损坏的数据不能把扩展卡死', () => {
   });
 
   it('treats a non-object record as no session', async () => {
-    await area.set({ 'coffer.session': 'garbage' });
+    await area.set({ '1warden.session': 'garbage' });
     expect(await store.load()).toBeNull();
   });
 
   it('treats a key of the wrong length as no session', async () => {
     await area.set({
-      'coffer.session': {
+      '1warden.session': {
         account,
         userKey: {
           encKey: toBase64(new Uint8Array([1, 2, 3])),
@@ -229,7 +229,7 @@ describe('SessionStore —— 损坏的数据不能把扩展卡死', () => {
 
   it('treats a record missing the account as no session', async () => {
     await area.set({
-      'coffer.session': {
+      '1warden.session': {
         userKey: { encKey: 'AA==', macKey: 'AA==' }, items: [], folders: [],
       },
     });
@@ -238,7 +238,7 @@ describe('SessionStore —— 损坏的数据不能把扩展卡死', () => {
 
   it('treats a record whose items are not an array as no session', async () => {
     await area.set({
-      'coffer.session': {
+      '1warden.session': {
         account, userKey: { encKey: 'AA==', macKey: 'AA==' }, items: 'nope', folders: [],
       },
     });

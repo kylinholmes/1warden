@@ -1,14 +1,14 @@
-# Coffer 计划 3：领域层 (@coffer/vault)
+# 1Warden 计划 3：领域层 (@1warden/vault)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 实现 `@coffer/vault` —— 把「服务器返回的加密 JSON」变成「用户能用的领域对象」，并承载会话状态、同步、搜索、安全报告与 TOTP。
+**Goal:** 实现 `@1warden/vault` —— 把「服务器返回的加密 JSON」变成「用户能用的领域对象」，并承载会话状态、同步、搜索、安全报告与 TOTP。
 
-**Architecture:** 位于 `@coffer/crypto`（解密）与 `@coffer/api`（传输）之上的编排层。它持有**内存中的密钥与明文**，这两样东西**永不落盘**。三个下层各自不知道对方存在，这一层把它们组合起来。
+**Architecture:** 位于 `@1warden/crypto`（解密）与 `@1warden/api`（传输）之上的编排层。它持有**内存中的密钥与明文**，这两样东西**永不落盘**。三个下层各自不知道对方存在，这一层把它们组合起来。
 
-**Tech Stack:** TypeScript (strict) · Bun · Vitest · 依赖 `@coffer/crypto` 与 `@coffer/api`
+**Tech Stack:** TypeScript (strict) · Bun · Vitest · 依赖 `@1warden/crypto` 与 `@1warden/api`
 
-**Spec:** `docs/superpowers/specs/2026-10-04-coffer-design.md`（尤其 §5 安全模型、§6 数据流、§8 测试策略）
+**Spec:** `docs/superpowers/specs/2026-10-04-onewarden-design.md`（尤其 §5 安全模型、§6 数据流、§8 测试策略）
 **参考:** `docs/reference/bitwarden-api-notes.md` §2（字段加密对照表）、`docs/reference/1password-mapping.md` §4-6（Watchtower / TOTP / 生成器）
 
 ## Global Constraints
@@ -57,7 +57,7 @@
 - Modify: `tsconfig.json`（根，加 reference）
 
 **Interfaces:**
-- Consumes: `@coffer/api` 的 `CipherDto` / `FolderDto`
+- Consumes: `@1warden/api` 的 `CipherDto` / `FolderDto`
 - Produces:
   - `type ItemType = 'login' | 'secureNote' | 'card' | 'identity' | 'sshKey' | 'unknown'`
   - `interface DecryptedField { value: string | null; failed: boolean }`
@@ -74,15 +74,15 @@
 `packages/vault/package.json`:
 ```json
 {
-  "name": "@coffer/vault",
+  "name": "@1warden/vault",
   "version": "0.0.0",
   "private": true,
   "type": "module",
   "main": "./src/index.ts",
   "exports": { ".": "./src/index.ts" },
   "dependencies": {
-    "@coffer/api": "workspace:*",
-    "@coffer/crypto": "workspace:*"
+    "@1warden/api": "workspace:*",
+    "@1warden/crypto": "workspace:*"
   }
 }
 ```
@@ -163,7 +163,7 @@ Expected: FAIL —— 无法解析模块 `./model`
 /**
  * 领域模型 —— **已解密**的形状。
  *
- * 与 `@coffer/api` 的 DTO 严格分开：
+ * 与 `@1warden/api` 的 DTO 严格分开：
  *   DTO    = 线上形状，所有敏感字段都是不透明字符串（EncString）
  *   VaultItem = 解密后的形状，字段是明文
  *
@@ -332,7 +332,7 @@ git commit -m "feat(vault): add decrypted domain model"
 - Test: `packages/vault/src/decrypt.test.ts`
 
 **Interfaces:**
-- Consumes: `@coffer/api` 的 `CipherDto` / `FolderDto`；`@coffer/crypto` 的 `decryptString` / `decryptBytes` / `SymmetricKey` / `DecryptError`；Task 1 的 `VaultItem` 等
+- Consumes: `@1warden/api` 的 `CipherDto` / `FolderDto`；`@1warden/crypto` 的 `decryptString` / `decryptBytes` / `SymmetricKey` / `DecryptError`；Task 1 的 `VaultItem` 等
 - Produces:
   - `decryptCipher(dto: CipherDto, userKey: SymmetricKey): Promise<VaultItem>`
   - `decryptFolder(dto: FolderDto, userKey: SymmetricKey): Promise<VaultFolder>`
@@ -347,9 +347,9 @@ git commit -m "feat(vault): add decrypted domain model"
 
 ```ts
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeUserKey, encryptString, encryptBytes } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherDto } from '@coffer/api';
+import { makeUserKey, encryptString, encryptBytes } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import type { CipherDto } from '@1warden/api';
 import { decryptCipher, decryptFolder } from './decrypt';
 
 let key: SymmetricKey;
@@ -567,9 +567,9 @@ Expected: FAIL —— 无法解析模块 `./decrypt`
 - [ ] **Step 3: 实现 `packages/vault/src/decrypt.ts`**
 
 ```ts
-import { decryptString, decryptBytes, DecryptError } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherDto, FolderDto, CipherFieldDto } from '@coffer/api';
+import { decryptString, decryptBytes, DecryptError } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import type { CipherDto, FolderDto, CipherFieldDto } from '@1warden/api';
 import {
   cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity,
 } from './model';
@@ -751,7 +751,7 @@ git commit -m "feat(vault): add DTO→domain decryption with per-field degradati
 - Test: `packages/vault/src/encrypt.test.ts`
 
 **Interfaces:**
-- Consumes: Task 1 的模型；`@coffer/crypto` 的 `encryptString`；`@coffer/api` 的 `CipherWriteBody`
+- Consumes: Task 1 的模型；`@1warden/crypto` 的 `encryptString`；`@1warden/api` 的 `CipherWriteBody`
 - Produces:
   - `encryptCipher(item: VaultItem, userKey: SymmetricKey, opts: { userId: string; itemKey?: SymmetricKey; lastKnownRevisionDate?: string }): Promise<CipherWriteBody>`
 
@@ -764,8 +764,8 @@ git commit -m "feat(vault): add DTO→domain decryption with per-field degradati
 
 ```ts
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeUserKey } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
+import { makeUserKey } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
 import { decryptCipher } from './decrypt';
 import { encryptCipher } from './encrypt';
 import { emptyLogin, emptyCard, emptyIdentity } from './model';
@@ -913,9 +913,9 @@ Expected: FAIL —— 无法解析模块 `./encrypt`
 - [ ] **Step 3: 实现 `packages/vault/src/encrypt.ts`**
 
 ```ts
-import { encryptString } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherWriteBody } from '@coffer/api';
+import { encryptString } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import type { CipherWriteBody } from '@1warden/api';
 import type { VaultItem, ItemType } from './model';
 
 export interface EncryptOptions {
@@ -1034,7 +1034,7 @@ git commit -m "feat(vault): add domain→DTO encryption with round-trip tests"
 - Test: `packages/vault/src/session.test.ts`
 
 **Interfaces:**
-- Consumes: `@coffer/crypto` 的密钥函数；`@coffer/api` 的认证函数
+- Consumes: `@1warden/crypto` 的密钥函数；`@1warden/api` 的认证函数
 - Produces:
   - `type SessionStatus = 'loggedOut' | 'locked' | 'unlocking' | 'unlocked'`
   - `interface AccountInfo { serverUrl; email; userId; kdf: KdfConfig }`
@@ -1048,7 +1048,7 @@ git commit -m "feat(vault): add domain→DTO encryption with round-trip tests"
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
-import { makeUserKey } from '@coffer/crypto';
+import { makeUserKey } from '@1warden/crypto';
 import { VaultSession } from './session';
 import type { VaultItem } from './model';
 
@@ -1196,8 +1196,8 @@ Expected: FAIL —— 无法解析模块 `./session`
 - [ ] **Step 3: 实现 `packages/vault/src/session.ts`**
 
 ```ts
-import { zeroizeKey } from '@coffer/crypto';
-import type { SymmetricKey, KdfConfig } from '@coffer/crypto';
+import { zeroizeKey } from '@1warden/crypto';
+import type { SymmetricKey, KdfConfig } from '@1warden/crypto';
 import type { VaultItem, VaultFolder } from './model';
 
 export type SessionStatus = 'loggedOut' | 'locked' | 'unlocking' | 'unlocked';
@@ -1359,7 +1359,7 @@ git commit -m "feat(vault): add session state machine with zeroizing lock"
 - Test: `packages/vault/src/sync-engine.test.ts`
 
 **Interfaces:**
-- Consumes: `@coffer/api` 的 `sync` / `partitionCiphers` / `getRevisionDate`；Task 2 的 `decryptCipher` / `decryptFolder`；Task 4 的 `VaultSession`
+- Consumes: `@1warden/api` 的 `sync` / `partitionCiphers` / `getRevisionDate`；Task 2 的 `decryptCipher` / `decryptFolder`；Task 4 的 `VaultSession`
 - Produces:
   - `interface SyncEngineOptions { http; session; onError?: (e: unknown) => void }`
   - `class SyncEngine { sync(opts?: { force?: boolean }): Promise<SyncOutcome>; get lastSyncedAt(): number | null }`
@@ -1376,7 +1376,7 @@ git commit -m "feat(vault): add session state machine with zeroizing lock"
 
 ```ts
 import { describe, it, expect, vi } from 'vitest';
-import { makeUserKey } from '@coffer/crypto';
+import { makeUserKey } from '@1warden/crypto';
 import { SyncEngine } from './sync-engine';
 import { VaultSession } from './session';
 
@@ -1532,9 +1532,9 @@ Expected: FAIL —— 无法解析模块 `./sync-engine`
 - [ ] **Step 3: 实现 `packages/vault/src/sync-engine.ts`**
 
 ```ts
-import { partitionCiphers } from '@coffer/api';
-import type { CipherDto, FolderDto, SyncResult as ApiSyncResult } from '@coffer/api';
-import type { SymmetricKey } from '@coffer/crypto';
+import { partitionCiphers } from '@1warden/api';
+import type { CipherDto, FolderDto, SyncResult as ApiSyncResult } from '@1warden/api';
+import type { SymmetricKey } from '@1warden/crypto';
 import { decryptCipher } from './decrypt';
 import { decryptFolder } from './decrypt';
 import type { VaultSession } from './session';
@@ -2357,7 +2357,7 @@ git commit -m "feat(vault): add local security reports with HIBP k-anonymity"
 - Test: `packages/vault/src/vault.contract.test.ts`
 
 **Interfaces:**
-- Consumes: `@coffer/crypto` 的 `generateTotp` / `parseOtpauthUri`；Task 1 的 `VaultItem` / `CustomField`
+- Consumes: `@1warden/crypto` 的 `generateTotp` / `parseOtpauthUri`；Task 1 的 `VaultItem` / `CustomField`
 - Produces:
   - `readTotpSecret(item: VaultItem): string | null` —— 双路径读取
   - `writeTotpSecret(item: VaultItem, secret: string | null): { loginTotp: string | null; customFields: CustomField[] }` —— 写入原生优先
@@ -2506,7 +2506,7 @@ Expected: FAIL —— 无法解析模块 `./totp`
 - [ ] **Step 3: 实现 `packages/vault/src/totp.ts`**
 
 ```ts
-import { generateTotp, parseOtpauthUri } from '@coffer/crypto';
+import { generateTotp, parseOtpauthUri } from '@1warden/crypto';
 import type { VaultItem, CustomField } from './model';
 
 /**
@@ -2624,10 +2624,10 @@ export * from './totp';
  * 前置： ./scripts/dev-server.sh start && bun run seed && bun run test:contract
  */
 import { describe, it, expect, beforeAll } from 'vitest';
-import { HttpClient, loginWithPassword, prelogin, getProfile, sync, createCipher, hardDeleteCipher, DEVICE_TYPE } from '@coffer/api';
-import type { CipherDto } from '@coffer/api';
-import { deriveMasterKey, hashMasterPassword, decryptBytes, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
+import { HttpClient, loginWithPassword, prelogin, getProfile, sync, createCipher, hardDeleteCipher, DEVICE_TYPE } from '@1warden/api';
+import type { CipherDto } from '@1warden/api';
+import { deriveMasterKey, hashMasterPassword, decryptBytes, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
 import { decryptCipher } from './decrypt';
 import { encryptCipher } from './encrypt';
 import { emptyLogin } from './model';
@@ -2636,9 +2636,9 @@ import type { VaultItem } from './model';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED ??= '0';
 
 const BASE = process.env.VW_URL ?? 'https://localhost:8443';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
-const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'vault-contract', name: 'coffer-vault' };
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'vault-contract', name: 'onewarden-vault' };
 
 let http: HttpClient;
 let userId: string;
@@ -2656,7 +2656,7 @@ beforeAll(async () => {
   });
   if (!tok.key) throw new Error('token 响应缺少 Key');
   // 用同一个拉伸主密钥解开用户密钥 —— 与 seed 脚本用的是同一条路径
-  const { stretchMasterKey } = await import('@coffer/crypto');
+  const { stretchMasterKey } = await import('@1warden/crypto');
   const raw = await decryptBytes(tok.key, await stretchMasterKey(mk));
   userKey = { encKey: raw.slice(0, 32), macKey: raw.slice(32, 64) };
 
@@ -2716,7 +2716,7 @@ describe('集成：领域模型 ↔ 真实服务器', () => {
 
   it('目录里的条目都能被解密（不会因个别条目而整体失败）', async () => {
     const r = await sync(http, '');
-    const { partitionCiphers } = await import('@coffer/api');
+    const { partitionCiphers } = await import('@1warden/api');
     const { active } = partitionCiphers(r.ciphers);
     expect(active.length).toBeGreaterThan(0);
 

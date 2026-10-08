@@ -21,7 +21,7 @@ describe('encrypted Profile record codec', () => {
   });
   it('rejects damaged and future notes rather than overwriting them', () => {
     const item = buildProfileItem(profile);
-    for (const notes of ['{', JSON.stringify({ schema: 'coffer.profile', version: 2 })]) {
+    for (const notes of ['{', JSON.stringify({ schema: '1warden.profile', version: 2 })]) {
       expect(() => buildProfileItem(profile, { ...item, notes })).toThrow();
     }
     expect(() => parseProfile({ ...item, notesFailed: true })).toThrow();

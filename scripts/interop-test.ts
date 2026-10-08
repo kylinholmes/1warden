@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * 互操作测试：证明 @coffer/crypto 与官方 Bitwarden 实现字节级兼容。
+ * 互操作测试：证明 @1warden/crypto 与官方 Bitwarden 实现字节级兼容。
  *
  * ⚠️ 这是整个计划里最重要的一个测试。
  *
@@ -32,8 +32,8 @@ prepareBwEnv();
 
 // 默认与 scripts/dev-env.sh 保持一致（HTTPS + 自签证书：官方 CLI 拒绝明文 HTTP）
 const BASE = process.env.VW_URL ?? 'https://localhost:8443';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -75,7 +75,7 @@ async function token(masterPasswordHash: string): Promise<TokenResponse> {
     client_id: 'cli',
     deviceType: '24',            // 24 = macOS CLI
     deviceIdentifier: crypto.randomUUID(),
-    deviceName: 'coffer-interop',
+    deviceName: 'onewarden-interop',
   });
   const r = await fetch(`${BASE}/identity/connect/token`, {
     method: 'POST',

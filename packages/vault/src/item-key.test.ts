@@ -2,11 +2,11 @@ import { describe, it, expect } from 'vitest';
 import {
   deriveMasterKey, stretchMasterKey, makeUserKey, encryptString, encryptBytes, decryptString,
   KDF_TYPE_PBKDF2, type SymmetricKey, type KdfConfig,
-} from '@coffer/crypto';
+} from '@1warden/crypto';
 import { VaultClient } from './client';
 import { createFakeServer, fakeJwt, type FakeCipher } from './testing/fake-server';
 
-const EMAIL = 'coffer-test@example.com';
+const EMAIL = 'onewarden-test@example.com';
 const PASSWORD = 'Test-Master-Password-123!';
 const KDF: KdfConfig = { kdf: KDF_TYPE_PBKDF2, iterations: 1000 };
 const USER_ID = 'user-0000-1111-2222-333333333333';

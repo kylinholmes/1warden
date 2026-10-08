@@ -1,6 +1,6 @@
-name: coffer
+name: onewarden
 options:
-  bundleIdPrefix: app.coffer.desktop
+  bundleIdPrefix: app.onewarden.desktop
   deploymentTarget:
     iOS: 15.0
 fileGroups: [../../src]
@@ -11,7 +11,7 @@ settingGroups:
   app:
     base:
       PRODUCT_NAME: 1Warden
-      PRODUCT_BUNDLE_IDENTIFIER: app.coffer.desktop
+      PRODUCT_BUNDLE_IDENTIFIER: app.onewarden.desktop
 targetTemplates:
   app:
     type: application
@@ -24,7 +24,7 @@ targetTemplates:
     settings:
       groups: [app]
 targets:
-  coffer_iOS:
+  onewarden_iOS:
     type: application
     platform: iOS
     sources:
@@ -36,13 +36,13 @@ targets:
       # via LIBRARY_SEARCH_PATHS, never bundled as resources.
       - path: Externals
         excludes: ["**/*.a"]
-      - path: coffer_iOS
+      - path: onewarden_iOS
       - path: assets
         buildPhase: resources
         type: folder
       - path: LaunchScreen.storyboard
     info:
-      path: coffer_iOS/Info.plist
+      path: onewarden_iOS/Info.plist
       properties:
         LSRequiresIPhoneOS: true
         UILaunchStoryboardName: LaunchScreen
@@ -59,7 +59,7 @@ targets:
         CFBundleShortVersionString: 0.0.0
         CFBundleVersion: "0.0.0"
     entitlements:
-      path: coffer_iOS/coffer_iOS.entitlements
+      path: onewarden_iOS/onewarden_iOS.entitlements
     scheme:
       environmentVariables:
         RUST_BACKTRACE: full

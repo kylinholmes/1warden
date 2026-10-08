@@ -1,4 +1,5 @@
-import { useState, type FormEvent } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { type FormEvent } from 'react';
 import { IconSpinner } from './icons';
 
 /**
@@ -44,8 +45,13 @@ export function TwoFactorForm({
   busy: boolean;
   onSubmit: (p: { code: string; provider: number; remember: boolean }) => void;
 }) {
-  const [code, setCode] = useState('');
-  const [remember, setRemember] = useState(true);
+  const viewStore = useLocalStore(() => {
+    const code = '';
+    const remember = true;
+    return { code, remember };
+  });
+  const [code, setCode] = useStoreField(viewStore, 'code');
+  const [remember, setRemember] = useStoreField(viewStore, 'remember');
 
   function submit(e: FormEvent) {
     e.preventDefault();

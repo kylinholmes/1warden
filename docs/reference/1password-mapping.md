@@ -201,8 +201,8 @@ Bitwarden 的 `login.fido2Credentials[]` 结构完全相同。无映射决策要
 写进自定义字段的话，用户在官方 App 里看不到验证码。所以**能写原生就写原生**，
 只在原生表达不了的时候（非登录条目）才用自定义字段。
 
-> 这个决定不影响 `@coffer/crypto`（`generateTotp` 接受任意 URI/种子，与存储无关），
-> 只影响计划 3 的 `@coffer/vault`。**但要在写领域层之前定下来。**
+> 这个决定不影响 `@1warden/crypto`（`generateTotp` 接受任意 URI/种子，与存储无关），
+> 只影响计划 3 的 `@1warden/vault`。**但要在写领域层之前定下来。**
 
 ---
 

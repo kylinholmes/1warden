@@ -8,9 +8,9 @@ import { pathToFileURL } from 'node:url';
 const product = process.argv[2];
 if (product !== 'edge' && product !== 'zen') throw new Error('Usage: bun scripts/connection-smoke.ts edge|zen');
 const firefox = product === 'zen';
-const { default: puppeteer } = await import(process.env.COFFER_PUPPETEER
-  ? pathToFileURL(resolve(process.env.COFFER_PUPPETEER)).href : 'puppeteer-core');
-const profile = mkdtempSync(join(tmpdir(), `coffer-connection-${product}-`));
+const { default: puppeteer } = await import(process.env.ONEWARDEN_PUPPETEER
+  ? pathToFileURL(resolve(process.env.ONEWARDEN_PUPPETEER)).href : 'puppeteer-core');
+const profile = mkdtempSync(join(tmpdir(), `onewarden-connection-${product}-`));
 const uuid = '3791a0b1-2d30-4794-b5d0-b87bd6725ce6';
 let requests = 0;
 let holdFailure = false;
@@ -35,12 +35,12 @@ function check(condition: boolean, message: string) {
 try {
   browser = await puppeteer.launch({
     browser: firefox ? 'firefox' : 'chrome', headless: true, userDataDir: profile,
-    executablePath: process.env[`COFFER_${product.toUpperCase()}`] ?? (firefox
+    executablePath: process.env[`ONEWARDEN_${product.toUpperCase()}`] ?? (firefox
       ? '/Applications/Zen.app/Contents/MacOS/zen' : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
     defaultViewport: null, enableExtensions: true, protocolTimeout: 30_000,
     ...(firefox ? { args: ['--remote-allow-system-access'], extraPrefsFirefox: {
-      'extensions.webextensions.uuids': JSON.stringify({ 'coffer@coffer.app': uuid }),
-    } } : { pipe: true }),
+      'extensions.webextensions.uuids': JSON.stringify({ '1warden@1warden.app': uuid }),
+    } } : { pipe: process.platform !== 'win32' }),
   });
   const id = await browser.installExtension(resolve(import.meta.dir, '../apps/desktop', firefox ? 'dist-firefox' : 'dist-extension'));
   const url = `${firefox ? `moz-extension://${uuid}` : `chrome-extension://${id}`}/popup.html`;
@@ -50,7 +50,17 @@ try {
     else await page.goto(url);
     await page.waitForSelector(selector, { timeout: 10_000 });
   }
-  await open();
+  await open('[data-add-server]');
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '添加服务器，开始使用'
+    && await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim()) === '添加第一个服务器',
+    'empty account home invites adding the first server, not another server');
+  await page.$eval('[data-add-server]', (button: HTMLButtonElement) => button.click());
+  await page.waitForSelector('input[type="email"]');
+  await page.$eval('[aria-label="返回上一级"]', (button: HTMLButtonElement) => button.click());
+  await page.waitForSelector('[data-add-server]');
+  check(await page.$('input[type="email"]') === null, 'first-server setup can return to the empty home');
+  await page.$eval('[data-add-server]', (button: HTMLButtonElement) => button.click());
+  await page.waitForSelector('input[type="email"]');
   await page.evaluate((values: string[]) => {
     for (const [index, type] of ['url', 'email', 'password'].entries()) {
       const input = document.querySelector(`input[type="${type}"]`) as HTMLInputElement;
@@ -76,7 +86,7 @@ try {
   check(restored.password === '', 'reopened form clears the master password');
   const draft = await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return JSON.stringify(await api.storage.session.get('coffer.connectionDraft'));
+    return JSON.stringify(await api.storage.session.get('1warden.connectionDraft'));
   });
   check(!draft.includes(password), 'draft does not retain the master password');
   await page.evaluate(() => {
@@ -86,7 +96,7 @@ try {
   });
   await page.waitForFunction(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return (await api.storage.session.get('coffer.connectionDraft'))['coffer.connectionDraft']?.email === 'edited@example.invalid';
+    return (await api.storage.session.get('1warden.connectionDraft'))['1warden.connectionDraft']?.email === 'edited@example.invalid';
   });
   await page.close();
   await open();
@@ -95,8 +105,8 @@ try {
   check(requests === 1, 'reopening never resubmits login automatically');
   await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    await api.storage.session.remove('coffer.connectionDraft');
-    await api.storage.local.set({ 'coffer.accounts': JSON.stringify([
+    await api.storage.session.remove('1warden.connectionDraft');
+    await api.storage.local.set({ '1warden.accounts': JSON.stringify([
       { serverUrl: 'https://first.example.invalid', email: 'first@example.invalid' },
       { serverUrl: 'https://second.example.invalid', email: 'second@example.invalid' },
     ]) });
@@ -104,26 +114,26 @@ try {
   await page.close();
   await open('h1');
   await page.waitForFunction(() => document.querySelector('h1')?.textContent === '选择要连接的账户');
+  check(await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim()) === '连接其他服务器',
+    'remembered accounts use the existing-account heading and other-server action');
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)));
   check(await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return !(await api.storage.session.get('coffer.connectionDraft'))['coffer.connectionDraft'];
+    return !(await api.storage.session.get('1warden.connectionDraft'))['1warden.connectionDraft'];
   }), 'opening the account picker does not silently select or save its first account');
   await page.close();
   await open('h1');
   check(await page.$eval('h1', (node: Element) => node.textContent) === '选择要连接的账户',
     'reopening keeps the account picker until an account is chosen');
   async function back() {
-    const button = await page.evaluateHandle(() => [...document.querySelectorAll('button')]
-      .find(button => button.textContent?.trim() === '返回'));
+    const button = await page.evaluateHandle(() => document.querySelector('[aria-label="返回上一级"]'));
     check(Boolean(button.asElement()), 'full Add Account form has a Back action');
     if (firefox) await button.evaluate((node: HTMLButtonElement) => node.click());
     else await button.asElement()!.click();
     await button.dispose();
   }
   async function otherServer() {
-    const button = await page.evaluateHandle(() => [...document.querySelectorAll('button')]
-      .find(button => button.textContent?.trim() === '连接其他服务器'));
+    const button = await page.evaluateHandle(() => document.querySelector('[data-add-server]'));
     if (firefox) await button.evaluate((node: HTMLButtonElement) => node.click());
     else await button.asElement()!.click();
     await button.dispose();
@@ -144,7 +154,7 @@ try {
   check(await page.$('[role="alert"]') === null, 'Back removes the abandoned login error');
   await page.waitForFunction(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return !(await api.storage.session.get('coffer.connectionDraft'))['coffer.connectionDraft'];
+    return !(await api.storage.session.get('1warden.connectionDraft'))['1warden.connectionDraft'];
   });
   await otherServer();
   check(await page.$eval('input[type="password"]', (input: HTMLInputElement) => input.value) === '',
@@ -156,7 +166,7 @@ try {
   if (afterBackHeading !== '选择要连接的账户') console.error(await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
     return { heading: document.querySelector('h1')?.textContent,
-      draft: (await api.storage.session.get('coffer.connectionDraft'))['coffer.connectionDraft'] };
+      draft: (await api.storage.session.get('1warden.connectionDraft'))['1warden.connectionDraft'] };
   }));
   check(afterBackHeading === '选择要连接的账户',
     'Back clears the draft so a reopened popup returns to the picker');
@@ -183,12 +193,12 @@ try {
   check(await page.$('[role="alert"]') === null, 'a late failed request cannot restore the abandoned error');
   check(await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return !(await api.storage.session.get('coffer.connectionDraft'))['coffer.connectionDraft'];
+    return !(await api.storage.session.get('1warden.connectionDraft'))['1warden.connectionDraft'];
   }), 'a late failed request cannot recreate the cleared draft');
 
   await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    await api.storage.session.set({ 'coffer.connectionDraft': {
+    await api.storage.session.set({ '1warden.connectionDraft': {
       serverUrl: '', email: '', error: null,
       returnAccount: { serverUrl: 'https://first.example.invalid', email: 'first@example.invalid' },
     } });
@@ -196,9 +206,14 @@ try {
   await page.close();
   await open();
   await back();
+  await page.waitForSelector('main li button');
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '选择要连接的账户',
+    'Back from a resumed Add Account draft returns to the common account home');
+  await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('main li button')]
+    .find(button => button.textContent?.includes('first@example.invalid'))!.click());
   await page.waitForSelector('input[type="password"]');
   check(await page.$('input[type="email"]') === null && await page.evaluate(() => document.body.textContent?.includes('first@example.invalid')),
-    'Back from Add Account selects its original account rather than the generic picker');
+    'a remembered account remains selectable and opens its unlock page after Back');
 } finally {
   await browser?.close();
   server.stop(true);

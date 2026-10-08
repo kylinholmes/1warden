@@ -3,7 +3,7 @@
  *
  * ## 之前的状态
  *
- * `@coffer/api` 里**只有 DTO 类型、没有任何函数**。所以附件的元数据能同步下来，
+ * `@1warden/api` 里**只有 DTO 类型、没有任何函数**。所以附件的元数据能同步下来，
  * 内容却一条都取不回来 —— 用户从别处导入一个带附件的库，
  * 那些附件在服务端躺着，在我们的界面上连「存在」都看不出来。
  *
@@ -30,7 +30,7 @@ export async function refreshAttachmentUrl(
   );
 }
 
-/** 下载附件的**密文**字节。解密是 @coffer/vault 的事 */
+/** 下载附件的**密文**字节。解密是 @1warden/vault 的事 */
 export async function downloadAttachment(
   http: HttpClient, absoluteUrl: string,
 ): Promise<Uint8Array> {

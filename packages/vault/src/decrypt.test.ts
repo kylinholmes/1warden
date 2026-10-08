@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeUserKey, encryptString, encryptBytes } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherDto } from '@coffer/api';
+import { makeUserKey, encryptString, encryptBytes } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import type { CipherDto } from '@1warden/api';
 import { decryptCipher, decryptFolder } from './decrypt';
 
 let key: SymmetricKey;

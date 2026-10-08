@@ -1,4 +1,4 @@
-# Coffer — 设计文档
+# 1Warden — 设计文档
 
 > 一个面向普通个人用户的密码管理器。UI/UX 参考 1Password，后端对接 Vaultwarden（Bitwarden 兼容协议）。
 >
@@ -80,20 +80,20 @@
                 └──────────┬────────────────┘
                            ▼
 ┌───────────────────────────────────────────────────────────┐
-│ @coffer/ui — React 设计系统                                │
+│ @1warden/ui — React 设计系统                                │
 │  纯展示组件：tokens / primitives / 条目视图 / 布局          │
 │  不知道 HTTP、不知道加密，只消费领域对象                     │
 ├───────────────────────────────────────────────────────────┤
-│ @coffer/vault — 领域层                                     │
+│ @1warden/vault — 领域层                                     │
 │  模型 · 同步引擎 · 会话与锁定 · 搜索 · 密码生成 · TOTP      │
 │  把「加密的 JSON」变成「可用的领域对象」                     │
 ├──────────────────────────┬────────────────────────────────┤
-│ @coffer/crypto           │ @coffer/api                    │
+│ @1warden/crypto           │ @1warden/api                    │
 │  Bitwarden 密码学原语     │  Bitwarden REST 客户端          │
 │  纯函数 · 无网络 · 无 UI  │  只认 HTTP 和原始 JSON，不碰解密 │
 └──────────────────────────┴────────────────────────────────┘
                            │
-                    @coffer/i18n (zh-CN / en)
+                    @1warden/i18n (zh-CN / en)
 ```
 
 **为什么把 crypto 和 api 拆开**：`api` 只负责"把字节搬来搬去"，`crypto` 只负责"把字节变明文"。两者都不知道对方存在。这样：
@@ -109,11 +109,11 @@
 ├── tsconfig.base.json
 ├── .npmrc                          # 淘宝源
 ├── packages/
-│   ├── crypto/                     # @coffer/crypto
-│   ├── api/                        # @coffer/api
-│   ├── vault/                      # @coffer/vault
-│   ├── i18n/                       # @coffer/i18n
-│   └── ui/                         # @coffer/ui
+│   ├── crypto/                     # @1warden/crypto
+│   ├── api/                        # @1warden/api
+│   ├── vault/                      # @1warden/vault
+│   ├── i18n/                       # @1warden/i18n
+│   └── ui/                         # @1warden/ui
 ├── apps/
 │   ├── desktop/                    # Tauri 2 + React + Vite
 │   │   ├── src/                    # React 前端
@@ -131,7 +131,7 @@
 
 ## 4. 模块设计
 
-### 4.1 `@coffer/crypto`
+### 4.1 `@1warden/crypto`
 
 **职责**：实现 Bitwarden 客户端密码学。纯函数，无状态，无 I/O。
 
@@ -176,7 +176,7 @@ generateTotp(secret: string, at?: number): Promise<{ code: string; period: numbe
 - 解密失败要抛**结构化错误**（`DecryptError` 带类型），不要静默返回空串。区分"MAC 校验失败"（数据被篡改/密钥错）和"格式不合法"。
 - 常量时间比较 MAC。
 
-### 4.2 `@coffer/api`
+### 4.2 `@1warden/api`
 
 **职责**：Bitwarden/Vaultwarden REST 协议。只处理 HTTP 与原始 JSON。
 
@@ -219,7 +219,7 @@ class BitwardenApi {
 - 请求头模拟官方客户端（`Device-Type`、`Bitwarden-Client-Name`、`Bitwarden-Client-Version`），保证服务端行为一致。
 - **绝不打印含密钥的 body 到日志**。
 
-### 4.3 `@coffer/vault`
+### 4.3 `@1warden/vault`
 
 **职责**：把加密数据变成用户能用的东西。整个应用的"大脑"。
 
@@ -238,7 +238,7 @@ class BitwardenApi {
 - **持久化的只有**：服务器地址、邮箱、加密后的 vault 缓存、设置项。
 - 锁定 = 清空 `session` 中的所有密钥与 `VaultItem`，并尽力覆写原缓冲区。
 
-### 4.4 `@coffer/ui`
+### 4.4 `@1warden/ui`
 
 **职责**：React 设计系统。**纯展示**，不知道网络与加密。
 
@@ -501,7 +501,7 @@ Cipher 可以带自己的 `Key` 字段（用 userKey 加密的 64B 密钥）。�
 
 ### 7.3 相对 1Password 的简化（有意为之）
 
-| 1Password | Coffer | 为什么更好 |
+| 1Password | 1Warden | 为什么更好 |
 |---|---|---|
 | 账户 + 多个 Vault 双层结构 | **单账户单库 + 文件夹** | 个人用户理解不了"Vault"是什么。Vaultwarden 原生模型就是文件夹 |
 | 文件夹 **和** 标签两套组织方式 | **只有文件夹** | 两套并存是认知负担。映射服务端原生模型 |
@@ -546,9 +546,9 @@ Cipher 可以带自己的 `Key` 字段（用 userKey 加密的 64B 密钥）。�
 | # | 里程碑 | 产出 | 验证方式 |
 |---|---|---|---|
 | M1 | 基础设施 | monorepo、本地 Vaultwarden、CI 骨架 | `dev-server.sh` 能起服务并注册用户 |
-| M2 | 密码学核心 | `@coffer/crypto` 全绿 | 与官方 CLI 互操作测试通过 |
-| M3 | API 客户端 | `@coffer/api` | 对真机跑通登录/同步/CRUD 契约测试 |
-| M4 | 领域层 | `@coffer/vault` | 同步/搜索/生成器/TOTP 单测全绿 |
+| M2 | 密码学核心 | `@1warden/crypto` 全绿 | 与官方 CLI 互操作测试通过 |
+| M3 | API 客户端 | `@1warden/api` | 对真机跑通登录/同步/CRUD 契约测试 |
+| M4 | 领域层 | `@1warden/vault` | 同步/搜索/生成器/TOTP 单测全绿 |
 | M5 | 桌面 App | 可用的完整桌面客户端 | 端到端 Playwright 通过，能日常使用 |
 | M6 | 浏览器扩展 | 自动填充 | 在真实网站完成填充 |
 | M7 | 打磨 | 安全报告、i18n、暗色、无障碍 | 安全断言测试 + 无障碍审计 |
@@ -572,6 +572,6 @@ Cipher 可以带自己的 `Key` 字段（用 userKey 加密的 64B 密钥）。�
 
 ## 11. 待确认
 
-- **产品命名**：`Coffer` 为占位名（含义：保险箱），仅出现在品牌位与文案，改名成本 = 改一个常量 + i18n 词条。
+- **产品命名**：`1Warden` 为占位名（含义：保险箱），仅出现在品牌位与文案，改名成本 = 改一个常量 + i18n 词条。
 - **界面语言**：默认 `zh-CN`，内置 `en`，i18n 架构一开始就搭好。
 - **服务端**：开发用本地编译的 Vaultwarden；生产用用户提供的实例（稍后接入）。

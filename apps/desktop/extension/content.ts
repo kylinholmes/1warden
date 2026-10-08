@@ -11,12 +11,12 @@
  * 这样即使页面本身有 XSS、或者有别的扩展想读我们的内存，也拿不到明文。
  */
 import { ext } from './ext-api';
-import { isLikelyLoginForm, type FieldDescriptor } from '@coffer/vault';
+import { isLikelyLoginForm, type FieldDescriptor } from '@1warden/vault';
 import { installInlinePicker } from './inline-picker';
 
 /** 与 background / popup 约定的消息形状 */
 interface FieldsReport {
-  type: 'coffer:fields';
+  type: '1warden:fields';
   url: string;
   fields: FieldDescriptor[];
   isLoginForm: boolean;
@@ -87,7 +87,7 @@ function report(): void {
 
   const fields = readFields();
   const msg: FieldsReport = {
-    type: 'coffer:fields',
+    type: '1warden:fields',
     url: location.href,
     fields,
     isLoginForm: isLikelyLoginForm(fields),
@@ -131,8 +131,8 @@ function onFormSubmit(event: Event): void {
   // 只关心含密码框的表单 —— 搜索框、订阅框提交时不该触发保存提示
   if (!form.querySelector('input[type="password"]')) return;
 
-  console.debug('[coffer] 检测到登录表单提交');
-  ext.runtime.sendMessage({ type: 'coffer:submitted', url: location.href })
+  console.debug('[onewarden] 检测到登录表单提交');
+  ext.runtime.sendMessage({ type: '1warden:submitted', url: location.href })
     .catch(() => { /* 没有接收方是正常情况 */ });
 }
 
@@ -147,7 +147,7 @@ document.addEventListener('keydown', (e) => {
   const el = e.target;
   if (!(el instanceof HTMLInputElement)) return;
   if (el.type !== 'password' && el.form?.querySelector('input[type="password"]') === null) return;
-  ext.runtime.sendMessage({ type: 'coffer:submitted', url: location.href }).catch(() => {});
+  ext.runtime.sendMessage({ type: '1warden:submitted', url: location.href }).catch(() => {});
 }, true);
 
 // ── 注册顺序很重要 ──
@@ -166,7 +166,7 @@ document.addEventListener('keydown', (e) => {
  * 页面可能已经变了。这里按需重新读一遍再回。
  */
 ext.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
-  if ((msg as { type?: string })?.type !== 'coffer:read-fields') return undefined;
+  if ((msg as { type?: string })?.type !== '1warden:read-fields') return undefined;
   const fields = readFields();
   respond({ fields, isLoginForm: isLikelyLoginForm(fields) });
   return true;
@@ -213,7 +213,7 @@ function remember(id: number, reply: unknown): void {
 }
 
 function send(id: number, payload: Record<string, unknown>): void {
-  window.postMessage({ tag: 'coffer:webauthn-reply', id, ...payload }, window.location.origin);
+  window.postMessage({ tag: '1warden:webauthn-reply', id, ...payload }, window.location.origin);
 }
 
 window.addEventListener('message', (event: MessageEvent) => {
@@ -223,12 +223,12 @@ window.addEventListener('message', (event: MessageEvent) => {
   // 探针：MAIN world 用它确认我们已经就位。**只回一个标记，不做任何事** ——
   // 它跑在 document_start，我们跑在 document_idle，它必须等我们。
   // 让重发带副作用（直接重发真正的请求）会让一次 create 执行多遍
-  if (data?.tag === 'coffer:webauthn-ping') {
-    window.postMessage({ tag: 'coffer:webauthn-pong' }, window.location.origin);
+  if (data?.tag === '1warden:webauthn-ping') {
+    window.postMessage({ tag: '1warden:webauthn-pong' }, window.location.origin);
     return;
   }
 
-  if (!data || data.tag !== 'coffer:webauthn' || typeof data.id !== 'number') return;
+  if (!data || data.tag !== '1warden:webauthn' || typeof data.id !== 'number') return;
   const { id } = data;
 
   // 已经回过 —— 再把同一个答案发一次。页面那边可能只是没收到上一条回复
@@ -251,7 +251,7 @@ window.addEventListener('message', (event: MessageEvent) => {
    * 但无论来自谁，能到达的都是 window 自己，所以回给 window 是对的。
    */
   const work: Promise<Record<string, unknown>> = ext.runtime
-    .sendMessage({ type: 'coffer:webauthn', payload: data })
+    .sendMessage({ type: '1warden:webauthn', payload: data })
     .then((reply: unknown) => (reply ?? { ok: false, error: '扩展没有返回结果' }) as Record<string, unknown>)
     .catch((e: unknown) => ({ ok: false, error: e instanceof Error ? e.message : '扩展没有响应' }));
 
@@ -273,7 +273,7 @@ function safeReport(): void {
   try {
     report();
   } catch (e) {
-    console.error('[coffer] 初始上报失败：', e);
+    console.error('[onewarden] 初始上报失败：', e);
   }
 }
 

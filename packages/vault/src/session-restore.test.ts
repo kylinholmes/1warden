@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { makeUserKey } from '@coffer/crypto';
+import { makeUserKey } from '@1warden/crypto';
 import { VaultSession, restoreSession, type AccountInfo } from './session';
 import { emptyLogin, type VaultItem, type VaultFolder } from './model';
 

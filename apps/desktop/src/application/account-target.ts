@@ -1,4 +1,4 @@
-import type { AccountInfo, ConnectParams } from '@coffer/vault';
+import type { AccountInfo, ConnectParams } from '@1warden/vault';
 export type AccountTarget = Pick<ConnectParams, 'serverUrl' | 'email'>;
 
 export function accountKey(target: AccountTarget): string {

@@ -43,8 +43,17 @@ mod autotype;
 #[cfg(desktop)]
 mod save;
 mod hotkey;
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(all(test, target_os = "windows"))]
+#[path = "../build_support.rs"]
+mod build_support;
 #[cfg(desktop)]
 mod tray;
+#[cfg(desktop)]
+mod quick;
+#[cfg(target_os = "windows")]
+mod clipboard;
 #[cfg(target_os = "macos")]
 mod biometric;
 
@@ -106,18 +115,14 @@ fn main_minimize(app: tauri::AppHandle) {
 #[cfg(desktop)]
 #[tauri::command]
 fn quick_hide(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("quick") {
-        let _ = w.hide();
-    }
+    quick::hide(&app);
 }
 
 /// 从快速面板切到主窗口 —— 面板一次只够做一件事，需要完整界面时把主窗口叫出来。
 #[cfg(desktop)]
 #[tauri::command]
 fn quick_open_main(app: tauri::AppHandle) {
-    if let Some(w) = app.get_webview_window("quick") {
-        let _ = w.hide();
-    }
+    quick::hide(&app);
     if let Some(w) = app.get_webview_window("main") {
         let _ = w.show();
         let _ = w.unminimize();
@@ -128,9 +133,43 @@ fn quick_open_main(app: tauri::AppHandle) {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
+        .on_window_event(|window, event| {
+            #[cfg(desktop)]
+            if window.label() == "quick" {
+                match event {
+                    tauri::WindowEvent::Focused(false) => quick::focus_lost(window.app_handle()),
+                    tauri::WindowEvent::CloseRequested { api, .. } => { api.prevent_close(); quick::hide(window.app_handle()); }
+                    _ => {}
+                }
+            }
+            // Keep the primary WebView alive for tray/quick access after closing on Windows.
+            #[cfg(target_os = "windows")]
+            if window.label() == "main" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
+            #[cfg(not(target_os = "windows"))]
+            let _ = (window, event);
+        })
         .invoke_handler(tauri::generate_handler![
             app_version,
             app_updates_supported,
+            #[cfg(target_os = "windows")]
+            clipboard::clipboard_copy,
+            #[cfg(desktop)]
+            quick::quick_status,
+            #[cfg(desktop)]
+            quick::quick_set_enabled,
+            #[cfg(desktop)]
+            quick::quick_window_state,
+            #[cfg(desktop)]
+            quick::quick_set_pinned,
+            #[cfg(target_os = "windows")]
+            windows::window_action,
+            #[cfg(target_os = "windows")]
+            windows::window_theme,
             #[cfg(desktop)]
             restart_app,
             http::http_request,
@@ -167,6 +206,11 @@ pub fn run() {
             let state = http::HttpState::new(dir.join("trusted-certs.json"))
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             app.manage(state);
+            #[cfg(desktop)]
+            {
+                app.manage(quick::QuickState::new(dir.join("quick-search.json")));
+                quick::update_shortcut(app.handle());
+            }
 
             // 菜单栏图标。密码管理器大部分时间不在前台，用户需要它的时候
             // 正在别处登录一个网站 —— 常驻入口比主窗口重要。
@@ -175,22 +219,14 @@ pub fn run() {
             // 图标，那属于系统，不属于应用。所以这里不是降级，是这一节整个不存在。
             #[cfg(desktop)]
             if let Err(e) = tray::install(app.handle()) {
-                eprintln!("[coffer] 菜单栏图标不可用：{e}");
+                eprintln!("[onewarden] 菜单栏图标不可用：{e}");
             }
 
             // 全局快捷键（⌘⇧\）：在别的应用里也能呼出 1Warden。
             // 注册失败**不影响启动** —— 组合键被占用是很常见的情况，
             // 为了这个让应用起不来是本末倒置。
-            #[cfg(target_os = "macos")]
-            if let Err(e) = hotkey::register(
-                app.handle().clone(),
-                hotkey::DEFAULT_KEYCODE,
-                hotkey::MOD_CMD | hotkey::MOD_SHIFT,
-            ) {
-                eprintln!("[coffer] 全局快捷键不可用：{e}");
-            }
+            // Registration is owned by quick::QuickState and follows the saved preference.
 
-            // 开发期打开 devtools 会方便很多；发布版刻意没有这个入口 ——
             // 密码管理器不该在正式版里留一个能看到内存中明文的调试器。
             //
             // ⚠️ 移动端另一个概念：那边是 Safari 的 Web Inspector，由**构建设置**
@@ -208,7 +244,14 @@ pub fn run() {
     #[cfg(desktop)]
     let builder = builder.plugin(tauri_plugin_updater::Builder::new().build());
 
+    let context = tauri::generate_context!();
+    #[cfg(target_os = "windows")]
+    let context = {
+        let mut context = context;
+        windows::configure_effects(context.config_mut());
+        context
+    };
     builder
-        .run(tauri::generate_context!())
+        .run(context)
         .expect("启动 1Warden 失败");
 }

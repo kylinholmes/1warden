@@ -3,7 +3,7 @@
  *
  * ## 为什么要自己写
  *
- * 现实约束：MV3 的 service worker 里**没有 `DOMParser`**，而 `@coffer/vault`
+ * 现实约束：MV3 的 service worker 里**没有 `DOMParser`**，而 `@1warden/vault`
  * 要在扩展里跑。引一个 XML 库则要连 DOM 仿真一起引进来 —— 为了一份
  * KeePass 导出的解析，代价太大。
  *

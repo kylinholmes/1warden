@@ -1,17 +1,17 @@
 import { lockedAccount } from '../src/application/account-target';
-import { validateProfile } from '@coffer/vault';
+import { validateProfile, validatePreferences, validateDevice } from '@1warden/vault';
 import type { ApplicationMethod, ApplicationRequest, ApplicationService } from '../src/application/types';
 
 type Sender = { id?: string | undefined; url?: string | undefined; frameId?: number | undefined; tab?: { id?: number | undefined } | undefined };
 type Runtime = { id: string; getURL(path: string): string };
 
-const contentRequests = new Set(['coffer:fields', 'coffer:submitted', 'coffer:webauthn']);
-const inlineRequests = new Set(['coffer:inline-accounts', 'coffer:inline-fill', 'coffer:inline-unlock']);
+const contentRequests = new Set(['1warden:fields', '1warden:submitted', '1warden:webauthn']);
+const inlineRequests = new Set(['1warden:inline-accounts', '1warden:inline-fill', '1warden:inline-unlock']);
 const pageRequests = new Set([
-  'coffer:application', 'coffer:context', 'coffer:fill', 'coffer:save-capture',
-  'coffer:dismiss-capture', 'coffer:clipboard-copied',
+  '1warden:application', '1warden:context', '1warden:fill', '1warden:save-capture',
+  '1warden:dismiss-capture', '1warden:clipboard-copied',
   // Existing automation clients; the application itself uses only the typed API.
-  'coffer:connect', 'coffer:list', 'coffer:matches', 'coffer:pending', 'coffer:copy', 'coffer:lock',
+  '1warden:connect', '1warden:list', '1warden:matches', '1warden:pending', '1warden:copy', '1warden:lock',
 ]);
 
 /** Extension IDs alone do not distinguish content scripts from the trusted UI. */
@@ -107,6 +107,14 @@ const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
     if (a.length !== 2 || (a[1] !== null && !string(a[1]))) return false;
     try { validateProfile(a[0]); return true; } catch { return false; }
   },
+  savePreferences: (a) => {
+    if (a.length !== 2) return false;
+    try { validatePreferences(a[0]); if (a[1] !== null) validatePreferences(a[1]); return true; } catch { return false; }
+  },
+  recordDevice: (a) => {
+    if (a.length !== 1) return false;
+    try { validateDevice(a[0]); return true; } catch { return false; }
+  },
   connect: (a) => {
     const params = a[0];
     return a.length === 1 && object(params) && ['serverUrl', 'email', 'masterPassword'].every((k) => string(params[k]));
@@ -127,14 +135,21 @@ const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
 };
 
 const mutations = new Set<ApplicationMethod>([
-  'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'toggleFavorite',
+  'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'savePreferences', 'recordDevice', 'toggleFavorite',
   'moveToTrash', 'deletePermanently', 'createFolder', 'renameFolder', 'deleteFolder', 'importData',
+]);
+
+/** In-memory reads must not wait for network writes or an unresponsive webpage. */
+export const LOCAL_READS = new Set<ApplicationMethod>([
+  'snapshot', 'search', 'getItem', 'getDraft', 'reveal', 'totp', 'securityReport',
 ]);
 
 function invoke(service: ApplicationService, request: ApplicationRequest): Promise<unknown> {
   // Explicit dispatch prevents inherited methods or new VaultClient methods from becoming RPCs.
   switch (request.method) {
     case 'saveProfile': return service.saveProfile(...request.args);
+    case 'savePreferences': return service.savePreferences(...request.args);
+    case 'recordDevice': return service.recordDevice(...request.args);
     case 'switchAccount': return service.switchAccount(...request.args);
     case 'snapshot': return service.snapshot(...request.args);
     case 'connect': return service.connect(...request.args);
@@ -213,14 +228,14 @@ export function createApplicationDispatcher(service: ApplicationService | (() =>
         }
       }
     };
-    // Opening the UI must not wait for a pending login, sync, or network write.
+    // Browsing must not wait for a pending login, sync, write, or webpage message.
     // Restoration, lock cleanup, and generation checks still apply to this read.
-    if (method !== 'snapshot') return run(execute);
+    if (!LOCAL_READS.has(method)) return run(execute);
     try { return await execute(); }
     catch (error) {
       // Restoration can discover expiry and lock the old generation. Only this
       // side-effect-free read may restart to return the current locked snapshot.
-      if (version !== epoch) return dispatch(input);
+      if (method === 'snapshot' && version !== epoch) return dispatch(input);
       throw error;
     }
   };

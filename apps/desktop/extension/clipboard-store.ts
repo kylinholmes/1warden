@@ -1,8 +1,8 @@
-import { CLIPBOARD_CLEAR_MS } from '@coffer/ui/clipboard';
+import { CLIPBOARD_CLEAR_MS } from '@1warden/ui/clipboard';
 import type { StorageArea } from './session-store';
 import { createSerialRunner } from './application-rpc';
 
-const KEY = 'coffer.clipboard';
+const KEY = '1warden.clipboard';
 
 /** Firefox's event page can stop; the alarm and expected value therefore live outside the popup. */
 export function createClipboardStore(options: {

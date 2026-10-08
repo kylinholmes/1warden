@@ -7,7 +7,7 @@
  * 「存到哪」必须由系统对话框回答 —— 见 `src-tauri/src/save.rs` 的说明。
  */
 import { invoke } from '@tauri-apps/api/core';
-import { IS_DESKTOP } from '@coffer/ui';
+import { IS_DESKTOP } from '@1warden/ui';
 import { toBase64 } from './base64';
 
 export interface SaveOutcome {

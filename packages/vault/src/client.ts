@@ -1,5 +1,5 @@
 /**
- * 把 @coffer/api 与 @coffer/vault 接起来的一层。
+ * 把 @1warden/api 与 @1warden/vault 接起来的一层。
  *
  * 这一层是**唯一**知道「怎么从服务器地址+邮箱+主密码走到一个可用的保险库」的地方。
  * UI 只跟它打交道，不直接碰 HTTP 或密码学。
@@ -10,19 +10,19 @@ import {
   HttpClient, prelogin, loginWithPassword, refreshToken, DEVICE_TYPE,
   refreshAttachmentUrl, downloadAttachment, createAttachmentV2, uploadAttachmentBytes,
   type DeviceInfo, type TokenResponse,
-} from '@coffer/api';
+} from '@1warden/api';
 import {
   deriveMasterKey, hashMasterPassword, stretchMasterKey, decryptBytes,
   encryptString, makeUserKey,
   zeroizeKey,
   KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
   type SymmetricKey, type KdfConfig,
-} from '@coffer/crypto';
+} from '@1warden/crypto';
 import { VaultSession, restoreSession } from './session';
 import { SyncEngine, type SyncCache, type KdfCache } from './sync-engine';
 import { decryptCipher, decryptFolder } from './decrypt';
 import { unwrapAttachmentKey, decryptAttachmentContent } from './attachments';
-import { encryptBytes } from '@coffer/crypto';
+import { encryptBytes } from '@1warden/crypto';
 import type { SessionStatus, StoredSession } from './session';
 import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
@@ -452,7 +452,7 @@ export class VaultClient {
   private authHeaders(): () => Record<string, string> {
     return () => ({
       Authorization: `Bearer ${this.token?.accessToken ?? ''}`,
-      // 名称与版本号由 @coffer/api 的 HttpClient 默认带上（那里是唯一的来源），
+      // 名称与版本号由 @1warden/api 的 HttpClient 默认带上（那里是唯一的来源），
       // 这里只补客户端特有的设备类型
       'Device-Type': String(this.device.type),
     });
@@ -1065,7 +1065,7 @@ export interface DeviceIdStore {
   clear(): Promise<void> | void;
 }
 
-const DEVICE_KEY = 'coffer.deviceId';
+const DEVICE_KEY = '1warden.deviceId';
 
 const localStorageDeviceStore: DeviceIdStore = {
   get: () => localStorage.getItem(DEVICE_KEY),
@@ -1088,8 +1088,8 @@ import {
   setArchived as setArchivedApi, updateCipherPartial,
   createFolder as createFolderApi, updateFolder as updateFolderApi,
   deleteFolder as deleteFolderApi,
-} from '@coffer/api';
-// ⚠️ 这两个原来是 `from '@coffer/vault'` —— 那份文件曾经住在 apps/desktop，
+} from '@1warden/api';
+// ⚠️ 这两个原来是 `from '@1warden/vault'` —— 那份文件曾经住在 apps/desktop，
 // 搬到包里之后就成了自引用。tsc 能解析所以一直没报错，但它是错的。
 import { encryptCipher } from './encrypt';
 

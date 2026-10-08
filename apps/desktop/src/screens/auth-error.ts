@@ -1,4 +1,4 @@
-import type { TwoFactorChallenge } from '@coffer/vault';
+import type { TwoFactorChallenge } from '@1warden/vault';
 
 /** Shared by first connection and re-unlock, including errors received over RPC. */
 export function twoFactorChallenge(error: unknown): TwoFactorChallenge | null {

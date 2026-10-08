@@ -1,7 +1,7 @@
 @import 'tailwindcss';
 
 /*
- * Coffer 设计系统 ——「一件安静的器具」。
+ * 1Warden 设计系统 ——「一件安静的器具」。
  *
  * 比例参照本机 1Password 8.12.34 的实测值（4px 间距基准、三档圆角、
  * 分层表面色、描边为主的层级），但**值全部是我们自己的**。
@@ -28,8 +28,8 @@
  * 换主题时不会出现色相偏移。
  */
 /* 设计令牌在共享包里 —— 见 packages/ui/src/theme.css 顶部的说明 */
-@import '@coffer/ui/theme.css';
-@import '@coffer/ui/components.css';
+@import '@1warden/ui/theme.css';
+@import '@1warden/ui/components.css';
 
 /*
  * ⚠️ 必须告诉 Tailwind 去扫**共享包**。
@@ -42,6 +42,63 @@
  * 表现是「详情里两个分组贴在一起」，而两端各自看代码都完全正常。
  */
 @source '../../../packages/ui/src';
+
+/* Account identity is quiet chrome, not a second selected navigation item. */
+.account-menu-trigger {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-width: 0;
+  min-height: 40px; padding: 4px 6px; border-radius: var(--radius-sm); text-align: left;
+  transition: background var(--dur-fast);
+}
+.account-menu-trigger:hover, .account-menu-trigger[aria-expanded='true'] {
+  background: color-mix(in srgb, var(--ink-secondary) 7%, transparent);
+}
+.account-menu-current { display: flex; align-items: flex-start; gap: 10px; padding: 10px 8px; }
+.account-menu-action { min-height: 38px; }
+.account-menu-action > svg { color: var(--ink-secondary); }
+.account-menu-action:last-of-type > svg { color: inherit; }
+
+/* All palettes reuse the same translucent chrome, including the Windows override below. */
+:root[data-palette]:not([data-palette='original']) {
+  --surface-glass: color-mix(in srgb, var(--surface-chrome) 84%, transparent);
+}
+.appearance-mode-row { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 12px; padding: 14px; }
+.appearance-modes { display: flex; gap: 8px; }
+.appearance-mode { width: 76px; padding: 3px; border-radius: 8px; font-size: 11px; color: var(--ink-secondary); }
+.appearance-mode[aria-pressed='true'] { color: var(--ink-primary); }
+.appearance-mode-preview {
+  display: flex; flex-direction: column; align-items: flex-end; gap: 5px; height: 49px;
+  padding: 10px 9px 6px 25px; margin-bottom: 5px; border: 1px solid #bbbbbb; border-radius: 6px;
+  background: linear-gradient(90deg, #ececec 20%, #ffffff 20%); position: relative;
+}
+.appearance-mode-preview i { display: block; height: 3px; width: 100%; background: #c5c5c5; border-radius: 2px; }
+.appearance-mode-preview i:nth-child(2) { width: 70%; background: #6b83ae; }
+.appearance-mode-preview.mode-dark { background: linear-gradient(90deg, #181818 20%, #272727 20%); border-color: #555555; }
+.mode-dark i { background: #787878; }
+.appearance-mode-preview.mode-system { background: linear-gradient(90deg, #ececec 20%, #ffffff 20%, #ffffff 50%, #272727 50%); }
+.appearance-mode[aria-pressed='true'] .appearance-mode-preview { outline: 2px solid var(--accent-ring); outline-offset: 2px; }
+.appearance-palette-card { padding: 0 14px; overflow: visible; }
+.appearance-palette-control { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; position: relative; padding-block: 12px; }
+.palette-trigger { display: flex; align-items: center; gap: 8px; width: 174px; min-height: 38px; padding: 5px 10px 5px 6px; border-radius: 20px; border: 1px solid var(--border-strong); background: var(--surface-well); font-size: 13px; text-align: left; }
+.palette-letter { display: grid; place-items: center; width: 25px; height: 25px; flex: none; border: 1px solid color-mix(in srgb, currentColor 20%, transparent); border-radius: 50%; font-size: 11px; font-weight: 600; }
+.palette-options { position: absolute; z-index: 5; inset: 56px 0 auto auto; width: min(248px, 100%); max-height: 224px; overflow-y: auto; overscroll-behavior: contain; padding: 5px; background: var(--surface-overlay); border: 1px solid var(--border-overlay); border-radius: var(--radius-md); box-shadow: var(--elev-pop); }
+.palette-options-label { padding: 5px 8px; color: var(--ink-tertiary); font-size: 11px; }
+.palette-options button { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 6px 8px; border-radius: 5px; text-align: left; font-size: 13px; }
+.palette-options button:hover, .palette-options button:focus-visible { background: var(--surface-hover); }
+.appearance-swatches > div { display: flex; justify-content: space-between; align-items: center; gap: 10px; min-height: 45px; border-top: 1px solid var(--border-subtle); font-size: 13px; }
+.palette-color { display: flex; align-items: center; gap: 7px; color: var(--ink-secondary); font-family: var(--font-secret); font-size: 11px; }
+.palette-color i { width: 15px; height: 15px; border-radius: 50%; background: var(--swatch); border: 1px solid var(--border-strong); }
+.quick-setting-toggle { display: flex; align-items: center; width: 38px; height: 24px; padding: 3px; border-radius: 15px; background: var(--border-strong); }
+.quick-setting-toggle span { width: 18px; height: 18px; border-radius: 50%; background: var(--surface-paper); }
+.quick-setting-toggle[aria-checked='true'] { background: var(--accent); }
+.quick-setting-toggle[aria-checked='true'] span { transform: translateX(14px); background: var(--accent-ink); }
+.quick-setting-toggle:disabled { opacity: .5; }
+:root[data-quick-window] { --titlebar-h: 0px; background: transparent; }
+:root[data-quick-window] body, :root[data-quick-window] #root { background: transparent; }
+.quick-panel { box-shadow: none; }
+@media (width < 900px) {
+  .account-menu-action { min-height: 44px; }
+  .palette-options button { min-height: 44px; }
+}
 
 :root {
   /*
@@ -56,6 +113,43 @@
 :root[data-os='mac'] {
   --titlebar-h: 28px;
 }
+
+/* Windows-only immersive chrome. Browser and mobile builds keep their own safe areas. */
+:root[data-native-titlebar='windows'] {
+  --titlebar-h: 36px;
+  --surface-glass: color-mix(in srgb, var(--surface-chrome) 72%, transparent);
+}
+.windows-titlebar {
+  position: fixed;
+  inset: 0 0 auto;
+  height: var(--titlebar-h);
+  display: flex;
+  z-index: 80;
+  background: var(--surface-glass);
+  border-bottom: 1px solid var(--border-subtle);
+  color: var(--ink-secondary);
+  user-select: none;
+}
+.windows-titlebar-drag {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+  min-width: 0;
+  padding-inline: 14px;
+  font-size: 12px;
+}
+.windows-window-controls { display: flex; flex: none; }
+.windows-window-controls button {
+  display: grid;
+  place-items: center;
+  width: 46px;
+  height: 100%;
+  color: var(--ink-primary);
+}
+.windows-window-controls button:hover { background: var(--surface-hover); }
+.windows-window-controls button.windows-close:hover { background: #c42b1c; color: white; }
+.windows-window-controls svg { fill: none; stroke: currentColor; stroke-width: 1; }
 
 /*
  * ── 移动端：顶上让出的是**安全区**，不是标题栏 ──────────────────────
@@ -391,21 +485,21 @@ input[type='range'] {
  */
 
 /* 整屏进场 —— 解锁屏 → 保险库、连接屏 → 解锁屏 */
-@keyframes coffer-screen-in {
+@keyframes onewarden-screen-in {
   from { opacity: 0; transform: translateY(6px) scale(0.995); }
   to { opacity: 1; transform: none; }
 }
-.screen-in { animation: coffer-screen-in var(--dur-base) var(--ease-enter) both; }
+.screen-in { animation: onewarden-screen-in var(--dur-base) var(--ease-enter) both; }
 
 /* 右侧详情换了一条记录 —— 只淡入，不位移：位移会让长内容显得在抖 */
-.fade-in { animation: coffer-fade-in var(--dur-fast) var(--ease-enter) both; }
+.fade-in { animation: onewarden-fade-in var(--dur-fast) var(--ease-enter) both; }
 
 /* 验证码换了一组 —— 提醒用户「这是新的了」，但别闪得刺眼 */
-@keyframes coffer-code-turn {
+@keyframes onewarden-code-turn {
   0% { opacity: 0.35; }
   100% { opacity: 1; }
 }
-.code-turn { animation: coffer-code-turn 420ms var(--ease-enter) both; }
+.code-turn { animation: onewarden-code-turn 420ms var(--ease-enter) both; }
 
 /*
  * 解锁进行中 —— 头像外圈缓缓向外扩散。
@@ -414,15 +508,15 @@ input[type='range'] {
  * 往返，通常接近一秒）。这段时间界面如果完全不动，用户会怀疑自己没点上，
  * 然后去点第二下。让它动，但只动一点点 —— 这是**等待**的反馈，不是庆祝。
  */
-@keyframes coffer-breathe {
+@keyframes onewarden-breathe {
   0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--accent) 38%, transparent); }
   60% { box-shadow: 0 0 0 10px color-mix(in oklab, var(--accent) 0%, transparent); }
 }
-.breathe { animation: coffer-breathe 1.5s var(--ease-move) infinite; }
+.breathe { animation: onewarden-breathe 1.5s var(--ease-move) infinite; }
 
 /* 转圈 —— 用在「正在解锁」「查询中」 */
-@keyframes coffer-spin { to { transform: rotate(360deg); } }
-.spin { animation: coffer-spin 700ms linear infinite; }
+@keyframes onewarden-spin { to { transform: rotate(360deg); } }
+.spin { animation: onewarden-spin 700ms linear infinite; }
 
 /*
  * 浮层的进出。
@@ -441,13 +535,22 @@ input[type='range'] {
  * 从右下角偏右一点点滑进来 —— 位移只有 10px，够表达「从边上进来」，
  * 又不至于让用户去追它。出场只淡出 + 微缩：它已经不在焦点上了。
  */
-@keyframes coffer-toast-in {
+@keyframes onewarden-toast-in {
   from { opacity: 0; transform: translateX(10px) scale(0.98); }
   to { opacity: 1; transform: none; }
 }
-@keyframes coffer-toast-out {
+@keyframes onewarden-toast-out {
   from { opacity: 1; transform: none; }
   to { opacity: 0; transform: scale(0.98); }
 }
-.toast-in { animation: coffer-toast-in var(--dur-base) var(--ease-enter) both; }
-.toast-out { animation: coffer-toast-out var(--dur-fast) var(--ease-move) both; }
+.toast-in { animation: onewarden-toast-in var(--dur-base) var(--ease-enter) both; }
+.toast-out { animation: onewarden-toast-out var(--dur-fast) var(--ease-move) both; }
+/* Local, responsive avatar editor. The circular mask previews the displayed avatar. */
+.avatar-cropper { border-top: 1px solid var(--border-subtle); padding-top: 12px; }
+.avatar-crop-frame { position: relative; width: min(100%, 280px); aspect-ratio: 1; margin-inline: auto; overflow: hidden; border-radius: var(--radius-md); background: var(--surface-well); touch-action: none; cursor: grab; user-select: none; }
+.avatar-crop-frame:active { cursor: grabbing; }
+.avatar-crop-frame img { position: absolute; max-width: none; pointer-events: none; }
+.avatar-crop-mask { position: absolute; inset: 0; border: 1px solid #ffffffb3; border-radius: 50%; box-shadow: 0 0 0 80px #0005; pointer-events: none; }
+.avatar-crop-zoom { display: flex; align-items: center; gap: 12px; margin-block: 8px; font-size: var(--text-xs); }
+.avatar-crop-zoom input { min-width: 0; flex: 1; height: 44px; accent-color: var(--accent); }
+.avatar-crop-zoom output { width: 4ch; font-variant-numeric: tabular-nums; }

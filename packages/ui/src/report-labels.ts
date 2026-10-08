@@ -14,7 +14,7 @@
  * 取值以桌面端为准（它是参考实现）。`WEAK_REASON` 两边本来就逐字相同，
  * 一并收进来免得将来漂。
  *
- * ⚠️ 键要和 `@coffer/vault` 的 `WeakFinding.reason` / `ScoreGrade` 对齐 ——
+ * ⚠️ 键要和 `@1warden/vault` 的 `WeakFinding.reason` / `ScoreGrade` 对齐 ——
  * 那边加一个枚举值，这里就要跟着加，否则界面上会显示成机器串。
  */
 export type ScoreGrade = 'excellent' | 'good' | 'fair' | 'poor' | 'critical';

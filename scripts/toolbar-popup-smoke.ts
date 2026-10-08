@@ -9,16 +9,16 @@ import { pathToFileURL } from 'node:url';
 const product = process.argv[2];
 if (product !== 'edge' && product !== 'zen') throw new Error('Usage: bun scripts/toolbar-popup-smoke.ts edge|zen');
 const engine = product === 'edge' ? 'chrome' : 'firefox';
-const headless = process.env.COFFER_SMOKE_HEADED !== '1';
-const executable = process.env[`COFFER_${product.toUpperCase()}`] ?? (product === 'edge'
+const headless = process.env.ONEWARDEN_SMOKE_HEADED !== '1';
+const executable = process.env[`ONEWARDEN_${product.toUpperCase()}`] ?? (product === 'edge'
   ? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' : '/Applications/Zen.app/Contents/MacOS/zen');
 if (!existsSync(executable)) throw new Error(`Browser not found: ${executable}`);
-const modulePath = process.env.COFFER_PUPPETEER;
+const modulePath = process.env.ONEWARDEN_PUPPETEER;
 const { default: puppeteer } = await import(modulePath ? pathToFileURL(resolve(modulePath)).href : 'puppeteer-core');
-const dist = resolve(process.env.COFFER_TOOLBAR_DIST ?? join(import.meta.dir, '../apps/desktop', product === 'edge' ? 'dist-extension' : 'dist-firefox'));
-const output = resolve(process.env.COFFER_SMOKE_OUT ?? join(tmpdir(), 'coffer-toolbar-smoke'));
+const dist = resolve(process.env.ONEWARDEN_TOOLBAR_DIST ?? join(import.meta.dir, '../apps/desktop', product === 'edge' ? 'dist-extension' : 'dist-firefox'));
+const output = resolve(process.env.ONEWARDEN_SMOKE_OUT ?? join(tmpdir(), 'onewarden-toolbar-smoke'));
 mkdirSync(output, { recursive: true });
-const profile = mkdtempSync(join(tmpdir(), `coffer-toolbar-${product}-`));
+const profile = mkdtempSync(join(tmpdir(), `onewarden-toolbar-${product}-`));
 const uuid = '47bf0b27-4904-4824-8456-6619fc76c3a1';
 function files(directory: string, prefix = ''): string[] {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => entry.isDirectory()
@@ -44,7 +44,7 @@ try {
     ...(engine === 'chrome' ? { pipe: true, args: ['--window-size=1200,900',
       ...(headless ? ['--screen-info={1600x1200}'] : [])] } : {
       args: ['--remote-allow-system-access', '--width=1200', '--height=900'],
-      extraPrefsFirefox: { 'extensions.webextensions.uuids': JSON.stringify({ 'coffer@coffer.app': uuid }) },
+      extraPrefsFirefox: { 'extensions.webextensions.uuids': JSON.stringify({ '1warden@1warden.app': uuid }) },
     }),
   });
   version = await browser.version();
@@ -137,7 +137,7 @@ try {
       reprompt: 0, createdAt: '2026-01-01T00:00:00Z', updatedAt: '2026-01-01T00:00:00Z',
       deletedAt: null, archivedAt: null, wrappedKey: null, login: null, card: null, identity: null,
       secureNote: { type: 0 }, sshKey: null, customFields: [], passwordHistory: [], attachments: [] };
-    await api.storage.session.set({ 'coffer.account': account, 'coffer.session': { account,
+    await api.storage.session.set({ '1warden.account': account, '1warden.session': { account,
       userKey: { encKey: btoa(String.fromCharCode(...new Uint8Array(32).fill(17))),
         macKey: btoa(String.fromCharCode(...new Uint8Array(32).fill(23))) },
       items: [item], folders: [], token: null, expiresAt: Date.now() + 900000 } });

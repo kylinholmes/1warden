@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { detectOs } from './platform';
+import { detectOs, primaryShortcut, quickShortcut } from './platform';
 
 /**
  * ⚠️ 这一组测试守的是一个**只在真机上才看得见**的 bug。
@@ -52,5 +52,17 @@ describe('detectOs', () => {
   it('认不出来就给 other，不抛错也不猜', () => {
     expect(detectOs('')).toBe('other');
     expect(detectOs('Mozilla/5.0 (X11; Linux x86_64)')).toBe('other');
+  });
+});
+
+describe('platform shortcuts', () => {
+  it('uses Ctrl for Windows and Command for macOS', () => {
+    expect(primaryShortcut('N', 'win')).toBe('Ctrl+N');
+    expect(primaryShortcut('N', 'mac')).toBe('⌘N');
+    expect(primaryShortcut('N', 'ios')).toBe('⌘N');
+  });
+  it('matches each native quick-access registration', () => {
+    expect(quickShortcut('win')).toBe('Ctrl+Shift+\\');
+    expect(quickShortcut('mac')).toBe('⌘⇧\\');
   });
 });

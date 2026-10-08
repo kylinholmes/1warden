@@ -1,20 +1,20 @@
-# Coffer 计划 1：基础设施 + 密码学核心
+# 1Warden 计划 1：基础设施 + 密码学核心
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 建立 monorepo 骨架与本地 Vaultwarden 测试服务，并实现经**官方 Bitwarden CLI 互操作验证**的 Bitwarden 客户端密码学库 `@coffer/crypto`。
+**Goal:** 建立 monorepo 骨架与本地 Vaultwarden 测试服务，并实现经**官方 Bitwarden CLI 互操作验证**的 Bitwarden 客户端密码学库 `@1warden/crypto`。
 
 **Architecture:** 纯函数式密码学库，无状态、无 I/O、无网络，全部密钥显式传参。密钥派生用 `hash-wasm`（Argon2id/PBKDF2 的 WASM 实现，浏览器与 Node 通用），对称加密与 RSA 用 WebCrypto 原生 API。HKDF-Expand 需手写（WebCrypto 的 HKDF 强制做 extract+expand，与 Bitwarden 只做 expand 的语义不符）。
 
 **Tech Stack:** Bun workspaces · TypeScript (strict) · Vitest · hash-wasm · WebCrypto · Vaultwarden 1.37.3（本地编译）
 
-**Spec:** `docs/superpowers/specs/2026-10-04-coffer-design.md`
+**Spec:** `docs/superpowers/specs/2026-10-04-onewarden-design.md`
 
 ## Global Constraints
 
 - **包管理器**：`bun`（registry 已在 `bunfig.toml` / `.npmrc` 指向 `https://registry.npmmirror.com`）
 - **TypeScript**：`strict: true`，`noUncheckedIndexedAccess: true`，不允许 `any`（用 `unknown` + 收窄）
-- **`@coffer/crypto` 零网络、零 I/O、零全局状态**：所有密钥必须作为参数传入
+- **`@1warden/crypto` 零网络、零 I/O、零全局状态**：所有密钥必须作为参数传入
 - **绝不记录敏感数据**：密码、密钥、明文、token 不得出现在 `console.*`、错误消息或测试快照中
 - **解密失败必须抛错**，不得静默返回空串
 - **MAC 比较必须常量时间**
@@ -49,7 +49,7 @@
 
 ```json
 {
-  "name": "coffer",
+  "name": "onewarden",
   "private": true,
   "type": "module",
   "workspaces": ["packages/*", "apps/*"],
@@ -138,7 +138,7 @@ git commit -m "chore: bootstrap bun workspaces monorepo"
 
 **Interfaces:**
 - Consumes: 无
-- Produces: `scripts/dev-server.sh start|stop|reset|status` —— 在 `http://127.0.0.1:8080` 提供干净可重置的 Vaultwarden；数据目录 `.dev/vaultwarden-data/`；测试账号 `coffer-test@example.com` / `Test-Master-Password-123!`
+- Produces: `scripts/dev-server.sh start|stop|reset|status` —— 在 `http://127.0.0.1:8080` 提供干净可重置的 Vaultwarden；数据目录 `.dev/vaultwarden-data/`；测试账号 `onewarden-test@example.com` / `Test-Master-Password-123!`
 
 > **背景**：Vaultwarden 官方 **不发布 macOS 预编译二进制**（1.37.3 的 GitHub release 无任何 asset），Homebrew 也没有 formula。所以走 **cargo 从源码编译**，产出纯原生 arm64 可执行文件，不用虚拟机。crates 走已配置好的 rsproxy 镜像，编译有 sccache 加速。
 
@@ -199,8 +199,8 @@ export VW_PIDFILE="$ROOT/.dev/vaultwarden.pid"
 export VW_LOG="$ROOT/.dev/vaultwarden.log"
 
 # 测试账号（仅供本地开发）
-export COFFER_TEST_EMAIL="coffer-test@example.com"
-export COFFER_TEST_PASSWORD='Test-Master-Password-123!'
+export ONEWARDEN_TEST_EMAIL="onewarden-test@example.com"
+export ONEWARDEN_TEST_PASSWORD='Test-Master-Password-123!'
 
 export VW_ENV=(
   "DATA_FOLDER=$VW_DATA"
@@ -286,7 +286,7 @@ Expected: `/api/config` 返回 JSON，含 `"version"` 字段（形如 `"2026.4.0
 ```bash
 curl -fsS -X POST http://127.0.0.1:8080/identity/accounts/prelogin \
   -H 'Content-Type: application/json' \
-  -d '{"email":"coffer-test@example.com"}'
+  -d '{"email":"onewarden-test@example.com"}'
 ```
 
 Expected: `{"Kdf":0,"KdfIterations":600000,...}` —— 记下实际的 `Kdf` 与 `KdfIterations` 值，Task 4 的测试向量要用
@@ -300,7 +300,7 @@ git commit -m "chore: add native Vaultwarden dev server scripts (cargo build, no
 
 ---
 
-## Task 3: `@coffer/crypto` 包骨架 + 字节工具
+## Task 3: `@1warden/crypto` 包骨架 + 字节工具
 
 **Files:**
 - Create: `packages/crypto/package.json`
@@ -327,7 +327,7 @@ git commit -m "chore: add native Vaultwarden dev server scripts (cargo build, no
 `packages/crypto/package.json`:
 ```json
 {
-  "name": "@coffer/crypto",
+  "name": "@1warden/crypto",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -2135,7 +2135,7 @@ git commit -m "feat(crypto): add password/passphrase generator with unbiased sam
 - Modify: `package.json`（新增 `test:interop` 脚本）
 
 **Interfaces:**
-- Consumes: `@coffer/crypto` 全部公开 API；Task 2 的 `scripts/dev-env.sh` 中的测试账号常量
+- Consumes: `@1warden/crypto` 全部公开 API；Task 2 的 `scripts/dev-env.sh` 中的测试账号常量
 - Produces: `bun run test:interop` —— 退出码 0 表示密码学与官方实现兼容
 
 > **这是整个计划里最重要的一个任务。**
@@ -2162,7 +2162,7 @@ Expected: `bw --version` 输出版本号（形如 `2026.x.x`）
 ```ts
 #!/usr/bin/env bun
 /**
- * 互操作测试：证明 @coffer/crypto 与官方 Bitwarden 实现字节级兼容。
+ * 互操作测试：证明 @1warden/crypto 与官方 Bitwarden 实现字节级兼容。
  *
  * 方向 A：我们用 bw 创建账户 + 写入条目 → 用我们的 crypto 解出正确明文
  * 方向 B：我们用 bw 读取 → 确认 bw 能解出我们自己加密的数据
@@ -2176,8 +2176,8 @@ import {
 } from '../packages/crypto/src/index';
 
 const BASE = process.env.VW_URL ?? 'http://127.0.0.1:8080';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -2226,7 +2226,7 @@ async function token(email: string, masterPasswordHash: string) {
     client_id: 'cli',
     deviceType: '8',
     deviceIdentifier: crypto.randomUUID(),
-    deviceName: 'coffer-interop',
+    deviceName: 'onewarden-interop',
   });
   const r = await fetch(`${BASE}/identity/connect/token`, {
     method: 'POST',
@@ -2404,8 +2404,8 @@ main().catch((e) => { console.error(e); process.exit(1); });
 import { execFileSync } from 'node:child_process';
 
 const BASE = process.env.VW_URL ?? 'http://127.0.0.1:8080';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 
 console.log(`→ 配置 CLI 指向 ${BASE}`);
 execFileSync('bw', ['config', 'server', BASE], { stdio: 'inherit' });
@@ -2475,7 +2475,7 @@ git commit -m "test(crypto): add cross-implementation interop test against offic
 - [ ] 全仓 `grep -rn "console.log" packages/crypto/src` 无输出（库代码不得打印）
 - [ ] `packages/crypto` 无任何网络调用、无 `fs` 导入
 
-**下一份计划**：计划 2 —— `@coffer/api`（Bitwarden REST 客户端）+ `@coffer/vault`（领域层：同步引擎、会话状态机、搜索、Watchtower）。
+**下一份计划**：计划 2 —— `@1warden/api`（Bitwarden REST 客户端）+ `@1warden/vault`（领域层：同步引擎、会话状态机、搜索、Watchtower）。
 
 ---
 
@@ -2502,7 +2502,7 @@ Executor: inline (executing-plans)
 | Task 5 → 6 | `parseEncString`, `serializeEncString`, `EncryptionType`, `DecryptError`, `aesCbcEncrypt`, `aesCbcDecrypt`, `hmacSha256` | ✓ 一致 |
 | Task 5 → 8 | `hmacSha256` | ✓ 一致 |
 | Task 6 → 10 | `deriveMasterKey`, `hashMasterPassword`, `stretchMasterKey`, `encryptString`, `decryptString`, `KDF_TYPE_PBKDF2` | ✓ 一致 |
-| Task 2 → 10 | `VW_URL`, `COFFER_TEST_EMAIL`, `COFFER_TEST_PASSWORD` | ✓ 一致 |
+| Task 2 → 10 | `VW_URL`, `ONEWARDEN_TEST_EMAIL`, `ONEWARDEN_TEST_PASSWORD` | ✓ 一致 |
 
 **冲突与裁决（动手前已修入计划）：**
 

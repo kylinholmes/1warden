@@ -1,3 +1,7 @@
 @import '../extension/styles.css';
 @source '../src';
 @source '../preview';
+
+/* This browser page is a resizable layout harness, not a toolbar popup.
+   The shipped extension retains its intrinsic 440x600 sizing for Firefox. */
+body { width: 100%; height: 100dvh; }

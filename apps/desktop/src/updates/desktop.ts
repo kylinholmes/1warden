@@ -1,4 +1,4 @@
-import { IS_DESKTOP } from '@coffer/ui';
+import { IS_DESKTOP } from '@1warden/ui';
 import { getVersion } from '@tauri-apps/api/app';
 import { invoke } from '@tauri-apps/api/core';
 import { getCurrentWindow } from '@tauri-apps/api/window';

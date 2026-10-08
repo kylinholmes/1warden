@@ -5,7 +5,7 @@
  * 两处各写一份词表的话，迟早会出现「一般」和「中等」并存，
  * 或者同一个分数在一处是绿色、在另一处是橙色。
  *
- * ⚠️ 分档本身**不在这里** —— 它由 `@coffer/crypto` 的 `passwordStrength`
+ * ⚠️ 分档本身**不在这里** —— 它由 `@1warden/crypto` 的 `passwordStrength`
  * 定（28 / 50 / 70 / 100 位熵），这里只负责把那个 score 翻译成人话。
  * 分档写两份才是真的会出事：同一个密码在两个界面上被评成两档。
  */
@@ -69,7 +69,7 @@ export function crackTimeText(entropyBits: number): string {
  *
  * ⚠️ 这个模型对**生成出来的**密码是准的：字符是从一个已知大小的池子里
  * 均匀取的，攻击者也知道参数（算法保密不值钱）。对用户自己敲的密码不准 ——
- * `P@ssw0rd1!` 会被算得很高，那要用词典式的判定，见 `@coffer/vault` 的 health。
+ * `P@ssw0rd1!` 会被算得很高，那要用词典式的判定，见 `@1warden/vault` 的 health。
  */
 export function crackSentence(entropyBits: number, score: number): string {
   const time = crackTimeText(entropyBits);

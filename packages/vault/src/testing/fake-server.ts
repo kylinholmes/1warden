@@ -8,8 +8,8 @@
  *
  * 图形界面的回路一次要几十秒，还依赖窗口焦点；这里只要几十毫秒。
  */
-import type { SymmetricKey } from '@coffer/crypto';
-import { concatBytes, encryptBytes } from '@coffer/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import { concatBytes, encryptBytes } from '@1warden/crypto';
 
 export interface FakeServerOptions {
   /** 服务端要返回的用户密钥（明文 64 字节）。测试用它验证客户端解得对不对。 */
@@ -93,7 +93,7 @@ export function createFakeServer(opts: FakeServerOptions): FakeServer {
 
       case '/api/sync':
         return json({
-          profile: { id: 'user-0000-1111-2222-333333333333', email: 'coffer-test@example.com' },
+          profile: { id: 'user-0000-1111-2222-333333333333', email: 'onewarden-test@example.com' },
           folders: [],
           ciphers: [],
           collections: [],

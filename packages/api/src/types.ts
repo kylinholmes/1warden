@@ -5,7 +5,7 @@
  * （`viewPassword`、`organizationUseTotp`、`folderId`），不是 C# / TS 里的属性名。
  *
  * 本包内所有「加密」字段都是**不透明字符串**（EncString）。api 层不解析它们，
- * 也不导入 `@coffer/crypto` —— 这条边界让「协议写错了」和「解密写错了」
+ * 也不导入 `@1warden/crypto` —— 这条边界让「协议写错了」和「解密写错了」
  * 成为两种可区分的失败。
  */
 

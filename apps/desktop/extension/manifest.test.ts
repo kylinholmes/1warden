@@ -9,9 +9,10 @@ describe('Firefox extension package', () => {
     const result = firefoxManifest(chromeManifest);
     expect(result.background).toEqual({ scripts: ['background.js'], type: 'module' });
     expect(result).not.toHaveProperty('minimum_chrome_version');
+    expect(result).not.toHaveProperty('key');
     expect(result.permissions).not.toContain('offscreen');
     expect(result.browser_specific_settings).toEqual({
-      gecko: { id: 'coffer@coffer.app', strict_min_version: '128.0' },
+      gecko: { id: '1warden@1warden.app', strict_min_version: '128.0' },
     });
   });
 

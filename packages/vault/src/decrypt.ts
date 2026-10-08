@@ -1,6 +1,6 @@
-import { decryptString, decryptBytes, DecryptError } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherDto, FolderDto, CipherFieldDto } from '@coffer/api';
+import { decryptString, decryptBytes, DecryptError } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import type { CipherDto, FolderDto, CipherFieldDto } from '@1warden/api';
 import { cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
 import type {
   VaultItem, VaultFolder, LoginFields, CardFields, IdentityFields, SshKeyFields,

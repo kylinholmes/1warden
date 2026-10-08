@@ -1,8 +1,8 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
-import { SORT_BY } from '@coffer/vault';
-import type { ItemSummary } from '@coffer/ui';
+import { SORT_BY } from '@1warden/vault';
+import type { ItemSummary } from '@1warden/ui';
 import type { ApplicationClient, ItemDetailData } from '../application/types';
 import { visibleVaultItems, type VaultCategory } from './vault-presentation';
 

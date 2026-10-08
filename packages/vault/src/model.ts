@@ -1,7 +1,7 @@
 /**
  * 领域模型 —— **已解密**的形状。
  *
- * 与 `@coffer/api` 的 DTO 严格分开：
+ * 与 `@1warden/api` 的 DTO 严格分开：
  *   DTO       = 线上形状，敏感字段都是不透明字符串（EncString）
  *   VaultItem = 解密后的形状，字段是明文
  *

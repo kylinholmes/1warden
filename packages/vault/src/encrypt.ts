@@ -1,6 +1,6 @@
-import { encryptString } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
-import type { CipherWriteBody, CipherFido2CredentialDto } from '@coffer/api';
+import { encryptString } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
+import type { CipherWriteBody, CipherFido2CredentialDto } from '@1warden/api';
 import type { StoredPasskey } from './passkey';
 import type { VaultItem, ItemType } from './model';
 
@@ -13,7 +13,7 @@ export interface EncryptOptions {
 }
 
 // ⚠️ 这里刻意**不处理** `encryptedFor`。
-// 它由 @coffer/api 的 createCipher/updateCipher 从**已认证的 userId** 填入。
+// 它由 @1warden/api 的 createCipher/updateCipher 从**已认证的 userId** 填入。
 // 两层各司其职：vault 管加密，api 管身份。让这一层也加一份会造成重复，
 // 而且可能填进一个与当前登录用户不符的值 —— 服务端会以 422 "Invalid user cipher"
 // 拒绝，且很难看出为什么。

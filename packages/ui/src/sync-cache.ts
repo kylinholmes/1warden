@@ -1,11 +1,11 @@
 import { host } from './host';
-import type { SyncCache, KdfCache, KdfCacheEntry, AccountInfo } from '@coffer/vault';
+import type { SyncCache, KdfCache, KdfCacheEntry, AccountInfo } from '@1warden/vault';
 
 /*
- * ⚠️ `SyncResult` 从**接口本身**推，不从 `@coffer/api` 引 ——
+ * ⚠️ `SyncResult` 从**接口本身**推，不从 `@1warden/api` 引 ——
  * 那会给 `packages/ui` 添一个它不需要的依赖，而这里要的只是
  * 「`SyncCache.load` 返回什么」。从接口推的话，那个类型将来搬家
- * （比如搬进 `@coffer/vault`）这个文件也不用跟着改。
+ * （比如搬进 `@1warden/vault`）这个文件也不用跟着改。
  */
 type SyncResult = NonNullable<Awaited<ReturnType<SyncCache['load']>>>;
 

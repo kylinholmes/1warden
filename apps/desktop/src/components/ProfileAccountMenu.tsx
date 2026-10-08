@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
-import type { UserProfile } from '@coffer/vault';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useEffect, useRef } from 'react';
+import type { UserProfile } from '@1warden/vault';
 import {
   host, readAccounts, IconArrowLeft, IconCheck, IconChevronDown, IconGear, IconIdentity,
-  IconPlus, IconSpinner, type SavedAccount,
-} from '@coffer/ui';
+  IconPlus, IconSpinner, useCloseNavigation, type SavedAccount,
+} from '@1warden/ui';
 import { createProfileCache } from '../application/profile-cache';
 import { ProfileAvatar } from './ProfileAvatar';
 
@@ -22,13 +23,21 @@ export interface ProfileAccountMenuProps {
   onSwitch: (account: SavedAccount | null) => Promise<void>;
 }
 
-const actionClass = 'flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2 py-2 text-left text-sm hover:bg-[var(--surface-hover)] focus-visible:bg-[var(--surface-hover)] disabled:opacity-50';
+const actionClass = 'account-menu-action flex w-full items-center gap-2.5 rounded-[var(--radius-sm)] px-2 py-2 text-left text-sm hover:bg-[var(--surface-hover)] focus-visible:bg-[var(--surface-hover)] disabled:opacity-50';
 
 export function ProfileAccountMenu({ account, unlockedAccounts = [], syncing, onProfile, onSettings, onLogout, onSwitch }: ProfileAccountMenuProps) {
-  const [open, setOpen] = useState(false);
-  const [accounts, setAccounts] = useState<ProfileAccount[] | null>(null);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const closeNavigation = useCloseNavigation();
+  const viewStore = useLocalStore(() => {
+    const open = false;
+    const accounts = (null) as ProfileAccount[] | null;
+    const busy = (null) as string | null;
+    const error = (null) as string | null;
+    return { open, accounts, busy, error };
+  });
+  const [open, setOpen] = useStoreField(viewStore, 'open');
+  const [accounts, setAccounts] = useStoreField(viewStore, 'accounts');
+  const [busy, setBusy] = useStoreField(viewStore, 'busy');
+  const [error, setError] = useStoreField(viewStore, 'error');
   const root = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const menu = useRef<HTMLDivElement>(null);
@@ -74,6 +83,7 @@ export function ProfileAccountMenu({ account, unlockedAccounts = [], syncing, on
     if (pending.current) return;
     setOpen(false);
     trigger.current?.focus();
+    closeNavigation();
     action();
   }
   async function perform(label: string, action: () => Promise<void>): Promise<void> {
@@ -116,25 +126,25 @@ export function ProfileAccountMenu({ account, unlockedAccounts = [], syncing, on
     <button ref={trigger} type="button" aria-label="账户菜单" aria-haspopup="menu" aria-expanded={open}
       aria-controls={open ? 'profile-account-menu' : undefined}
       onClick={() => { setError(null); setOpen((value) => !value); if (!open) focusAction(); }}
-      className="flex w-full min-w-0 items-center gap-2.5 rounded-[var(--radius-md)] py-1.5 text-left hover:bg-[var(--surface-hover)]">
-      <ProfileAvatar profile={account.profile} fallback={account.email} className="h-8 w-8 text-md" />
-      <span className="min-w-0 flex-1 truncate text-md font-semibold" title={name}>{name}</span>
+      className="account-menu-trigger">
+      <ProfileAvatar profile={account.profile} fallback={account.email} className="h-7 w-7 text-sm" />
+      <span className="min-w-0 flex-1 truncate text-md font-medium" title={name}>{name}</span>
       {syncing ? <IconSpinner size={14} aria-label="正在同步" className="text-[var(--accent)]" />
         : <IconChevronDown size={14} className={`shrink-0 text-[var(--ink-secondary)] transition-transform ${open ? 'rotate-180' : ''}`} />}
     </button>
     {open && <div ref={menu} id="profile-account-menu" role="menu" tabIndex={-1} aria-label="账户操作" aria-busy={busy !== null}
-      className="absolute left-0 top-full z-40 mt-1 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border-overlay)] bg-[var(--surface-overlay)] p-2 shadow-[var(--elev-pop)]"
-      style={{ width: 'min(320px, calc(100vw - 28px))', maxHeight: 'calc(100dvh - var(--titlebar-h, 0px) - var(--band-h) - max(20px, env(safe-area-inset-bottom, 0px) + 8px))' }}>
-      <div className="mb-1 rounded-[var(--radius-sm)] bg-[var(--accent-tint)] px-2 py-2.5">
+      className="account-menu-popover absolute left-0 top-full z-40 mt-1 overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-overlay)] p-1.5 shadow-[var(--elev-pop)]"
+      style={{ width: 'min(288px, calc(100vw - 28px))', maxHeight: 'calc(100dvh - var(--titlebar-h, 0px) - var(--band-h) - max(20px, env(safe-area-inset-bottom, 0px) + 8px))' }}>
+      <div className="account-menu-current">
         <span className="sr-only">当前账户</span>
-        <div className="flex items-center gap-2">
-          <ProfileAvatar profile={account.profile} fallback={account.email} className="h-8 w-8 text-sm" />
-          <span className="min-w-0 flex-1 break-words text-sm font-medium">{name}</span>
-          <IconCheck size={15} className="shrink-0 text-[var(--accent)]" />
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2"><span className="min-w-0 flex-1 truncate text-sm font-medium" title={name}>{name}</span>
+            <IconCheck size={14} aria-label="当前账户" className="shrink-0 text-[var(--ink-secondary)]" /></div>
+          <p className="truncate text-xs text-[var(--ink-secondary)]" title={account.email}>{account.email}</p>
+          <p className="mt-0.5 truncate text-2xs text-[var(--ink-tertiary)]" title={account.serverUrl}>{account.serverUrl}</p>
         </div>
-        <p className="mt-2 break-all text-xs text-[var(--ink-primary)]">{account.email}</p>
-        <p className="mt-0.5 break-all text-2xs text-[var(--ink-secondary)]">{account.serverUrl}</p>
       </div>
+      <div role="separator" className="my-1 border-t border-[var(--border-subtle)]" />
       {accounts === null ? <p role="status" className="px-2 py-2 text-xs text-[var(--ink-secondary)]">正在读取账户…</p>
         : accounts.length > 0 && <>
           <p className="px-2 pt-2 pb-1 text-2xs font-medium text-[var(--ink-secondary)]">切换账户</p>
@@ -158,7 +168,7 @@ export function ProfileAccountMenu({ account, unlockedAccounts = [], syncing, on
       </button>
       <div role="separator" className="my-1 border-t border-[var(--border-subtle)]" />
       <button type="button" role="menuitem" tabIndex={-1} disabled={busy !== null} className={actionClass} onClick={() => closeAndRun(onProfile)}>
-        <IconIdentity size={16} className="text-[var(--accent)]" />更新头像与资料
+        <IconIdentity size={16} className="text-[var(--accent)]" />用户详情
       </button>
       <button type="button" role="menuitem" tabIndex={-1} disabled={busy !== null} className={actionClass} onClick={() => closeAndRun(onSettings)}>
         <IconGear size={16} className="text-[var(--violet)]" />设置

@@ -16,9 +16,9 @@
             <BuildableReference
                BuildableIdentifier = "primary"
                BlueprintIdentifier = "EC7B4C562D5A9ADD902E54D9"
-               BuildableName = "coffer_iOS.app"
-               BlueprintName = "coffer_iOS"
-               ReferencedContainer = "container:coffer.xcodeproj">
+               BuildableName = "1Warden.app"
+               BlueprintName = "onewarden_iOS"
+               ReferencedContainer = "container:onewarden.xcodeproj">
             </BuildableReference>
          </BuildActionEntry>
       </BuildActionEntries>
@@ -33,9 +33,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "EC7B4C562D5A9ADD902E54D9"
-            BuildableName = "coffer_iOS.app"
-            BlueprintName = "coffer_iOS"
-            ReferencedContainer = "container:coffer.xcodeproj">
+            BuildableName = "1Warden.app"
+            BlueprintName = "onewarden_iOS"
+            ReferencedContainer = "container:onewarden.xcodeproj">
          </BuildableReference>
       </MacroExpansion>
       <Testables>
@@ -70,9 +70,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "EC7B4C562D5A9ADD902E54D9"
-            BuildableName = "coffer_iOS.app"
-            BlueprintName = "coffer_iOS"
-            ReferencedContainer = "container:coffer.xcodeproj">
+            BuildableName = "1Warden.app"
+            BlueprintName = "onewarden_iOS"
+            ReferencedContainer = "container:onewarden.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>
@@ -101,9 +101,9 @@
          <BuildableReference
             BuildableIdentifier = "primary"
             BlueprintIdentifier = "EC7B4C562D5A9ADD902E54D9"
-            BuildableName = "coffer_iOS.app"
-            BlueprintName = "coffer_iOS"
-            ReferencedContainer = "container:coffer.xcodeproj">
+            BuildableName = "1Warden.app"
+            BlueprintName = "onewarden_iOS"
+            ReferencedContainer = "container:onewarden.xcodeproj">
          </BuildableReference>
       </BuildableProductRunnable>
       <CommandLineArguments>

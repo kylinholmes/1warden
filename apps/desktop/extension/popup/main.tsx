@@ -3,11 +3,11 @@ import { createRoot } from 'react-dom/client';
 import { App, ErrorBoundary } from '../../src/App';
 import { installExtensionHost } from '../host-impl';
 import { createExtensionApplicationClient, scheduleExtensionClipboardClear } from '../application-client';
-import { installClipboardScheduler } from '@coffer/ui';
+import { installClipboardScheduler } from '@1warden/ui';
 import { initTheme } from '../../src/theme';
 import '../styles.css';
 
-// 宿主要最先装 —— 见 @coffer/ui/host 的说明
+// 宿主要最先装 —— 见 @1warden/ui/host 的说明
 installExtensionHost();
 installClipboardScheduler(scheduleExtensionClipboardClear);
 initTheme();

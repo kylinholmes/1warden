@@ -19,7 +19,7 @@
 use std::ffi::c_void;
 use std::sync::Mutex;
 
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
 /// 默认快捷键：⌘⇧\
 ///
@@ -55,6 +55,7 @@ type EventHandlerProc = extern "C" fn(*mut c_void, *mut c_void, *mut c_void) -> 
 
 #[link(name = "Carbon", kind = "framework")]
 extern "C" {
+    fn UnregisterEventHotKey(hot_key: *mut c_void) -> i32;
     fn GetApplicationEventTarget() -> *mut c_void;
     fn InstallEventHandler(
         target: *mut c_void,
@@ -86,6 +87,18 @@ extern "C" {
 /// 注册成功后的引用。丢了它热键就失效，所以必须留着一份。
 static HOTKEY_REF: Mutex<Option<usize>> = Mutex::new(None);
 static APP: Mutex<Option<AppHandle>> = Mutex::new(None);
+static HANDLER_INSTALLED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+pub fn unregister() -> Result<(), String> {
+    let mut slot = HOTKEY_REF.lock().map_err(|_| "快捷键状态不可用")?;
+    if let Some(reference) = *slot {
+        // SAFETY: reference was returned by RegisterEventHotKey and is retained until success.
+        let result = unsafe { UnregisterEventHotKey(reference as *mut c_void) };
+        if result != 0 { return Err(format!("注销快捷键失败（Carbon 错误码 {result}）")); }
+        *slot = None;
+    }
+    Ok(())
+}
 
 /// Carbon 的回调。**不能捕获任何东西** —— 所以状态只能走静态变量。
 extern "C" fn on_hotkey(
@@ -119,10 +132,7 @@ extern "C" fn on_hotkey(
     // 搜到就走。
     if let Ok(app) = APP.lock() {
         if let Some(app) = app.as_ref() {
-            if let Some(w) = app.get_webview_window("quick") {
-                let _ = w.show();
-                let _ = w.set_focus();
-            }
+            crate::quick::show(app);
         }
     }
     0 // noErr
@@ -130,6 +140,7 @@ extern "C" fn on_hotkey(
 
 /// 注册全局快捷键。返回可读的错误串，让界面能如实告诉用户为什么没生效。
 pub fn register(app: AppHandle, key_code: u32, modifiers: u32) -> Result<(), String> {
+    if HOTKEY_REF.lock().map_err(|_| "快捷键状态不可用")?.is_some() { return Ok(()); }
     {
         let mut slot = APP.lock().map_err(|_| "内部状态不可用")?;
         *slot = Some(app);
@@ -147,17 +158,18 @@ pub fn register(app: AppHandle, key_code: u32, modifiers: u32) -> Result<(), Str
             event_kind: K_EVENT_HOTKEY_PRESSED,
         };
         let mut handler_ref: *mut c_void = std::ptr::null_mut();
-        let install = InstallEventHandler(
+        let install = if HANDLER_INSTALLED.load(std::sync::atomic::Ordering::SeqCst) { 0 } else { InstallEventHandler(
             target,
             on_hotkey,
             1,
             &spec,
             std::ptr::null_mut(),
             &mut handler_ref,
-        );
+        ) };
         if install != 0 {
             return Err(format!("安装事件处理器失败（Carbon 错误码 {install}）"));
         }
+        HANDLER_INSTALLED.store(true, std::sync::atomic::Ordering::SeqCst);
 
         let mut hotkey_ref: *mut c_void = std::ptr::null_mut();
         let status = RegisterEventHotKey(

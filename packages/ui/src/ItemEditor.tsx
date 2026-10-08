@@ -1,16 +1,17 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import { generatePassword, passwordStrength } from '@coffer/crypto';
-import { writeTotpSecret } from '@coffer/vault';
-import type { VaultItem, VaultFolder, ItemType, CustomField } from '@coffer/vault';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useCallback, useEffect, useRef } from 'react';
+import { generatePassword, passwordStrength } from '@1warden/crypto';
+import { writeTotpSecret } from '@1warden/vault';
+import type { VaultItem, VaultFolder, ItemType, CustomField } from '@1warden/vault';
 import { FloatingPanel } from './FloatingPanel';
 import { STRENGTH_COLORS, STRENGTH_LABELS } from './strength';
 import {
-  IconCard, IconChevronDown, IconClose, IconIdentity, IconKey, IconNote,
+  IconCard, IconChevronDown, IconIdentity, IconKey, IconNote,
   IconPlus, IconSpinner, IconStar, IconTerminal, IconTrash,
 } from './icons';
 
 interface Props {
-  /** 文件夹列表。桌面端从会话里拿，扩展端从 `coffer:folders` 拿 */
+  /** 文件夹列表。桌面端从会话里拿，扩展端从 `1warden:folders` 拿 */
   /* 只读 —— 编辑器只拿它填下拉，不改文件夹本身 */
   folders: readonly VaultFolder[];
   /** 保存。桌面端直接调 client，扩展端发消息给后台 —— 加密在他们那边 */
@@ -54,12 +55,21 @@ interface Props {
  * 第二次是把这一问撤掉、回到编辑。要丢只能点「放弃改动」。
  */
 export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Props) {
-  const [draft, setDraft] = useState<VaultItem>(() => item ?? blankItem());
+  const viewStore = useLocalStore(() => {
+    const draft = item ?? blankItem();
+    const initial = draft;
+    const busy = false;
+    const error = (null) as string | null;
+    const confirming = false;
+    const isNew = item === null;
+    return { draft, initial, busy, error, confirming, isNew };
+  });
+  const [draft, setDraft] = useStoreField(viewStore, 'draft');
   /** 打开那一刻的样子 —— 判断「改没改过」就靠它 */
-  const [initial, setInitial] = useState<VaultItem>(draft);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [confirming, setConfirming] = useState(false);
+  const [initial, setInitial] = useStoreField(viewStore, 'initial');
+  const [busy, setBusy] = useStoreField(viewStore, 'busy');
+  const [error, setError] = useStoreField(viewStore, 'error');
+  const [confirming, setConfirming] = useStoreField(viewStore, 'confirming');
   /**
    * 「这是在新建吗」也在打开时定下来，不跟着 prop 走。
    *
@@ -67,7 +77,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
    * `item` 换成 null 了 —— 标题会当着用户的面从「编辑条目」跳成
    * 「新建条目」，像是点错了什么东西。
    */
-  const [isNew, setIsNew] = useState(item === null);
+  const [isNew, setIsNew] = useStoreField(viewStore, 'isNew');
 
   /*
    * ⚠️ 只在**开**的那一刻取一次 item，之后不再跟着 prop 走。
@@ -129,7 +139,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
   }, [busy, dirty, onCancel]);
 
   /*
-   * 浮层要的 onClose：Esc、点遮罩、右上角的叉都走这里。
+   * 浮层要的 onClose：Esc、点遮罩都走这里。
    * 正在问「要放弃吗」的时候，再按 Esc 是**把这一问撤掉**，不是丢掉改动。
    */
   const handleClose = useCallback(() => {
@@ -182,9 +192,6 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel }: Pr
           }`}
         >
           <IconStar size={16} filled={draft.favorite} />
-        </button>
-        <button onClick={requestClose} aria-label="关闭" title="关闭  esc" className="btn btn-ghost -mr-1 p-1.5">
-          <IconClose size={15} />
         </button>
       </div>
 
@@ -471,9 +478,9 @@ function Select({ value, onChange, options }: {
  *
  * ⚠️ 这是**输入时**的即时反馈，用的是字符类熵 —— 够用，但它会把
  * `P@ssw0rd1!` 算得偏高。真正用于「弱密码报告」的判定必须是词典式的
- * （见 @coffer/vault 的 health 模块），否则字典密码会被报成安全。
+ * （见 @1warden/vault 的 health 模块），否则字典密码会被报成安全。
  *
- * 说法与颜色取自 `@coffer/ui` 的 `strength.ts` —— 生成器那边说的是同一套话。
+ * 说法与颜色取自 `@1warden/ui` 的 `strength.ts` —— 生成器那边说的是同一套话。
  */
 function StrengthMeter({ value }: { value: string }) {
   if (value.length === 0) return null;

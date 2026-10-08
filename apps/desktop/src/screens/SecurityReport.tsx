@@ -1,18 +1,27 @@
-import { useEffect, useRef, useState } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useEffect, useRef } from 'react';
 import {
-  IconSpinner, NavTrigger, SecurityReportView as SecurityReportBody,
+  IconSpinner, PageHeader, SecurityReportView as SecurityReportBody,
   type BreachState, type ReportBrief,
-} from '@coffer/ui';
+} from '@1warden/ui';
 import type { ApplicationClient } from '../application/types';
 
 /** The service analyzes the vault; the shared screen receives display findings only. */
-export function SecurityReportView({ client }: { client: ApplicationClient }) {
+export function SecurityReportView({ client, onBack }: { client: ApplicationClient; onBack?: () => void }) {
   const snapshot = client.getSnapshot();
-  const [report, setReport] = useState<ReportBrief | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [breachState, setBreachState] = useState<BreachState>('off');
-  const [now] = useState(() => Date.now());
-  const [retry, setRetry] = useState(0);
+  const viewStore = useLocalStore(() => {
+    const report = (null) as ReportBrief | null;
+    const error = (null) as string | null;
+    const breachState = ('off') as BreachState;
+    const now = Date.now();
+    const retry = 0;
+    return { report, error, breachState, now, retry };
+  });
+  const [report, setReport] = useStoreField(viewStore, 'report');
+  const [error, setError] = useStoreField(viewStore, 'error');
+  const [breachState, setBreachState] = useStoreField(viewStore, 'breachState');
+  const [now] = useStoreField(viewStore, 'now');
+  const [retry, setRetry] = useStoreField(viewStore, 'retry');
   const request = useRef(0);
 
   useEffect(() => {
@@ -48,10 +57,8 @@ export function SecurityReportView({ client }: { client: ApplicationClient }) {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="band shrink-0 px-8" data-tauri-drag-region="deep">
-        <NavTrigger />
-        <h2 className="min-w-0 flex-1 truncate text-lg font-semibold">安全报告</h2>
-      </header>
+      <PageHeader navigation title="安全报告" onBack={onBack} backLabel="返回保险库"
+        breadcrumbs={[{ label: '保险库', ...(onBack ? { onSelect: onBack } : {}) }, { label: '安全报告' }]} />
       {error ? <div role="alert" className="p-8 text-sm text-[var(--risk)]">
         <p>{error}</p><button className="btn btn-quiet mt-3" onClick={() => setRetry((n) => n + 1)}>重试</button>
       </div> : report ? <SecurityReportBody

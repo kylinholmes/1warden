@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { IconEye } from './icons';
 import { CopyButton } from './CopyButton';
 import { scheduleClipboardClear } from './clipboard';
@@ -63,8 +63,13 @@ export function SecretField({
    *
    * ⚠️ 它存的可能是**异步取回来的**，不是 `value` —— 见下面的 `toggle`。
    */
-  const [revealed, setRevealed] = useState<string | null>(null);
-  const [revealing, setRevealing] = useState(false);
+  const viewStore = useLocalStore(() => {
+    const revealed = (null) as string | null;
+    const revealing = false;
+    return { revealed, revealing };
+  });
+  const [revealed, setRevealed] = useStoreField(viewStore, 'revealed');
+  const [revealing, setRevealing] = useStoreField(viewStore, 'revealing');
   const hidden = masked && revealed === null;
   const shown = hidden ? '•'.repeat(Math.min(value.length, 20)) : (revealed ?? value);
 

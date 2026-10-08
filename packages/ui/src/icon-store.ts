@@ -1,4 +1,4 @@
-import { IconStore } from '@coffer/vault';
+import { IconStore } from '@1warden/vault';
 import { host } from './host';
 import { indexedDbIconDisk } from './icon-disk';
 

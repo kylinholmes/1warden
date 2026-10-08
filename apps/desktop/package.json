@@ -1,5 +1,5 @@
 {
-  "name": "@coffer/desktop",
+  "name": "@1warden/desktop",
   "version": "0.1.0",
   "private": true,
   "type": "module",
@@ -10,20 +10,21 @@
     "preview": "vite preview",
     "tauri": "tauri",
     "preview:build": "vite build -c vite.preview.config.ts",
-    "preview:mobile:build": "COFFER_PREVIEW_PLATFORM=mobile vite build -c vite.preview.config.ts",
+    "preview:mobile:build": "ONEWARDEN_PREVIEW_PLATFORM=mobile vite build -c vite.preview.config.ts",
     "preview:extension:build": "vite build -c vite.preview-extension.config.ts",
-    "build:extension": "vite build -c vite.extension.config.ts && vite build -c vite.content.config.ts && COFFER_ENTRY=webauthn vite build -c vite.content.config.ts",
-    "dev:extension": "vite build --watch -c vite.extension.config.ts & vite build --watch -c vite.content.config.ts & COFFER_ENTRY=webauthn vite build --watch -c vite.content.config.ts"
+    "build:extension": "vite build -c vite.extension.config.ts && vite build -c vite.content.config.ts && ONEWARDEN_ENTRY=webauthn vite build -c vite.content.config.ts",
+    "dev:extension": "vite build --watch -c vite.extension.config.ts & vite build --watch -c vite.content.config.ts & ONEWARDEN_ENTRY=webauthn vite build --watch -c vite.content.config.ts"
   },
   "dependencies": {
-    "@coffer/api": "workspace:*",
-    "@coffer/crypto": "workspace:*",
-    "@coffer/vault": "workspace:*",
+    "@1warden/state": "workspace:*",
+    "@1warden/api": "workspace:*",
+    "@1warden/crypto": "workspace:*",
+    "@1warden/vault": "workspace:*",
     "@tauri-apps/api": "2.12.1",
     "@tauri-apps/plugin-updater": "2.13.1",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "@coffer/ui": "workspace:*"
+    "@1warden/ui": "workspace:*"
   },
   "devDependencies": {
     "@tauri-apps/cli": "2.12.1",

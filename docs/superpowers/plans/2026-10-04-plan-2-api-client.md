@@ -1,20 +1,20 @@
-# Coffer 计划 2：Bitwarden REST 客户端 (@coffer/api)
+# 1Warden 计划 2：Bitwarden REST 客户端 (@1warden/api)
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 实现 `@coffer/api` —— 一个只认 HTTP 与原始 JSON、**完全不碰解密**的 Bitwarden/Vaultwarden REST 客户端，并通过针对真实 Vaultwarden 实例的契约测试。
+**Goal:** 实现 `@1warden/api` —— 一个只认 HTTP 与原始 JSON、**完全不碰解密**的 Bitwarden/Vaultwarden REST 客户端，并通过针对真实 Vaultwarden 实例的契约测试。
 
-**Architecture:** 纯传输层。它把请求发出去、把响应解析成带类型的 DTO、把失败归一成结构化错误，但**不理解任何密文**（`name`/`notes` 等字段对它就是不透明字符串）。解密是 `@coffer/vault` 的事。这条边界让协议可以被独立测试，也让「协议写错了」和「解密写错了」是两种可区分的失败。
+**Architecture:** 纯传输层。它把请求发出去、把响应解析成带类型的 DTO、把失败归一成结构化错误，但**不理解任何密文**（`name`/`notes` 等字段对它就是不透明字符串）。解密是 `@1warden/vault` 的事。这条边界让协议可以被独立测试，也让「协议写错了」和「解密写错了」是两种可区分的失败。
 
 **Tech Stack:** TypeScript (strict) · Bun · Vitest · 原生 `fetch` · 无运行时依赖
 
-**Spec:** `docs/superpowers/specs/2026-10-04-coffer-design.md`
+**Spec:** `docs/superpowers/specs/2026-10-04-onewarden-design.md`
 **实测参考（本文档的事实来源）:** `docs/reference/bitwarden-api-notes.md`
 
 ## Global Constraints
 
 - **零运行时依赖**：只用平台自带的 `fetch` / `URLSearchParams` / `AbortController`
-- **`@coffer/api` 不做任何密码学**：不导入 `@coffer/crypto`，不解析 EncString，不碰密钥
+- **`@1warden/api` 不做任何密码学**：不导入 `@1warden/crypto`，不解析 EncString，不碰密钥
 - **绝不把含密钥的请求体写进日志或错误消息**：`password`、`masterPasswordHash`、`access_token`、`refresh_token`、任何 `2.` 开头的字符串
 - **所有错误必须是 `ApiError`**：不得让 `TypeError` / `DOMException` 漏出去
 - TypeScript `strict` + `noUncheckedIndexedAccess` + `exactOptionalPropertyTypes`，不允许 `any`
@@ -80,7 +80,7 @@
 `packages/api/package.json`:
 ```json
 {
-  "name": "@coffer/api",
+  "name": "@1warden/api",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -681,7 +681,7 @@ import { describe, it, expect, vi } from 'vitest';
 import { HttpClient } from './http';
 import { loginWithPassword, refreshToken, loginWithApiKey, TwoFactorRequiredError, DEVICE_TYPE } from './auth';
 
-const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'dev-1', name: 'coffer-test' };
+const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'dev-1', name: 'onewarden-test' };
 
 const OK_TOKEN = {
   access_token: 'at', refresh_token: 'rt', expires_in: 7200,
@@ -1935,10 +1935,10 @@ import {
 process.env.NODE_TLS_REJECT_UNAUTHORIZED ??= '0';
 
 const BASE = process.env.VW_URL ?? 'https://localhost:8443';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 
-const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'contract-test', name: 'coffer-contract' };
+const device = { type: DEVICE_TYPE.macOSCLI, identifier: 'contract-test', name: 'onewarden-contract' };
 
 let http: HttpClient;
 let token: string;
@@ -2096,9 +2096,9 @@ git commit -m "test(api): add live contract tests against a real Vaultwarden"
 - [ ] `bun run test` 全绿，且**在服务器停止时也全绿**（单元测试零网络依赖）
 - [ ] `bun run typecheck` 无错误
 - [ ] `bun run test:contract` 对真实 Vaultwarden 全绿
-- [ ] `grep -rn "coffer/crypto" packages/api/src --include=*.ts | grep -v test` 无输出
+- [ ] `grep -rn "onewarden/crypto" packages/api/src --include=*.ts | grep -v test` 无输出
       （API 层不得依赖密码学层）
 - [ ] `grep -rniE "console\.(log|debug|info)" packages/api/src` 无输出
 - [ ] 软删除/硬删除的动词有专门测试钉死（本计划唯一能造成不可逆损失的代码）
 
-**下一份计划**：计划 3 —— `@coffer/vault`（领域层：DTO↔领域模型映射与解密、会话状态机、同步引擎、搜索、Watchtower）。
+**下一份计划**：计划 3 —— `@1warden/vault`（领域层：DTO↔领域模型映射与解密、会话状态机、同步引擎、搜索、Watchtower）。

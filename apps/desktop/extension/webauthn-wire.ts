@@ -25,7 +25,7 @@ export interface AllowDescriptor {
 /**
  * 字节 → base64url（**不带 padding**）。
  *
- * 不带 padding 是本项目内部的统一约定：`@coffer/crypto` 的 `toBase64Url`
+ * 不带 padding 是本项目内部的统一约定：`@1warden/crypto` 的 `toBase64Url`
  * 与存储里的 `credentialId` 都是这个形式。带了 padding 就对不上。
  */
 export function b64urlFromBytes(v: ArrayBuffer | ArrayBufferView): string {

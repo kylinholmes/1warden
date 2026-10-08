@@ -1,4 +1,5 @@
-import { useEffect, useState } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useEffect } from 'react';
 import { host } from './host';
 
 /**
@@ -28,7 +29,7 @@ import { host } from './host';
  * ## ⚠️ 异步带来的一个真问题
  *
  * `host().storage` 是异步的（`chrome.storage.local` 没有同步读）。
- * 而桌面端原来是**同步**拿到的，在 `useState(readAccounts)` 里一句话就完事。
+ * 而桌面端原来是**同步**读取本机账户的。
  * 换过来之后**首帧拿不到账户** —— 有记住账户的人会先看到完整表单、
  * 再跳成账户列表，读起来就是「咦，怎么又要我填服务器地址」。
  *
@@ -45,9 +46,9 @@ export interface SavedAccount {
  * 键名沿用桌面端原来的 —— 改键名等于让所有老用户「我明明记住过」
  * 的那一份凭空消失。
  */
-const ACCOUNTS_KEY = 'coffer.accounts';
-const LEGACY_URL_KEY = 'coffer.serverUrl';
-const LEGACY_EMAIL_KEY = 'coffer.email';
+const ACCOUNTS_KEY = '1warden.accounts';
+const LEGACY_URL_KEY = '1warden.serverUrl';
+const LEGACY_EMAIL_KEY = '1warden.email';
 
 /** 列表上限。存的是「常去的几台」，不是历史记录 */
 const MAX_ACCOUNTS = 5;
@@ -66,7 +67,7 @@ export async function readAccounts(): Promise<SavedAccount[]> {
       if (Array.isArray(list)) return list.filter(isSaved).slice(0, MAX_ACCOUNTS);
     }
     /*
-     * 旧版本只存了一个槽位（`coffer.serverUrl` / `coffer.email`）——
+     * 旧版本只存了一个槽位（`1warden.serverUrl` / `1warden.email`）——
      * 把它迁移成列表的第一项，用户升级后不会觉得「我明明记住过」。
      */
     const serverUrl = await host().storage.get(LEGACY_URL_KEY);
@@ -112,7 +113,11 @@ export async function rememberAccount(a: SavedAccount): Promise<void> {
  * 用户正在打字时把他选好的账户换掉。
  */
 export function useAccounts(): SavedAccount[] | null {
-  const [accounts, setAccounts] = useState<SavedAccount[] | null>(null);
+  const viewStore = useLocalStore(() => {
+    const accounts = (null) as SavedAccount[] | null;
+    return { accounts };
+  });
+  const [accounts, setAccounts] = useStoreField(viewStore, 'accounts');
   useEffect(() => {
     let alive = true;
     void readAccounts().then((a) => { if (alive) setAccounts(a); });

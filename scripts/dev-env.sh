@@ -11,8 +11,8 @@ export VW_PIDFILE="$ROOT/.dev/vaultwarden.pid"
 export VW_LOG="$ROOT/.dev/vaultwarden.log"
 
 # 仅供本地开发的测试账号 —— 绝不用于任何真实环境
-export COFFER_TEST_EMAIL="coffer-test@example.com"
-export COFFER_TEST_PASSWORD='Test-Master-Password-123!'
+export ONEWARDEN_TEST_EMAIL="onewarden-test@example.com"
+export ONEWARDEN_TEST_PASSWORD='Test-Master-Password-123!'
 
 # 官方 Bitwarden CLI 与 SDK 拒绝明文 HTTP（InsecureUrlNotAllowedError），
 # 所以本地也走 HTTPS + 自签证书。

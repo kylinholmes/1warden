@@ -42,6 +42,8 @@
 function mountTitlebarStrip(): void {
   // 预览页里没有 Tauri 壳，建了也只是个挡不住东西的空 div，没必要
   if (!('__TAURI_INTERNALS__' in window)) return;
+  if (document.documentElement.hasAttribute('data-quick-window')) return;
+  if (document.documentElement.dataset['os'] !== 'mac') return;
   if (document.querySelector('.titlebar-strip') !== null) return;
 
   const strip = document.createElement('div');

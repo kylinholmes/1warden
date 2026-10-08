@@ -1,5 +1,6 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { generatePassword, generatePassphrase, passwordStrength } from '@coffer/crypto';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useEffect, type ReactNode } from 'react';
+import { generatePassword, generatePassphrase, passwordStrength } from '@1warden/crypto';
 import { Segmented } from './Segmented';
 import { CopyButton } from './CopyButton';
 import { IconDice } from './icons';
@@ -37,21 +38,37 @@ import { STRENGTH_COLORS, STRENGTH_LABELS, crackSentence } from './strength';
 type Kind = 'password' | 'passphrase';
 
 export function GeneratorBody({ className = '' }: { className?: string }) {
-  const [kind, setKind] = useState<Kind>('password');
+  const viewStore = useLocalStore(() => {
+    const kind = ('password') as Kind;
+    const length = 20;
+    const lower = true;
+    const upper = true;
+    const digits = true;
+    const symbols = true;
+    const avoidAmbiguous = false;
+    const words = 4;
+    const separator = '-';
+    const capitalize = false;
+    const includeNumber = false;
+    const nonce = 0;
+    const value = '';
+    return { kind, length, lower, upper, digits, symbols, avoidAmbiguous, words, separator, capitalize, includeNumber, nonce, value };
+  });
+  const [kind, setKind] = useStoreField(viewStore, 'kind');
 
   // 密码
-  const [length, setLength] = useState(20);
-  const [lower, setLower] = useState(true);
-  const [upper, setUpper] = useState(true);
-  const [digits, setDigits] = useState(true);
-  const [symbols, setSymbols] = useState(true);
-  const [avoidAmbiguous, setAvoidAmbiguous] = useState(false);
+  const [length, setLength] = useStoreField(viewStore, 'length');
+  const [lower, setLower] = useStoreField(viewStore, 'lower');
+  const [upper, setUpper] = useStoreField(viewStore, 'upper');
+  const [digits, setDigits] = useStoreField(viewStore, 'digits');
+  const [symbols, setSymbols] = useStoreField(viewStore, 'symbols');
+  const [avoidAmbiguous, setAvoidAmbiguous] = useStoreField(viewStore, 'avoidAmbiguous');
 
   // 口令
-  const [words, setWords] = useState(4);
-  const [separator, setSeparator] = useState('-');
-  const [capitalize, setCapitalize] = useState(false);
-  const [includeNumber, setIncludeNumber] = useState(false);
+  const [words, setWords] = useStoreField(viewStore, 'words');
+  const [separator, setSeparator] = useStoreField(viewStore, 'separator');
+  const [capitalize, setCapitalize] = useStoreField(viewStore, 'capitalize');
+  const [includeNumber, setIncludeNumber] = useStoreField(viewStore, 'includeNumber');
 
   /**
    * 「换一个」用 —— 参数没变时也要能重新掷一次。
@@ -59,8 +76,8 @@ export function GeneratorBody({ className = '' }: { className?: string }) {
    * ⚠️ 不能用「把某一项改掉再改回来」这种办法绕，也不要拿 Math.random()
    * 当依赖：那样每次渲染都会重新生成，用户还没看清就变了。
    */
-  const [nonce, setNonce] = useState(0);
-  const [value, setValue] = useState('');
+  const [nonce, setNonce] = useStoreField(viewStore, 'nonce');
+  const [value, setValue] = useStoreField(viewStore, 'value');
 
   const classes = [lower, upper, digits, symbols].filter(Boolean).length;
 
@@ -131,7 +148,7 @@ export function GeneratorBody({ className = '' }: { className?: string }) {
 
       {/*
         口令那一档**不给分数**，也不给秒/年 —— 那两个数都需要词表的大小，
-        而词表在 @coffer/crypto 里没有导出。硬编一个「220 个词」写在这里，
+        而词表在 @1warden/crypto 里没有导出。硬编一个「220 个词」写在这里，
         就是从暗处复制了一份事实：词表哪天扩充，这里的数字会**静静地**
         变得保守或乐观，而没有任何东西会提醒。
         所以这里说清楚机制：强度只来自词的个数，加词才有用。

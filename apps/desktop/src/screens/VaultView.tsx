@@ -1,56 +1,81 @@
+import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
 import { ProfileAccountMenu } from '../components/ProfileAccountMenu';
-import { useState, useEffect, useMemo, useRef, useCallback, useSyncExternalStore } from 'react';
-import { SORT_BY, SORT_LABEL, type SortBy, type UserProfile, type VaultItem, type VaultFolder } from '@coffer/vault';
-import type { IconStore } from '@coffer/vault';
+import { primaryShortcut } from '../platform';
+import { useEffect, useMemo, useRef, useCallback } from 'react';
+import { SORT_BY, SORT_LABEL, type SortBy, type UserProfile, type VaultItem, type VaultFolder } from '@1warden/vault';
+import type { IconStore } from '@1warden/vault';
 import type { ApplicationClient, ItemDetailData, SiteContext, SecretRef } from '../application/types';
 /* `IS_DESKTOP` 是**编译期常量**（`__PLATFORM__`），打包时被替换成字面量 ——
    于是移动端的产物里根本不包含 `AutotypeAction` 那一段，而不只是「不执行」。
    见 packages/ui/src/platform.ts。 */
-import { iconStoreFor, IS_DESKTOP } from '@coffer/ui';
+import { iconStoreFor, IS_DESKTOP, useCompactLayout } from '@1warden/ui';
 import { useShowTypes } from '../prefs';
-import { ItemIcon } from '@coffer/ui';
+import { ItemIcon } from '@1warden/ui';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { SecurityReportView } from './SecurityReport';
 import { ImportScreen } from './Import';
+import { ProfilePage } from './ProfilePage';
 import { visibleVaultItems, type VaultCategory as Category } from './vault-presentation';
 
 import { Settings } from './Settings';
 import { Generator } from './Generator';
-import { FloatingPanel, useRetainedPresence } from '@coffer/ui';
+import { FloatingPanel, useRetainedPresence } from '@1warden/ui';
 
 import { useToast } from '../components/Toast';
 import {
-  IconAlert, IconArrowLeft, IconDice, IconFolder, IconImport,
-  IconIdentity, IconItems, IconKeyboard, IconMore, IconPencil, IconPlus,
+  BackButton, IconAlert, IconDice, IconFolder, IconImport,
+  IconItems, IconKeyboard, IconMore, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconShield, IconSpinner, IconStar, IconTrash,
-  IDENTITY_LABEL, ItemEditor, ItemRow, NavDrawer, NavTrigger, SecretField, Section,
+  IDENTITY_LABEL, ItemEditor, ItemRow, NavDrawer, NavDrawerProvider, NavTrigger, SecretField, Section,
   TYPE_LABEL, TypeIcon, countByType,
   scheduleClipboardClear, typeDestinations, type ItemSummary,
-} from '@coffer/ui';
+} from '@1warden/ui';
 
 interface Props {
   client: ApplicationClient;
   onLock: () => void;
+  onSwitchAccount?: (account: { serverUrl: string; email: string } | null) => Promise<void>;
+  onLogout?: () => Promise<void>;
 }
 
 type Mode = { kind: 'browse' } | { kind: 'loading' } | { kind: 'edit'; item: VaultItem } | { kind: 'new' };
 
-export function VaultView({ client, onLock }: Props) {
+export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) {
   const subscribe = useCallback((listener: () => void) => client.subscribe(listener), [client]);
   const getSnapshot = useCallback(() => client.getSnapshot(), [client]);
-  const session = useSyncExternalStore(subscribe, getSnapshot, getSnapshot);
+  const session = useStoreSnapshot(subscribe, getSnapshot, getSnapshot);
   const toast = useToast();
-  const [query, setQuery] = useState('');
-  const [category, setCategory] = useState<Category>({ kind: 'all' });
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [mode, setMode] = useState<Mode>({ kind: 'browse' });
-  const [confirmDelete, setConfirmDelete] = useState<ItemSummary | null>(null);
+  const viewStore = useLocalStore(() => {
+    const query = '';
+    const category = ({ kind: 'all' }) as Category;
+    const selectedId = (null) as string | null;
+    const mode = ({ kind: 'browse' }) as Mode;
+    const confirmDelete = (null) as ItemSummary | null;
+    const settingsOpen = false;
+    const generatorOpen = false;
+    const folderError = (null) as string | null;
+    const sortOpen = false;
+    const saved = localStorage.getItem('1warden.pref.sortBy');
+    const sortBy: SortBy = saved === SORT_BY.name || saved === SORT_BY.created ? saved : SORT_BY.updated;
+    const site = (null) as SiteContext | null;
+    const siteError = (null) as string | null;
+    const contextAttempt = 0;
+    const search = (null) as { query: string; revision: number; items: ItemSummary[] } | null;
+    const searchError = (null) as string | null;
+    const searchAttempt = 0;
+    return { query, category, selectedId, mode, confirmDelete, settingsOpen, generatorOpen, folderError, sortOpen, sortBy, site, siteError, contextAttempt, search, searchError, searchAttempt };
+  });
+  const [query, setQuery] = useStoreField(viewStore, 'query');
+  const [category, setCategory] = useStoreField(viewStore, 'category');
+  const [selectedId, setSelectedId] = useStoreField(viewStore, 'selectedId');
+  const [mode, setMode] = useStoreField(viewStore, 'mode');
+  const [confirmDelete, setConfirmDelete] = useStoreField(viewStore, 'confirmDelete');
   const editRequest = useRef(0);
   useEffect(() => () => { editRequest.current++; }, []);
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [generatorOpen, setGeneratorOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useStoreField(viewStore, 'settingsOpen');
+  const [generatorOpen, setGeneratorOpen] = useStoreField(viewStore, 'generatorOpen');
   const searchRef = useRef<HTMLInputElement>(null);
-  const [folderError, setFolderError] = useState<string | null>(null);
+  const [folderError, setFolderError] = useStoreField(viewStore, 'folderError');
 
   /*
    * 站点图标的缓存。按服务端地址取 —— 换服务器才重建。
@@ -64,20 +89,17 @@ export function VaultView({ client, onLock }: Props) {
   /*
    * 排序方式。
    *
-   * ⚠️ 用 `useState` 的惰性初始值读一次 localStorage，**不是**每次渲染都读 ——
+   * ⚠️ 在 Zustand store 初始化时读一次 localStorage，**不是**每次渲染都读 ——
    * 后者在 250 条的列表上每次重渲都要碰一次同步存储。
    *
    * 存在这里而不是 `prefs.ts`：它只被这一屏用，没有第二个读者，
    * 加进那个模块只会让「什么时候该用 prefs」这条线变模糊。
    */
-  const [sortOpen, setSortOpen] = useState(false);
-  const [sortBy, setSortBy] = useState<SortBy>(() => {
-    const saved = localStorage.getItem('coffer.pref.sortBy');
-    return saved === SORT_BY.name || saved === SORT_BY.created ? saved : SORT_BY.updated;
-  });
+  const [sortOpen, setSortOpen] = useStoreField(viewStore, 'sortOpen');
+  const [sortBy, setSortBy] = useStoreField(viewStore, 'sortBy');
   function changeSort(v: SortBy): void {
     setSortBy(v);
-    localStorage.setItem('coffer.pref.sortBy', v);
+    localStorage.setItem('1warden.pref.sortBy', v);
   }
 
   const serverUrl = session.account?.serverUrl ?? '';
@@ -100,9 +122,9 @@ export function VaultView({ client, onLock }: Props) {
 
   const items = session.items;
   const folders = session.folders;
-  const [site, setSite] = useState<SiteContext | null>(null);
-  const [siteError, setSiteError] = useState<string | null>(null);
-  const [contextAttempt, setContextAttempt] = useState(0);
+  const [site, setSite] = useStoreField(viewStore, 'site');
+  const [siteError, setSiteError] = useStoreField(viewStore, 'siteError');
+  const [contextAttempt, setContextAttempt] = useStoreField(viewStore, 'contextAttempt');
   useEffect(() => {
     const browserActions = client.browser;
     if (!browserActions) return;
@@ -122,9 +144,9 @@ export function VaultView({ client, onLock }: Props) {
     return () => { alive = false; window.removeEventListener('focus', refresh); };
   }, [client, session.revision, contextAttempt]);
 
-  const [search, setSearch] = useState<{ query: string; revision: number; items: ItemSummary[] } | null>(null);
-  const [searchError, setSearchError] = useState<string | null>(null);
-  const [searchAttempt, setSearchAttempt] = useState(0);
+  const [search, setSearch] = useStoreField(viewStore, 'search');
+  const [searchError, setSearchError] = useStoreField(viewStore, 'searchError');
+  const [searchAttempt, setSearchAttempt] = useStoreField(viewStore, 'searchAttempt');
   const normalizedQuery = query.trim();
   useEffect(() => {
     let alive = true;
@@ -167,7 +189,7 @@ export function VaultView({ client, onLock }: Props) {
    */
   const typeCounts = useMemo(() => {
     /*
-     * ⚠️ 顺序和词表都来自 `@coffer/ui` 的 `typeDestinations` —— 弹窗的 rail
+     * ⚠️ 顺序和词表都来自 `@1warden/ui` 的 `typeDestinations` —— 弹窗的 rail
      * 用的是同一个函数。
      *
      * 早先这里按**数量降序**（「条目多的排前面少找一次」），听着合理，
@@ -192,19 +214,9 @@ export function VaultView({ client, onLock }: Props) {
 
   const selected = filtered.find((i) => i.id === selectedId) ?? null;
   const detailPresence = useRetainedPresence(selected);
-  const contentRef = useRef<HTMLDivElement>(null);
   const detailRef = useRef<HTMLDivElement>(null);
-  const [narrow, setNarrow] = useState(false);
-  const fullWidth = category.kind === 'security' || category.kind === 'import';
-  useEffect(() => {
-    const content = contentRef.current;
-    if (!content) return;
-    const observer = new ResizeObserver(([entry]) => {
-      if (entry) setNarrow(entry.contentRect.width < 620);
-    });
-    observer.observe(content);
-    return () => observer.disconnect();
-  }, [fullWidth]);
+  const narrow = useCompactLayout();
+  const fullWidth = category.kind === 'security' || category.kind === 'import' || category.kind === 'profile';
   const shownSelected = selected ?? (narrow ? detailPresence.value : null);
   const detailOpen = narrow && selected !== null;
   useEffect(() => {
@@ -284,9 +296,10 @@ export function VaultView({ client, onLock }: Props) {
         // 而用户不知道为什么
         if (category.kind === 'folder' && category.id === id) setCategory({ kind: 'all' });
       })}
-      onSwitchAccount={(account) => client.switchAccount(account)}
-      onLogout={() => client.logout()}
+      onSwitchAccount={onSwitchAccount ?? ((account) => client.switchAccount(account))}
+      onLogout={onLogout ?? (() => client.logout())}
       onOpenSettings={() => setSettingsOpen(true)}
+      onOpenProfile={() => { setCategory({ kind: 'profile' }); setSelectedId(null); closeEditor(); }}
       syncing={session.syncing}
       typeCounts={typeCounts}
       showTypes={showTypes}
@@ -301,27 +314,28 @@ export function VaultView({ client, onLock }: Props) {
     拉回单条记录，而且点哪一条都没有对应的详情可看。
   */
   return (
+    <NavDrawerProvider>
     <div className="screen-in vault-shell app-shell h-full">
       {sidebar}
 
       {fullWidth ? (
         <div className="below-titlebar flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
-          {category.kind === 'security' ? (
-            <SecurityReportView client={client} />
+          {category.kind === 'profile' ? <ProfilePage client={client} onBack={() => setCategory({ kind: 'all' })} /> : category.kind === 'security' ? (
+            <SecurityReportView client={client} onBack={() => setCategory({ kind: 'all' })} />
           ) : (
-            <ImportScreen client={client} onImported={() => {}} />
+            <ImportScreen client={client} onImported={() => {}} onBack={() => setCategory({ kind: 'all' })} />
           )}
         </div>
       ) : (
         /*
-          三栏外壳来自 `@coffer/ui/components.css` —— 和弹窗**同一套**。
-          宽度由容器查询决定：宽时三栏并列，窄时详情盖住列表。
+          三栏外壳来自 `@1warden/ui/components.css` —— 和弹窗**同一套**。
+          可用宽度决定：宽窗口分栏，窄窗口详情盖住列表，和焦点/inert 判断一致。
           这里不再写死 `w-[var(--list-w)]`，那是布局类的事。
         */
-        <div ref={contentRef} className="vault-content" data-detail={selected !== null} data-detail-mounted={detailPresence.mounted}>
+        <div className="vault-content" data-detail={selected !== null} data-detail-mounted={detailPresence.mounted}>
           <div inert={detailOpen} className="below-titlebar vault-list bg-[var(--surface-content)]">
             {/* 这一条也是标题栏的一部分 —— 整条顶部带子都可以拖窗口 */}
-            <div className="band" data-tauri-drag-region="deep">
+            <div className="band vault-list-toolbar" data-tauri-drag-region="deep">
               {/* 导航开关 —— 和扩展端同一条位置：顶栏最左、搜索框前面。
                   曾经绝对定位到窗口左上角，那里是 macOS 红绿灯的地盘（系统画的，
                   抢不过），而且窗口角落不该放应用控件。 */}
@@ -383,7 +397,7 @@ export function VaultView({ client, onLock }: Props) {
                   </>
                 )}
               </div>
-              <button onClick={() => setMode({ kind: 'new' })} title="新建条目  ⌘N" className="btn btn-primary">
+              <button onClick={() => setMode({ kind: 'new' })} title={`新建条目  ${primaryShortcut('N')}`} className="btn btn-primary">
 <IconPlus size={15} />
 </button>
             </div>
@@ -533,7 +547,7 @@ export function VaultView({ client, onLock }: Props) {
         serverUrl={session.account?.serverUrl ?? ''}
         onClose={() => setSettingsOpen(false)}
         capabilities={client.capabilities}
-        onDisconnect={() => client.logout()}
+        onDisconnect={onLogout ?? (() => client.logout())}
       />
 
       {/*
@@ -569,6 +583,7 @@ export function VaultView({ client, onLock }: Props) {
         }}
       />
     </div>
+    </NavDrawerProvider>
   );
 }
 
@@ -588,9 +603,15 @@ function DeleteDialog(props: {
   onTrash: () => Promise<void>;
   onPermanent: () => Promise<void>;
 }) {
-  const [ack, setAck] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const viewStore = useLocalStore(() => {
+    const ack = false;
+    const busy = false;
+    const error = (null) as string | null;
+    return { ack, busy, error };
+  });
+  const [ack, setAck] = useStoreField(viewStore, 'ack');
+  const [busy, setBusy] = useStoreField(viewStore, 'busy');
+  const [error, setError] = useStoreField(viewStore, 'error');
   const retained = useRetainedPresence(props.item);
   useEffect(() => {
     if (props.item) { setAck(false); setBusy(false); setError(null); }
@@ -656,6 +677,7 @@ function Sidebar(props: {
   unlockedAccounts?: readonly string[];
   serverUrl: string;
   onOpenSettings: () => void;
+  onOpenProfile: () => void;
   /** 生成器是浮层，不是一屏 —— 侧栏只负责把它叫出来，选中态跟着它的开合走 */
   generatorOpen: boolean;
   onOpenGenerator: () => void;
@@ -684,15 +706,21 @@ function Sidebar(props: {
   function onNavSelect(key: string): void {
     if (key.startsWith('type:')) props.onSelect({ kind: 'type', type: key.slice('type:'.length) });
     else if (key.startsWith('folder:')) props.onSelect({ kind: 'folder', id: key.slice('folder:'.length) });
-    else if (key === 'profile') props.onOpenSettings();
     else if (key === 'generator') props.onOpenGenerator();
     else props.onSelect({ kind: key as 'all' | 'favorites' | 'security' | 'import' });
   }
 
-  const [creating, setCreating] = useState(false);
-  const [menuFor, setMenuFor] = useState<string | null>(null);
-  const [renaming, setRenaming] = useState<string | null>(null);
-  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const viewStore = useLocalStore(() => {
+    const creating = false;
+    const menuFor = (null) as string | null;
+    const renaming = (null) as string | null;
+    const confirmDelete = (null) as string | null;
+    return { creating, menuFor, renaming, confirmDelete };
+  });
+  const [creating, setCreating] = useStoreField(viewStore, 'creating');
+  const [menuFor, setMenuFor] = useStoreField(viewStore, 'menuFor');
+  const [renaming, setRenaming] = useStoreField(viewStore, 'renaming');
+  const [confirmDelete, setConfirmDelete] = useStoreField(viewStore, 'confirmDelete');
 
   return (
     /*
@@ -703,8 +731,8 @@ function Sidebar(props: {
     */
     /*
       ⚠️ 包在 `NavDrawer` 里 —— **和扩展端同一个结构**。
-      宽屏时 CSS 把它变回常驻侧栏（见 components.css 的 `@container shell`），
-      窄屏时它就是悬停抽屉。两端因此是同一份标记，只是宽度不同。
+      宽窗口时 CSS 把它变回常驻侧栏，窄窗口时它是点击展开的抽屉。
+      各平台使用同一份标记，由当前窗口可用宽度决定布局。
     */
     <NavDrawer
       className="app-sidebar below-titlebar"
@@ -713,7 +741,7 @@ function Sidebar(props: {
         account={{ email: props.account, serverUrl: props.serverUrl, profile: props.profile }}
         syncing={props.syncing}
         unlockedAccounts={props.unlockedAccounts ?? []}
-        onProfile={props.onOpenSettings}
+        onProfile={props.onOpenProfile}
         onSettings={props.onOpenSettings}
         onLogout={props.onLogout}
         onSwitch={props.onSwitchAccount}
@@ -721,7 +749,6 @@ function Sidebar(props: {
       current={currentKey}
       onSelect={onNavSelect}
       groups={[
-        { key: 'profile', entries: [{ key: 'profile', label: '资料', icon: <IconIdentity size={16} /> }] },
         {
           key: 'main',
           title: '',
@@ -893,7 +920,7 @@ function NavItem(props: {
 }
 
 /*
- * `ItemRow` 已经搬到 `@coffer/ui` —— 桌面端和浏览器插件**共用同一个**。
+ * `ItemRow` 已经搬到 `@1warden/ui` —— 桌面端和浏览器插件**共用同一个**。
  *
  * 搬家的理由不是「少写点代码」：这一行决定「同一条记录看起来是什么样」，
  * 两处各写一遍的后果是**同一条在两个地方显示成不同的东西**，
@@ -916,7 +943,11 @@ function InlineInput({ initial = '', placeholder, onCommit, onCancel }: {
   onCommit: (value: string) => void | Promise<void>;
   onCancel: () => void;
 }) {
-  const [value, setValue] = useState(initial);
+  const viewStore = useLocalStore(() => {
+    const value = initial;
+    return { value };
+  });
+  const [value, setValue] = useStoreField(viewStore, 'value');
   return (
     <input
       autoFocus
@@ -943,7 +974,7 @@ function InlineInput({ initial = '', placeholder, onCommit, onCancel }: {
  */
 function EmptyDetail({ hasItems }: { hasItems: boolean }) {
   return (
-    <div className="screen-in flex h-full items-center justify-center p-10">
+    <div className="fade-in flex h-full items-center justify-center p-10">
       <div className="max-w-[300px] text-center">
         <span className="mx-auto mb-4 grid h-11 w-11 place-items-center rounded-[var(--radius-md)] bg-[var(--surface-well)] text-[var(--ink-tertiary)]">
           <IconKeyboard size={20} />
@@ -953,7 +984,7 @@ function EmptyDetail({ hasItems }: { hasItems: boolean }) {
         </p>
         <p className="mt-1.5 text-xs leading-relaxed text-[var(--ink-tertiary)]">
           {hasItems
-            ? '用 ↑ ↓ 在列表里移动，⌘F 直接搜名字或网址。'
+            ? `用 ↑ ↓ 在列表里移动，${primaryShortcut('F')} 直接搜名字或网址。`
             : '左上的「新建」可以从空白开始，或从 1Password、Bitwarden 导入。'}
         </p>
       </div>
@@ -968,8 +999,13 @@ function BrowserContext({ client, site, error, onRefresh, onSelectSite }: {
   onRefresh: () => void;
   onSelectSite: () => void;
 }) {
-  const [busy, setBusy] = useState(false);
-  const [actionError, setActionError] = useState<string | null>(null);
+  const viewStore = useLocalStore(() => {
+    const busy = false;
+    const actionError = (null) as string | null;
+    return { busy, actionError };
+  });
+  const [busy, setBusy] = useStoreField(viewStore, 'busy');
+  const [actionError, setActionError] = useStoreField(viewStore, 'actionError');
   async function capture(save: boolean): Promise<void> {
     if (!client.browser || site?.tabId == null || busy) return;
     setBusy(true); setActionError(null);
@@ -1004,8 +1040,13 @@ function siteHost(url: string): string {
 }
 
 function BrowserFill({ client, itemId, tabId }: { client: ApplicationClient; itemId: string; tabId: number }) {
-  const [busy, setBusy] = useState(false);
-  const [result, setResult] = useState<{ ok: boolean; message: string } | null>(null);
+  const viewStore = useLocalStore(() => {
+    const busy = false;
+    const result = (null) as { ok: boolean; message: string } | null;
+    return { busy, result };
+  });
+  const [busy, setBusy] = useStoreField(viewStore, 'busy');
+  const [result, setResult] = useStoreField(viewStore, 'result');
   async function fill(): Promise<void> {
     if (!client.browser || busy) return;
     setBusy(true); setResult(null);
@@ -1038,13 +1079,19 @@ interface DetailProps {
 }
 
 function DetailBack({ onBack }: { onBack: () => void }) {
-  return <button onClick={onBack} aria-label="返回列表" className="detail-back btn btn-ghost shrink-0 p-1.5"><IconArrowLeft size={17} /></button>;
+  return <BackButton onBack={onBack} label="返回列表" className="detail-back" />;
 }
 
 function SelectedDetail({ item, ...props }: Omit<DetailProps, 'item'> & { item: ItemSummary }) {
-  const [detail, setDetail] = useState<ItemDetailData | null>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [retry, setRetry] = useState(0);
+  const viewStore = useLocalStore(() => {
+    const detail = (null) as ItemDetailData | null;
+    const error = (null) as string | null;
+    const retry = 0;
+    return { detail, error, retry };
+  });
+  const [detail, setDetail] = useStoreField(viewStore, 'detail');
+  const [error, setError] = useStoreField(viewStore, 'error');
+  const [retry, setRetry] = useStoreField(viewStore, 'retry');
   useEffect(() => {
     let alive = true;
     setError(null);
@@ -1066,9 +1113,15 @@ function SelectedDetail({ item, ...props }: Omit<DetailProps, 'item'> & { item: 
 
 function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, onBack, site }: DetailProps) {
   const summary = item.summary;
-  const [totp, setTotp] = useState<{ code: string; remaining: number; period: number } | null>(null);
-  const [totpError, setTotpError] = useState<string | null>(null);
-  const [secretError, setSecretError] = useState<string | null>(null);
+  const viewStore = useLocalStore(() => {
+    const totp = (null) as { code: string; remaining: number; period: number } | null;
+    const totpError = (null) as string | null;
+    const secretError = (null) as string | null;
+    return { totp, totpError, secretError };
+  });
+  const [totp, setTotp] = useStoreField(viewStore, 'totp');
+  const [totpError, setTotpError] = useStoreField(viewStore, 'totpError');
+  const [secretError, setSecretError] = useStoreField(viewStore, 'secretError');
   useEffect(() => {
     if (!item.login?.hasTotp) return;
     let alive = true;
@@ -1097,7 +1150,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
   const uris = item.login?.uris ?? [];
 
   return (
-    <article className="screen-in mx-auto w-full px-8 pb-12" style={{ maxWidth: 'calc(var(--detail-w) + 64px)' }}>
+    <article className="fade-in mx-auto w-full px-8 pb-12" style={{ maxWidth: 'calc(var(--detail-w) + 64px)' }}>
       {/* 头部跟着滚 —— 长条目滚到下面时，用户仍然看得到自己在看哪一条 */}
       <header className="sticky top-0 z-10 -mx-8 flex flex-wrap items-start gap-3.5 border-b border-[var(--border-subtle)] bg-[var(--surface-paper)] px-8 pb-4 pt-5">
         {/*
@@ -1312,10 +1365,10 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
   );
 }
 
-/* `TYPE_LABEL` 搬到 `@coffer/ui` 了 —— 两端各写一份的后果是
+/* `TYPE_LABEL` 搬到 `@1warden/ui` 了 —— 两端各写一份的后果是
    同一个类型在两个地方叫不同的名字（真发生过：「信用卡」vs「卡片」）。 */
 
-/* `IDENTITY_LABEL` 搬到 `@coffer/ui` 了 —— 和 `TYPE_LABEL` 同一族，
+/* `IDENTITY_LABEL` 搬到 `@1warden/ui` 了 —— 和 `TYPE_LABEL` 同一族，
    各写一份的后果是「身份证号」vs「证件号」那种漂。 */
 
 /**
@@ -1334,8 +1387,13 @@ function AttachmentRow({ client, itemId, attachment }: {
   itemId: string;
   attachment: ItemDetailData['attachments'][number];
 }) {
-  const [state, setState] = useState<'idle' | 'busy' | 'saved' | 'failed'>('idle');
-  const [note, setNote] = useState('');
+  const viewStore = useLocalStore(() => {
+    const state = ('idle') as 'idle' | 'busy' | 'saved' | 'failed';
+    const note = '';
+    return { state, note };
+  });
+  const [state, setState] = useStoreField(viewStore, 'state');
+  const [note, setNote] = useStoreField(viewStore, 'note');
 
   async function fetchIt(): Promise<void> {
     setState('busy');
@@ -1388,7 +1446,7 @@ function AttachmentRow({ client, itemId, attachment }: {
   );
 }
 
-/* `Section` 也搬到 `@coffer/ui` 了 —— 详情两边的分组方式必须一致，
+/* `Section` 也搬到 `@1warden/ui` 了 —— 详情两边的分组方式必须一致，
    否则「登录信息」在一边是一张卡、在另一边是几个散字段。 */
 
 export { ItemDetail, EmptyDetail };

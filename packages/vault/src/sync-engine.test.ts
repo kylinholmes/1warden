@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { makeUserKey } from '@coffer/crypto';
+import { makeUserKey } from '@1warden/crypto';
 import { SyncEngine } from './sync-engine';
 import type { SyncDeps } from './sync-engine';
 import { VaultSession } from './session';

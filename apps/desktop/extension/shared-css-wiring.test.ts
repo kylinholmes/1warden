@@ -1,14 +1,15 @@
 import { describe, it, expect } from 'vitest';
+import { COMPACT_LAYOUT_QUERY } from '../../../packages/ui/src/layout';
 
 /**
- * 守卫：`@coffer/ui` 导出的每一份 CSS，用到它的 app 都必须**真的引进来**。
+ * 守卫：`@1warden/ui` 导出的每一份 CSS，用到它的 app 都必须**真的引进来**。
  *
  * ## 为什么需要它
  *
  * 这个 bug 真的发生过，而且没有任何东西能发现：
  *
  * `IconGlyph` / `ItemIcon` 渲染的是 `.tile-img` / `.tile-avatar` / `.tile-glyph`，
- * 这三个类住在 `@coffer/ui/components.css`。扩展端的 `styles.css` 只引了
+ * 这三个类住在 `@1warden/ui/components.css`。扩展端的 `styles.css` 只引了
  * `theme.css` —— 于是**类名在 DOM 上、规则却不在产物里**：弹窗里的条目图标
  * 没有 34px 尺寸、没有圆角、没有彩色底，全裸着。
  *
@@ -60,21 +61,21 @@ function sourceEndingWith(suffix: string): string | undefined {
   return key === undefined ? undefined : FILES[key];
 }
 
-/** `@coffer/ui` 导出的全部 CSS 入口，形如 `['@coffer/ui/theme.css', …]` */
+/** `@1warden/ui` 导出的全部 CSS 入口，形如 `['@1warden/ui/theme.css', …]` */
 function sharedCssEntries(): string[] {
   const pkg = JSON.parse(sourceEndingWith('packages/ui/package.json')!) as {
     exports?: Record<string, unknown>;
   };
   return Object.keys(pkg.exports ?? {})
     .filter((key) => key.endsWith('.css'))
-    .map((key) => `@coffer/ui/${key.replace(/^\.\//, '')}`);
+    .map((key) => `@1warden/ui/${key.replace(/^\.\//, '')}`);
 }
 
-describe('@coffer/ui 的 CSS 在两个 app 里都接上了', () => {
+describe('@1warden/ui 的 CSS 在两个 app 里都接上了', () => {
   it('共享包确实导出了 CSS（否则下面两条是空转的）', () => {
     const entries = sharedCssEntries();
-    expect(entries).toContain('@coffer/ui/theme.css');
-    expect(entries).toContain('@coffer/ui/components.css');
+    expect(entries).toContain('@1warden/ui/theme.css');
+    expect(entries).toContain('@1warden/ui/components.css');
   });
 
   it('glob 确实读到了三份文件', () => {
@@ -149,6 +150,14 @@ describe('两个 app 都告诉 Tailwind 去扫共享包', () => {
  * 这里守住声明约束；真实工具栏的尺寸由 scripts/toolbar-popup-smoke.ts 验收。
  */
 describe('弹窗外壳的尺寸约束', () => {
+  it('所有平台按可用宽度布局，导航不会由 hover 或焦点自动打开', () => {
+    const css = sourceEndingWith('packages/ui/src/components.css')!.replace(/\/\*[\s\S]*?\*\//g, '');
+    expect(css).toContain(`@media ${COMPACT_LAYOUT_QUERY}`);
+    expect(css).toContain('@media (width >= 900px)');
+    expect(css).not.toMatch(/@media\s*\(orientation:/);
+    expect(css).not.toMatch(/@container (?:floating|vault|shell)/);
+    expect(css).not.toMatch(/(?:nav-trigger|nav-drawer(?:-panel)?):(?:hover|focus-within)[^{]*\.nav-drawer-panel/);
+  });
   it('⚠️ 外壳本身**不是** inline-size 容器', () => {
     const css = sourceEndingWith('packages/ui/src/components.css')!;
     const shell = css.match(/\.vault-shell \{[^}]*\}/)?.[0] ?? '';

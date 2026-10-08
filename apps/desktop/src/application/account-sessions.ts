@@ -1,4 +1,4 @@
-import type { VaultClient } from '@coffer/vault';
+import type { VaultClient } from '@1warden/vault';
 import { APPLICATION_METHODS } from './client';
 import { accountKey, lockedAccount } from './account-target';
 import { createVaultService } from './service';

@@ -1,10 +1,9 @@
-import { FloatingPanel } from '@coffer/ui';
-import { GeneratorBody, IconClose, IconDice } from '@coffer/ui';
+import { FloatingPanel, GeneratorBody, PageHeader } from '@1warden/ui';
 
 /**
  * 生成器 —— **桌面端这里只剩浮层外壳**。
  *
- * 内容本体在 `@coffer/ui` 的 `GeneratorBody`，和扩展弹窗**同一份代码**。
+ * 内容本体在 `@1warden/ui` 的 `GeneratorBody`，和扩展弹窗**同一份代码**。
  * 那份以前是两个 app 里各写一遍，而弹窗那份弱得多（没有口令、只有两类
  * 字符、而且**结果被截断看不全**）—— 详见共享组件顶部。
  *
@@ -32,13 +31,8 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
         </>
       }
     >
-      <div className="panel-head">
-        <IconDice size={15} className="shrink-0 text-[var(--ink-tertiary)]" />
-        <h2 id="generator-title" className="min-w-0 flex-1 truncate text-md font-medium">生成器</h2>
-        <button onClick={onClose} aria-label="关闭生成器" title="关闭  esc" className="btn btn-ghost -mr-1 p-1.5">
-          <IconClose size={15} />
-        </button>
-      </div>
+      <PageHeader panel title="生成器" titleId="generator-title" onBack={onClose} onClose={onClose}
+        breadcrumbs={[{ label: '保险库', onSelect: onClose }, { label: '生成器' }]} />
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <GeneratorBody />

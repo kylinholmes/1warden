@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useEffect, useRef, type FormEvent, type ReactNode } from 'react';
 import {
-  IconAlert, IconArrowLeft, IconChevronDown, IconGlobe, IconPlus, IconServer, IconSpinner,
+  IconAlert, IconChevronDown, IconGlobe, IconPlus, IconServer, IconSpinner,
 } from './icons';
 import { TwoFactorForm } from './TwoFactorForm';
 import type { SavedAccount } from './accounts';
+import { BackButton } from './PageHeader';
 
 /**
  * 连接 / 解锁这一屏 —— **两端共用这一份**。
@@ -65,7 +67,7 @@ export function ConnectScreen({
   challenge: { providers: number[] } | null;
   /** 桌面端专有的证书确认那一屏。扩展端恒为 `undefined` */
   cert?: ReactNode;
-  /** 桌面端有 Coffer 标；弹窗的壳里已经有了，不重复画 */
+  /** 桌面端有 1Warden 标；弹窗的壳里已经有了，不重复画 */
   brand?: ReactNode;
   onSubmit: (c: ConnectCreds) => void;
   onTwoFactor: (p: { code: string; provider: number; remember: boolean }) => void;
@@ -87,10 +89,17 @@ export function ConnectScreen({
    * 这样回访用户是「点一下 + 敲密码」，第一次用的人是完整表单，
    * 两条路都不别扭。
    */
-  const [view, setView] = useState<'pick' | 'form' | 'quick' | null>(initialCredentials ? 'form' : null);
-  const [serverUrl, setServerUrl] = useState(initialCredentials?.serverUrl ?? '');
-  const [email, setEmail] = useState(initialCredentials?.email ?? '');
-  const [password, setPassword] = useState('');
+  const viewStore = useLocalStore(() => {
+    const view = (initialCredentials ? 'form' : null) as 'pick' | 'form' | 'quick' | null;
+    const serverUrl = initialCredentials?.serverUrl ?? '';
+    const email = initialCredentials?.email ?? '';
+    const password = '';
+    return { view, serverUrl, email, password };
+  });
+  const [view, setView] = useStoreField(viewStore, 'view');
+  const [serverUrl, setServerUrl] = useStoreField(viewStore, 'serverUrl');
+  const [email, setEmail] = useStoreField(viewStore, 'email');
+  const [password, setPassword] = useStoreField(viewStore, 'password');
   const returning = useRef(false);
 
   useEffect(() => {
@@ -144,9 +153,7 @@ export function ConnectScreen({
 
       <div className="mt-5">
         {(view === 'form' || inFlow) && (canGoBack || Boolean(accounts?.length)) && (
-          <button type="button" aria-label="返回上一级" onClick={goBack} className="btn btn-quiet mb-4 gap-1.5 py-1.5 text-xs">
-            <IconArrowLeft size={13} />返回
-          </button>
+          <BackButton label="返回上一级" onBack={goBack} showLabel className="mb-4" />
         )}
         {view === null ? (
           /* 账户还在读。**不渲染表单** —— 见上面那个 effect 的说明 */
@@ -258,11 +265,13 @@ export function ConnectScreen({
  * 每一项给出**能用来区分的信息**：邮箱、服务器主机名。
  * 只显示邮箱是不够的（同一个人在两个服务器上常用同一个邮箱）。
  */
-export function AccountPicker({ accounts, busy = false, onPick, onOther }: {
+export function AccountPicker({ accounts, busy = false, onPick, onOther, renderIdentity }: {
   accounts: SavedAccount[];
   busy?: boolean;
   onPick: (a: SavedAccount) => void;
   onOther: () => void;
+  /** Optional presentation only; credentials and remembered account storage stay unchanged. */
+  renderIdentity?: (account: SavedAccount) => ReactNode;
 }) {
   return (
     <div>
@@ -275,28 +284,38 @@ export function AccountPicker({ accounts, busy = false, onPick, onOther }: {
               onClick={() => onPick(a)}
               className="group flex w-full items-center gap-3 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-paper)] px-3 py-2.5 text-left transition-colors duration-[var(--dur-fast)] hover:border-[var(--border-strong)] hover:bg-[var(--surface-hover)]"
             >
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-md font-semibold text-[var(--accent)]">
-                {a.email.slice(0, 1).toUpperCase()}
-              </span>
-              <span className="min-w-0 flex-1">
-                <span className="block truncate text-md">{a.email}</span>
-                <span className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
-                  <IconGlobe size={12} className="shrink-0" />
-                  <span className="truncate">{hostOf(a.serverUrl)}</span>
-                </span>
-              </span>
+              {renderIdentity ? renderIdentity(a) : <AccountIdentity account={a} />}
               <IconChevronDown size={15} className="-rotate-90 shrink-0 text-[var(--ink-tertiary)]" />
             </button>
           </li>
         ))}
       </ul>
 
-      <button type="button" onClick={onOther} disabled={busy} className="btn btn-quiet mt-3 w-full gap-2 py-2.5">
+      <button type="button" data-add-server onClick={onOther} disabled={busy} className="btn btn-quiet mt-3 w-full gap-2 py-2.5">
         <IconPlus size={14} />
-        连接其他服务器
+        {accounts.length ? '连接其他服务器' : '添加第一个服务器'}
       </button>
     </div>
   );
+}
+
+/** Shared identity layout; the host can supply a cached avatar/name without changing selection. */
+export function AccountIdentity({ account, displayName, avatar }: {
+  account: SavedAccount; displayName?: string | undefined; avatar?: ReactNode;
+}) {
+  return <>
+    {avatar ?? <span aria-hidden="true" className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-[var(--accent-tint)] text-md font-semibold text-[var(--accent)]">
+      {(displayName || account.email).slice(0, 1).toUpperCase()}
+    </span>}
+    <span className="min-w-0 flex-1">
+      <span className="block truncate text-md">{displayName || account.email}</span>
+      {displayName && <span className="mt-0.5 block truncate text-xs text-[var(--ink-secondary)]">{account.email}</span>}
+      <span className="mt-0.5 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
+        <IconGlobe size={12} className="shrink-0" />
+        <span className="truncate">{hostOf(account.serverUrl)}</span>
+      </span>
+    </span>
+  </>;
 }
 
 /** 已选定账户时的摘要 —— 替代两个已经不需要再填的输入框 */
@@ -315,13 +334,7 @@ export function AccountChip({ email, serverUrl, onBack }: {
           <span className="truncate">{hostOf(serverUrl)}</span>
         </span>
       </span>
-      <button
-        type="button" onClick={onBack}
-        className="btn btn-ghost shrink-0 gap-1.5" title="换一个账户"
-      >
-        <IconArrowLeft size={13} />
-        更换
-      </button>
+      <BackButton onBack={onBack} label="换一个账户" showLabel />
     </div>
   );
 }

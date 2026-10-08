@@ -121,7 +121,12 @@ pub fn accessibility_permission() -> PermissionState {
     }
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub fn accessibility_permission() -> PermissionState {
+    PermissionState::Granted
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn accessibility_permission() -> PermissionState {
     PermissionState::Denied
 }
@@ -365,7 +370,12 @@ fn press(
     Ok(())
 }
 
-#[cfg(not(target_os = "macos"))]
+#[cfg(target_os = "windows")]
+pub fn perform(actions: &[TypeAction]) -> Result<(), String> {
+    crate::windows::perform(actions)
+}
+
+#[cfg(not(any(target_os = "macos", target_os = "windows")))]
 pub fn perform(_actions: &[TypeAction]) -> Result<(), String> {
     Err("这个平台还不支持原生自动输入".into())
 }
@@ -392,7 +402,9 @@ pub fn autotype_status() -> AutotypeStatus {
             crate::hotkey::MOD_CMD | crate::hotkey::MOD_SHIFT,
             crate::hotkey::DEFAULT_KEYCODE,
         ),
-        #[cfg(not(target_os = "macos"))]
+        #[cfg(target_os = "windows")]
+        shortcut: crate::windows::SHORTCUT.into(),
+        #[cfg(not(any(target_os = "macos", target_os = "windows")))]
         shortcut: String::new(),
     }
 }

@@ -1,8 +1,9 @@
+import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { ProfileAvatar } from '../components/ProfileAvatar';
-import { useState, useEffect, useRef, type FormEvent } from 'react';
+import { useEffect, useRef, type FormEvent } from 'react';
 import type { ApplicationClient } from '../application/types';
-import type { TwoFactorChallenge } from '@coffer/vault';
-import { IconAlert, IconGlobe, IconSpinner, TwoFactorForm } from '@coffer/ui';
+import type { TwoFactorChallenge } from '@1warden/vault';
+import { BackButton, IconAlert, IconGlobe, IconSpinner, TwoFactorForm } from '@1warden/ui';
 import { twoFactorChallenge } from './auth-error';
 
 interface Props {
@@ -32,25 +33,37 @@ interface Props {
  * 淡入承担（`.screen-in`）。
  */
 export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
-  const [password, setPassword] = useState('');
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
+  const viewStore = useLocalStore(() => {
+    const password = '';
+    const busy = false;
+    const error = (null) as string | null;
+    const challenge = (null) as TwoFactorChallenge | null;
+    return { password, busy, error, challenge };
+  });
+  const [password, setPassword] = useStoreField(viewStore, 'password');
+  const [busy, setBusy] = useStoreField(viewStore, 'busy');
+  const [error, setError] = useStoreField(viewStore, 'error');
+  const [challenge, setChallenge] = useStoreField(viewStore, 'challenge');
   const { account, profile } = client.getSnapshot();
   const inputRef = useRef<HTMLInputElement>(null);
+  const operation = useRef(0);
+  useEffect(() => () => { operation.current++; }, []);
 
   // 解锁屏一出现就聚焦输入框 —— 用户按下快捷键后应该能直接开始打字
   useEffect(() => { inputRef.current?.focus(); }, []);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    const version = ++operation.current;
     setBusy(true);
     setError(null);
     try {
       await client.unlock(password);
+      if (version !== operation.current) return;
       setPassword(''); // 成功后立刻从组件状态里清掉
       onUnlocked();
     } catch (err) {
+      if (version !== operation.current) return;
       const nextChallenge = twoFactorChallenge(err);
       if (nextChallenge) setChallenge(nextChallenge);
       else setError(messageOf(err));
@@ -58,26 +71,30 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
       // 失败后把焦点还给输入框：用户下一步一定是重输
       inputRef.current?.focus();
     } finally {
-      setBusy(false);
+      if (version === operation.current) setBusy(false);
     }
   }
 
   async function submitCode(code: string, provider: number, remember: boolean): Promise<void> {
+    const version = ++operation.current;
     setBusy(true);
     setError(null);
     try {
       await client.connectWithTwoFactor(code, provider, remember);
+      if (version !== operation.current) return;
       onUnlocked();
     } catch (err) {
+      if (version !== operation.current) return;
       if ((err as { kind?: string } | null)?.kind === 'authRestartRequired') setChallenge(null);
       setError(messageOf(err));
-    } finally { setBusy(false); }
+    } finally { if (version === operation.current) setBusy(false); }
   }
 
   return (
     /* 整块背景可拖 —— 和连接屏同理，这一屏没有顶部带子（见 Connect.tsx） */
     <div className="below-titlebar flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
       <div className="screen-in w-full max-w-[380px]">
+        <BackButton label="返回首页" showLabel className="mb-6" onBack={() => { operation.current++; setPassword(''); onDisconnect(); }} />
         <div className="flex flex-col items-center text-center">
           <ProfileAvatar profile={profile} fallback={account?.email ?? ''} className={`mb-4 h-16 w-16 text-xl ${busy ? 'breathe' : ''}`} />
           <p className="text-md font-medium">{profile?.displayName || account?.email}</p>
@@ -116,14 +133,6 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
           </p>
         )}
 
-        <div className="mt-9 text-center">
-          <button
-            onClick={onDisconnect}
-            className="text-xs text-[var(--ink-tertiary)] underline-offset-2 transition-colors duration-[var(--dur-fast)] hover:text-[var(--ink-secondary)] hover:underline"
-          >
-            使用其他账户
-          </button>
-        </div>
       </div>
     </div>
   );

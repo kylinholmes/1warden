@@ -5,7 +5,7 @@ import { parseKeePassXml, looksLikeKeePassXml } from './import-keepass';
 /**
  * ⚠️ 自己写 XML 解析是有风险的决定，所以每一条边界都有用例。
  *
- * 现实约束：MV3 的 service worker 里**没有 `DOMParser`**，而 `@coffer/vault`
+ * 现实约束：MV3 的 service worker 里**没有 `DOMParser`**，而 `@1warden/vault`
  * 要在扩展里跑。引一个 XML 库则要连 DOM 仿真一起引。所以写一个**只够用**的：
  * 不支持 DTD、不支持命名空间、不支持处理指令 —— 而 KeePass 的导出只用得到
  * 元素、属性、文本、CDATA 和实体。

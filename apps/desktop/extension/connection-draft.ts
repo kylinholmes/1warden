@@ -2,7 +2,7 @@ import type { ConnectionDraftStore } from '../src/application/types';
 import { lockedAccount } from '../src/application/account-target';
 import type { StorageArea } from './session-store';
 
-export const CONNECTION_DRAFT_KEY = 'coffer.connectionDraft';
+export const CONNECTION_DRAFT_KEY = '1warden.connectionDraft';
 
 function publicReturnAccount(value: unknown): { serverUrl: string; email: string } | undefined {
   try {

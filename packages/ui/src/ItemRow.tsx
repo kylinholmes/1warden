@@ -11,7 +11,7 @@ import { IconStar } from './icons';
  * 显示成不同的东西**（插件里显示 `bilibili`、桌面端显示 `www.bilibili.com`）。
  * 用户会以为记错了、甚至以为丢数据。
  *
- * 所以第二行**不由这个组件推**，由调用方把 `@coffer/vault` 的 `summaryOf`
+ * 所以第二行**不由这个组件推**，由调用方把 `@1warden/vault` 的 `summaryOf`
  * 结果传进来 —— 那条规则（卡号必须掩码、没有可显示的就返回 null 而不是
  * 填「登录信息」这种每行都一样的占位词）只写在一处。
  *
@@ -19,7 +19,7 @@ import { IconStar } from './icons';
  *
  * 两端的图标**取法**是真的不同，而且这个不同是对的：桌面端跨源被 CORS 拦，
  * 得走 Rust；弹窗有 host_permissions，直接 fetch。共享的 `IconStore` 已经把
- * 规则和缓存策略收在 `@coffer/vault` 里，分叉只在「怎么发请求」那一个回调上。
+ * 规则和缓存策略收在 `@1warden/vault` 里，分叉只在「怎么发请求」那一个回调上。
  *
  * 所以这里收 `ReactNode`：桌面传 `<ItemIcon item store />`，弹窗传
  * `<IconGlyph domain text hue type store />`（它只拿得到摘要，见那个组件的

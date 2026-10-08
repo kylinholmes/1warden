@@ -8,9 +8,10 @@ export function firefoxManifest(source: Record<string, unknown>): Record<string,
   const result = structuredClone(source);
   result['background'] = { scripts: [background.service_worker], type: background.type ?? 'classic' };
   delete result['minimum_chrome_version'];
+  delete result['key']; // Chromium identity is not a Firefox manifest field.
   result['permissions'] = ((source['permissions'] ?? []) as string[]).filter((p) => p !== 'offscreen');
   result['browser_specific_settings'] = {
-    gecko: { id: 'coffer@coffer.app', strict_min_version: '128.0' },
+    gecko: { id: '1warden@1warden.app', strict_min_version: '128.0' },
   };
   return result;
 }

@@ -87,6 +87,8 @@ export function FloatingPanel({
       const activePanels = document.querySelectorAll('.floating-layer[data-open="true"] .panel');
       if (activePanels[activePanels.length - 1] !== panelRef.current) return;
       if (e.key === 'Escape') {
+        // An open nested picker owns its first Escape; let its target handler run.
+        if (e.target instanceof Element && e.target.closest('[data-escape-scope="true"]')) return;
         // 阻止冒泡：背后的界面（比如保险库里的 ⌘F/⌘L 监听）不该同时响应
         e.preventDefault();
         e.stopPropagation();

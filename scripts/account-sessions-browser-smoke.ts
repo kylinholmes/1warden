@@ -11,9 +11,9 @@ import { createFakeServer, fakeJwt } from '../packages/vault/src/testing/fake-se
 const product = process.argv[2] ?? 'edge';
 if (!['edge', 'zen'].includes(product)) throw Error('Usage: bun scripts/account-sessions-browser-smoke.ts edge|zen');
 const firefox = product === 'zen';
-const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.COFFER_PUPPETEER
-  ?? '/tmp/coffer-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
-const directory = mkdtempSync(join(tmpdir(), `coffer-account-sessions-${product}-`));
+const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.ONEWARDEN_PUPPETEER
+  ?? '/tmp/onewarden-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
+const directory = mkdtempSync(join(tmpdir(), `onewarden-account-sessions-${product}-`));
 const dist = join(directory, 'extension');
 cpSync(resolve('apps/desktop', firefox ? 'dist-firefox' : 'dist-extension'), dist, { recursive: true });
 const uuid = 'dcb51578-69ac-45f2-8305-27ef44a3b3f7';
@@ -81,11 +81,11 @@ function check(ok: unknown, name: string) {
 }
 try {
   browser = await puppeteer.launch({ browser: firefox ? 'firefox' : 'chrome', headless: true, userDataDir: directory,
-    executablePath: process.env[`COFFER_${product.toUpperCase()}`] ?? (firefox
+    executablePath: process.env[`ONEWARDEN_${product.toUpperCase()}`] ?? (firefox
       ? '/Applications/Zen.app/Contents/MacOS/zen' : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
     enableExtensions: true, protocolTimeout: 30_000,
     ...(firefox ? { args: ['--remote-allow-system-access'], extraPrefsFirefox: {
-      'extensions.webextensions.uuids': JSON.stringify({ 'coffer@coffer.app': uuid }),
+      'extensions.webextensions.uuids': JSON.stringify({ '1warden@1warden.app': uuid }),
     } } : { pipe: true }),
   });
   const id = await browser.installExtension(dist);
@@ -100,7 +100,7 @@ try {
   async function rpc(method: string, args: unknown[] = []) {
     return page.evaluate(async (m: string, values: unknown[]) => {
       const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-      return api.runtime.sendMessage({ type: 'coffer:application', method: m, args: values });
+      return api.runtime.sendMessage({ type: '1warden:application', method: m, args: values });
     }, method, args);
   }
   async function snapshot() {
@@ -123,7 +123,7 @@ try {
     await page.waitForSelector('.nav-trigger');
     await page.waitForFunction(async (target: { serverUrl: string; email: string }) => {
       const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-      const accounts = JSON.parse((await api.storage.local.get('coffer.accounts'))['coffer.accounts'] ?? '[]');
+      const accounts = JSON.parse((await api.storage.local.get('1warden.accounts'))['1warden.accounts'] ?? '[]');
       return accounts.some((saved: { serverUrl: string; email: string }) => saved.serverUrl === target.serverUrl && saved.email === target.email);
     }, {}, account.target);
   }
@@ -160,7 +160,7 @@ try {
     await page.waitForSelector(unlocked ? '.nav-trigger' : '#unlock-password');
     await page.waitForFunction(async (target: { serverUrl: string; email: string }) => {
       const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-      const current = (await api.runtime.sendMessage({ type: 'coffer:application', method: 'snapshot', args: [] })).result;
+      const current = (await api.runtime.sendMessage({ type: '1warden:application', method: 'snapshot', args: [] })).result;
       return current.account?.serverUrl === target.serverUrl && current.account?.email === target.email;
     }, {}, account.target);
   }

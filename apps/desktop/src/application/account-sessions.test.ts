@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installHost, resetHost } from '@coffer/ui';
-import { buildProfileItem, type VaultClient, type UserProfile } from '@coffer/vault';
+import { installHost, resetHost } from '@1warden/ui';
+import { buildProfileItem, type VaultClient, type UserProfile } from '@1warden/vault';
 import {
   concatBytes, deriveMasterKey, encryptBytes, encryptString, hashMasterPassword, makeUserKey, stretchMasterKey,
-} from '@coffer/crypto';
+} from '@1warden/crypto';
 import { createDesktopApplication } from './desktop';
 
 const a = { serverUrl: 'https://one.example', email: 'same@example.com' };

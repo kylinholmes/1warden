@@ -1,4 +1,4 @@
-import type { IconDiskCache } from '@coffer/vault';
+import type { IconDiskCache } from '@1warden/vault';
 
 /**
  * 图标**落盘**缓存 —— 两端共用。
@@ -17,7 +17,7 @@ import type { IconDiskCache } from '@coffer/vault';
  * 而它里面还住着同步缓存。撑爆的后果是**同步缓存也写不进去**，
  * 也就是「登录变慢」那个老问题会以一种完全无关的方式回来。
  */
-const DB_NAME = 'coffer-icons';
+const DB_NAME = 'onewarden-icons';
 const STORE = 'icons';
 
 function openDb(): Promise<IDBDatabase> {

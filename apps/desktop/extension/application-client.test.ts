@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { EMPTY_SNAPSHOT } from '../src/application/types';
-import { TwoFactorRequiredError } from '@coffer/api';
+import { TwoFactorRequiredError } from '@1warden/api';
 import { serializeError } from './application-rpc';
 import { twoFactorChallenge } from '../src/screens/auth-error';
 
@@ -25,7 +25,7 @@ it('prepares Add Account return identity before publishing the connection page',
   } });
   const { createExtensionApplicationClient } = await import('./application-client');
   const client = createExtensionApplicationClient(); await client.initialize();
-  client.subscribe(() => { if (client.getSnapshot().status === 'loggedOut') prepared.push(structuredClone(data['coffer.connectionDraft'])); });
+  client.subscribe(() => { if (client.getSnapshot().status === 'loggedOut') prepared.push(structuredClone(data['1warden.connectionDraft'])); });
   const selecting = client.switchAccount(null);
   await vi.waitFor(() => { expect(finish).toBeTypeOf('function'); });
   expect(prepared).toEqual([{ serverUrl: '', email: '', error: null, returnAccount: { serverUrl: account.serverUrl, email: account.email } }]);
@@ -51,6 +51,18 @@ it('finishes startup with a retryable error if the background never responds', a
   await client.initialize();
   expect(client.getSnapshot().status).toBe('loggedOut');
   client.dispose();
+});
+
+it.each(['search', 'getItem'] as const)('%s times out instead of leaving the interface spinning forever', async (method) => {
+  vi.resetModules(); vi.useFakeTimers();
+  vi.stubGlobal('chrome', { storage: { session: {} }, runtime: {
+    sendMessage: () => new Promise(() => {}),
+  } });
+  const { createExtensionApplicationClient } = await import('./application-client');
+  const client = createExtensionApplicationClient();
+  const pending = expect(client[method]('github')).rejects.toThrow('扩展后台响应超时，请重试');
+  await vi.advanceTimersByTimeAsync(5_000);
+  await pending; client.dispose();
 });
 
 it('explains a missing background receiver and allows an explicit startup retry', async () => {
@@ -87,7 +99,7 @@ it('does not refresh the displayed vault on a content script forged change notif
   let onMessage!: (message: unknown, sender: chrome.runtime.MessageSender) => void;
   let revision = 1;
   vi.stubGlobal('chrome', { storage: { session: {} }, runtime: {
-    id: 'coffer-id',
+    id: 'onewarden-id',
     onMessage: { addListener: (listener: typeof onMessage) => { onMessage = listener; }, removeListener: () => {} },
     sendMessage: async () => ({ ok: true, result: { ...EMPTY_SNAPSHOT, revision } }),
   } });
@@ -95,11 +107,11 @@ it('does not refresh the displayed vault on a content script forged change notif
   const client = createExtensionApplicationClient();
   await client.initialize();
   revision = 2;
-  onMessage({ type: 'coffer-internal:changed' }, { id: 'coffer-id', url: 'https://example.com', tab: { id: 1 } as chrome.tabs.Tab });
+  onMessage({ type: '1warden-internal:changed' }, { id: 'onewarden-id', url: 'https://example.com', tab: { id: 1 } as chrome.tabs.Tab });
   // Allow the request chain to finish if the notification was mistakenly accepted.
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(client.getSnapshot().revision).toBe(1);
-  onMessage({ type: 'coffer-internal:changed' }, { id: 'coffer-id' });
+  onMessage({ type: '1warden-internal:changed' }, { id: 'onewarden-id' });
   await new Promise((resolve) => setTimeout(resolve, 0));
   expect(client.getSnapshot().revision).toBe(2);
   client.dispose();

@@ -1,11 +1,11 @@
-# 1Password 功能 × Vaultwarden 能力 × Coffer 现状
+# 1Password 功能 × Vaultwarden 能力 × 1Warden 现状
 
 > 这份矩阵回答三个不同的问题，**不要把它们混为一谈**：
 >
 > 1. **1Password 有没有** —— 我们复刻的目标
 > 2. **Vaultwarden 支持不支持** —— 协议层给不给路。这一列决定的是「要不要
 >    自己做」，不是「能不能做」
-> 3. **Coffer 做到哪了** —— 代码里的实际状态
+> 3. **1Warden 做到哪了** —— 代码里的实际状态
 >
 > 第 2 列是 ❌ 的那些，几乎全都是**客户端自行实现**（服务端没有对应的
 > `/api/reports/*` 之类）—— 那反而是好事：数据不必离开设备。
@@ -16,7 +16,7 @@
 
 ## 1. 核心保险库
 
-| 功能 | 1Password | Vaultwarden | Coffer |
+| 功能 | 1Password | Vaultwarden | 1Warden |
 |---|---|---|---|
 | 主密码解锁 | ✅ | ✅ | ✅ |
 | Argon2id / PBKDF2 | ✅ | ✅ | ✅ 与官方 CLI 字节级互操作 |
@@ -36,7 +36,7 @@
 
 ## 2. 登录之外的凭据
 
-| 功能 | 1Password | Vaultwarden | Coffer |
+| 功能 | 1Password | Vaultwarden | 1Warden |
 |---|---|---|---|
 | TOTP 生成 | ✅ | ✅ `login.totp` | ✅ RFC 6238 官方向量验证 |
 | TOTP 放在任意条目上 | ✅ | ❌ 只在登录条目 | ✅ 双路径读取 + 原生优先写入 |
@@ -46,7 +46,7 @@
 
 ## 3. 自动填充
 
-| 场景 | 1Password | Coffer |
+| 场景 | 1Password | 1Warden |
 |---|---|---|
 | 浏览器扩展填充 | ✅ | ✅ **端到端验证过**（真实 Chromium） |
 | 提交后提示保存/更新 | ✅ | ✅ **端到端验证过** |
@@ -62,7 +62,7 @@
 
 Vaultwarden **完全没有** `/api/reports/*` —— 全部客户端实现。
 
-| 类别 | Coffer |
+| 类别 | 1Warden |
 |---|---|
 | 弱密码 | ✅ 词典式判定，不用字符熵 |
 | 重复使用的密码 | ✅ |
@@ -79,7 +79,7 @@ Vaultwarden **完全没有** `/api/reports/*` —— 全部客户端实现。
 
 ## 5. 生成器
 
-| 项 | 1Password | Coffer |
+| 项 | 1Password | 1Warden |
 |---|---|---|
 | 随机密码 | ✅ | ✅ 拒绝采样消除模偏差 |
 | 易记密码（Memorable） | ✅ | ✅ 官方已回退「Passphrase」这个叫法 |

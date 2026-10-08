@@ -2,11 +2,12 @@ import { lazy, StrictMode, Suspense, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App, ErrorBoundary } from './App';
 import { tauriAvailable, webAssemblyAvailable } from './capabilities';
-import { initPlatform } from './platform';
+import { detectOs, initPlatform } from './platform';
+import { WindowsTitlebar } from './components/WindowsTitlebar';
 import { installDesktopHost } from './host-impl';
 import { initNativeFeel } from './native';
 import { initTheme } from './theme';
-import { IS_DESKTOP } from '@coffer/ui';
+import { IS_DESKTOP } from '@1warden/ui';
 import { listen } from '@tauri-apps/api/event';
 import { useQuickBridge } from './use-quick-bridge';
 import { createDesktopApplication } from './application/desktop';
@@ -23,6 +24,8 @@ if (!root) throw new Error('找不到 #root 挂载点');
 // 主题和平台标记都得在**首次渲染之前**落上去，否则窗口会先按系统主题
 // 画一帧再翻过来，左栏也会先按「没有红绿灯」排一次位置
 initPlatform();
+const windowsTitlebar = IS_DESKTOP && tauriAvailable() && detectOs() === 'win';
+if (windowsTitlebar) document.documentElement.dataset['nativeTitlebar'] = 'windows';
 initNativeFeel();
 initTheme();
 
@@ -36,11 +39,11 @@ if (typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop' && tauriAv
 }
 
 function DesktopEvents() {
-  useQuickBridge(runtime.getActiveVault, runtime.subscribeActiveVault);
+  useQuickBridge(runtime.getActiveVault, runtime.subscribeVaultChanges);
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
-    void listen('coffer:tray-lock', () => { void runtime.client.lock(); }).then((off) => {
+    void listen('1warden:tray-lock', () => { void runtime.client.lock(); }).then((off) => {
       if (disposed) off(); else unlisten = off;
     });
     return () => { disposed = true; unlisten?.(); };
@@ -50,6 +53,7 @@ function DesktopEvents() {
 
 createRoot(root).render(
   <StrictMode>
+    {windowsTitlebar && <WindowsTitlebar />}
     {/* 边界要在 StrictMode 内层：它兜的是 App 的渲染异常 */}
     {webAssemblyAvailable() ? (
       <ErrorBoundary>

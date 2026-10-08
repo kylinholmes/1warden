@@ -1,9 +1,14 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useCallback, useEffect, useLayoutEffect } from 'react';
 
 /** Keep the last rendered value until its exit animation ends, including interrupted exits. */
 export function useRetainedPresence<T>(value: T | null) {
-  const [retained, setRetained] = useState(value);
-  if (value !== null && value !== retained) setRetained(value);
+  const viewStore = useLocalStore(() => {
+    const retained = value;
+    return { retained };
+  });
+  const [retained, setRetained] = useStoreField(viewStore, 'retained');
+  useLayoutEffect(() => { if (value !== null) setRetained(value); }, [value, setRetained]);
   const leaving = value === null && retained !== null;
   useEffect(() => {
     if (!leaving) return;

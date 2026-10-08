@@ -1,4 +1,4 @@
-import { generateTotp, parseOtpauthUri } from '@coffer/crypto';
+import { generateTotp, parseOtpauthUri } from '@1warden/crypto';
 import type { VaultItem, CustomField } from './model';
 
 /**

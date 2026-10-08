@@ -1,8 +1,9 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "1Warden",
+  "mainBinaryName": "1warden",
   "version": "0.1.0",
-  "identifier": "app.coffer.desktop",
+  "identifier": "app.onewarden.desktop",
   "build": {
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
@@ -34,6 +35,7 @@
         "label": "quick",
         "title": "1Warden",
         "url": "quick.html",
+        "transparent": true,
         "width": 620,
         "height": 400,
         "resizable": false,
@@ -63,7 +65,8 @@
       "dmg"
     ],
     "icon": [
-      "icons/icon.png"
+      "icons/icon.png",
+      "icons/icon.icns"
     ],
     "category": "Utility",
     "shortDescription": "个人密码管理器",

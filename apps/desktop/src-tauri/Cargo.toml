@@ -1,19 +1,25 @@
 [package]
-name = "coffer"
+name = "onewarden"
+default-run = "1warden"
 version = "0.1.0"
 description = "1Warden —— 个人密码管理器"
 edition = "2021"
 rust-version = "1.90"
 
+[[bin]]
+name = "1warden"
+path = "src/main.rs"
+
 [lib]
 # Tauri 的约定：lib 名必须是 `<package>_lib`，否则 main.rs 里的
-# `coffer_lib::run()` 会找不到 crate。
+# `onewarden_lib::run()` 会找不到 crate。
 # staticlib/cdylib 是给移动端（iOS/Android）用的 —— 桌面端用 rlib。
-name = "coffer_lib"
+name = "onewarden_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
+serde_json = "1"
 
 [dependencies]
 # ⚠️ 基础声明**不带** `tray-icon` / `image-png` —— 那两个是桌面端专属，
@@ -97,6 +103,14 @@ security-framework-sys = "2"
 # 而钥匙串调用不频繁，漏了也看不出来，只会在长期运行里慢慢涨。
 # 裸 FFI 啰嗦，但每个引用的归属是写明白的。
 core-foundation-sys = "0.8"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows-sys = { version = "0.61", features = [
+    "Win32_Foundation", "Win32_UI_Input_KeyboardAndMouse",
+    "Win32_UI_WindowsAndMessaging", "Win32_System_Threading",
+    "Win32_System_SystemInformation", "Wdk_System_SystemServices",
+    "Win32_System_DataExchange", "Win32_System_Memory",
+] }
 
 [features]
 # 生产构建时关掉 devtools —— 密码管理器不该在发布版里留调试入口

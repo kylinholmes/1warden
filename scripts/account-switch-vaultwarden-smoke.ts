@@ -12,12 +12,12 @@ import { createApplicationClient } from '../apps/desktop/src/application/client'
 import { createProfileCache } from '../apps/desktop/src/application/profile-cache';
 
 const existingUrl = (process.env.VW_TEST_URL ?? 'http://127.0.0.1:8080').replace(/\/$/, '');
-const existingEmail = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const existingPassword = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const existingEmail = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const existingPassword = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 if (!['localhost', '127.0.0.1', '[::1]'].includes(new URL(existingUrl).hostname)) {
   throw Error('The existing test server must use a loopback address');
 }
-const directory = await mkdtemp(join(tmpdir(), 'coffer-account-switch-'));
+const directory = await mkdtemp(join(tmpdir(), 'onewarden-account-switch-'));
 const logPath = join(directory, 'vaultwarden.log');
 const reserve = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('reserved') });
 const port = reserve.port; reserve.stop(true);
@@ -44,7 +44,7 @@ const cache = createProfileCache({ get: async (k) => storage.get(k) ?? null,
 });
 const clients = new Set<VaultClient>();
 const sessions = createAccountSessions(() => {
-  const client = new VaultClient({ deviceStore: { get: () => 'coffer-account-switch-smoke', set: () => {}, clear: () => {} },
+  const client = new VaultClient({ deviceStore: { get: () => 'onewarden-account-switch-smoke', set: () => {}, clear: () => {} },
   fetchImpl: async (input, init) => {
     const url = new URL(String(input));
     const method = (init?.method ?? 'GET').toUpperCase();

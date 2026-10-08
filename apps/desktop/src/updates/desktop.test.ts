@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({ desktop: true, native: true, label: 'main', supported: true,
   version: vi.fn(async () => '0.1.0'), check: vi.fn(async (): Promise<unknown> => null), invoke: vi.fn() }));
-vi.mock('@coffer/ui', () => ({ get IS_DESKTOP() { return fixture.desktop; } }));
+vi.mock('@1warden/ui', () => ({ get IS_DESKTOP() { return fixture.desktop; } }));
 vi.mock('../capabilities', () => ({ tauriAvailable: () => fixture.native }));
 vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ label: fixture.label }) }));
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: fixture.version }));

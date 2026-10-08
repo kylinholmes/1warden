@@ -17,12 +17,14 @@ if (!['chrome', 'firefox', 'edge', 'zen'].includes(product ?? '')) throw new Err
 const name = product === 'edge' || product === 'chrome' ? 'chrome' : 'firefox';
 const engine = name === 'chrome' ? 'Chromium' : 'Gecko';
 const localDefaults: Record<string, string> = {
-  edge: '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+  edge: process.platform === 'win32'
+    ? join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Microsoft/Edge/Application/msedge.exe')
+    : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
   zen: '/Applications/Zen.app/Contents/MacOS/zen',
 };
-const executable = process.env[`COFFER_${product!.toUpperCase()}`] ?? localDefaults[product!];
-if (!executable || !existsSync(executable)) throw new Error(`Set COFFER_${product!.toUpperCase()} to the browser executable`);
-const modulePath = process.env.COFFER_PUPPETEER;
+const executable = process.env[`ONEWARDEN_${product!.toUpperCase()}`] ?? localDefaults[product!];
+if (!executable || !existsSync(executable)) throw new Error(`Set ONEWARDEN_${product!.toUpperCase()} to the browser executable`);
+const modulePath = process.env.ONEWARDEN_PUPPETEER;
 // Kept outside the application dependency tree: this is an optional browser tool.
 const { default: puppeteer } = await import(modulePath ? pathToFileURL(resolve(modulePath)).href : 'puppeteer-core');
 const dist = join(ROOT, 'apps/desktop', name === 'chrome' ? 'dist-extension' : 'dist-firefox');
@@ -37,9 +39,9 @@ function packageFiles(directory: string, prefix = ''): string[] {
 const buildHashes = Object.fromEntries(packageFiles(dist).sort().map((file) => [
   file, createHash('sha256').update(readFileSync(join(dist, file))).digest('hex'),
 ]));
-const artifacts = resolve(process.env.COFFER_SMOKE_OUT ?? join(tmpdir(), `coffer-browser-smoke-${Date.now()}`));
+const artifacts = resolve(process.env.ONEWARDEN_SMOKE_OUT ?? join(tmpdir(), `onewarden-browser-smoke-${Date.now()}`));
 mkdirSync(artifacts, { recursive: true });
-const profile = mkdtempSync(join(tmpdir(), `coffer-smoke-${product}-`));
+const profile = mkdtempSync(join(tmpdir(), `onewarden-smoke-${product}-`));
 const downloads = join(profile, 'downloads');
 mkdirSync(downloads);
 const firefoxUuid = 'f69448ed-9c3e-44ad-876b-950aab9a0cab';
@@ -153,18 +155,20 @@ async function type(selector: string, value: string): Promise<void> {
   }, value);
 }
 async function openNavigation(): Promise<void> {
-  // Closing a dialog restores focus inside the drawer, which can keep it open.
-  // Its own overlay then covers the trigger; use the already-open navigation.
-  const open = await popup.$eval('.nav-drawer-panel', (panel: Element) => panel.getBoundingClientRect().right > 40);
-  if (!open) await click('button[aria-label="导航"]');
+  // Explicit state, not hover or an intermediate slide-animation position.
+  const open = await popup.$eval('[aria-label="导航"]', (trigger: Element) => trigger.getAttribute('aria-expanded') === 'true');
+  if (!open) {
+    await click('button[aria-label="导航"]');
+    await popup.waitForFunction(() => document.querySelector('.nav-drawer-panel')!.getBoundingClientRect().left >= 0);
+  }
 }
 try {
   browser = await puppeteer.launch({
-    browser: name, executablePath: executable, userDataDir: profile, headless: process.env.COFFER_SMOKE_HEADED !== '1',
-    enableExtensions: true, ...(name === 'chrome' ? { pipe: true, downloadBehavior: { policy: 'allow', downloadPath: downloads } } : {
+    browser: name, executablePath: executable, userDataDir: profile, headless: process.env.ONEWARDEN_SMOKE_HEADED !== '1',
+    enableExtensions: true, ...(name === 'chrome' ? { pipe: process.platform !== 'win32', downloadBehavior: { policy: 'allow', downloadPath: downloads } } : {
       // Firefox 153+ requires this opt-in to automate moz-extension pages.
       args: ['--remote-allow-system-access'],
-      extraPrefsFirefox: { 'extensions.webextensions.uuids': JSON.stringify({ 'coffer@coffer.app': firefoxUuid }) },
+      extraPrefsFirefox: { 'extensions.webextensions.uuids': JSON.stringify({ '1warden@1warden.app': firefoxUuid }) },
     }),
   });
   version = await browser.version();
@@ -173,9 +177,15 @@ try {
     downloadBehavior: { type: 'allowed', destinationFolder: downloads },
   });
   console.log(`${product} (${engine}): ${version}\nExecutable: ${executable}\nArtifacts: ${artifacts}`);
-  if (process.env.COFFER_SMOKE_HEADED === '1') console.log(`Browser PID: ${browser.process()?.pid}`);
+  if (process.env.ONEWARDEN_SMOKE_HEADED === '1') console.log(`Browser PID: ${browser.process()?.pid}`);
   check('correct browser engine', name === 'chrome' ? /(?:Chrome|Edg|Edge)\//i.test(version) : /(?:firefox|zen)\//i.test(version), version);
   const extensionId = await browser.installExtension(dist);
+  if (name === 'chrome') {
+    const manifest = JSON.parse(readFileSync(join(dist, 'manifest.json'), 'utf8'));
+    const expectedId = createHash('sha256').update(Buffer.from(manifest.key, 'base64')).digest('hex').slice(0, 32)
+      .replace(/[0-9a-f]/g, digit => String.fromCharCode(97 + parseInt(digit, 16)));
+    check('unpacked extension uses its new stable identity', extensionId === expectedId, extensionId);
+  }
   const origin = name === 'chrome' ? `chrome-extension://${extensionId}` : `moz-extension://${firefoxUuid}`;
   const login = await browser.newPage();
   await login.goto(siteUrl);
@@ -194,24 +204,67 @@ try {
     else await popup.goto(`${origin}/popup.html`, { waitUntil: 'domcontentloaded' });
   };
   await openPopup();
+  await popup.waitForSelector('main button');
+  await popup.waitForSelector('[data-add-server]');
+  check('empty home invites adding the first server', await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '添加第一个服务器')
+    && await popup.$eval('h1', (node: Element) => node.textContent === '添加服务器，开始使用'));
+  await popup.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('[data-brand-mark]')].every(node => node.complete && node.naturalWidth > 0));
+  check('production brand asset loads inside extension CSP', await popup.$eval('[data-brand-mark]', (node: HTMLImageElement) => node.complete && node.naturalWidth > 0));
+  await screenshot('empty-home-brand');
+  await popup.click('[data-add-server]');
   await popup.waitForSelector('input[type="email"]', { visible: true });
   check('shared connect screen renders', await popup.$('input[type="password"]') !== null);
   await screenshot('connect');
 
   await popup.evaluate(async (fixture: unknown) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    await api.storage.session.set({ 'coffer.session': fixture, 'coffer.account': (fixture as any).account });
+    await api.storage.session.set({ '1warden.session': fixture, '1warden.account': (fixture as any).account });
+    await api.storage.session.remove('1warden.connectionDraft');
   }, seed);
   await openPopup(true);
+  await popup.waitForSelector('main li button');
+  check('populated home retains account selection and other-server wording', await popup.$eval('h1', (node: Element) => node.textContent === '选择要连接的账户')
+    && await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '连接其他服务器'));
+  await enterHome();
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   check('shared vault renders from background session', true);
   const rpc = async (method: string, args: unknown[] = []) => popup.evaluate(async (m: string, a: unknown[]) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return api.runtime.sendMessage({ type: 'coffer:application', method: m, args: a });
+    return api.runtime.sendMessage({ type: '1warden:application', method: m, args: a });
   }, method, args);
+  async function enterHome() {
+    await popup.waitForSelector('main li button');
+    await popup.$eval('main li button', (b: HTMLButtonElement) => b.click());
+  }
   const snapshot = await rpc('snapshot');
   check('snapshot contains summaries without passwords or keys', snapshot.ok && snapshot.result.items.length === 2
     && !JSON.stringify(snapshot).includes(secret) && !JSON.stringify(snapshot).includes('userKey'));
+
+  if (name === 'chrome') {
+    // Frozen/sleeping tabs can hold executeScript indefinitely. Local browsing must stay responsive.
+    const cdp = await login.createCDPSession();
+    const targetId = await popup.evaluate(async (url: string) => {
+      const api = (globalThis as any).chrome;
+      return (await api.tabs.query({})).find((tab: any) => tab.url === url)?.id;
+    }, siteUrl);
+    await cdp.send('Page.setWebLifecycleState', { state: 'frozen' });
+    const filling = popup.evaluate((tabId: number) => (globalThis as any).chrome.runtime.sendMessage({
+      type: '1warden:fill', application: true, itemId: 'smoke-alpha', tabId,
+    }), targetId);
+    try {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+      const responsive = await Promise.race([
+        Promise.all([rpc('search', ['Alpha']), rpc('getItem', ['smoke-alpha'])])
+          .then(([search, detail]) => search.ok && search.result.length === 1 && detail.ok),
+        new Promise((resolve) => setTimeout(() => resolve(false), 2_000)),
+      ]);
+      check('search and details respond while a frozen tab blocks filling', responsive === true);
+    } finally {
+      await cdp.send('Page.setWebLifecycleState', { state: 'active' });
+      await filling;
+      await cdp.detach();
+    }
+  }
 
   const rowNames = () => popup.$$eval('.vault-list li > button', (rows: Element[]) => rows.map((row) => row.textContent ?? ''));
   const initialRows = await rowNames();
@@ -237,16 +290,17 @@ try {
   check('editor loads selected record through explicit draft RPC',
     (await popup.$eval('#editor-title', (node: Element) => node.textContent)) === '编辑条目');
   await screenshot('editor-440');
-  await click('[aria-label="关闭"]');
+  check('editor exposes one cancel action without a duplicate header close', await popup.$('.panel-head [aria-label="关闭"]') === null);
+  await click('.panel-foot button::-p-text(取消)');
   await popup.waitForSelector('[aria-label="返回列表"]', { visible: true });
   check('editor cancel returns to selected detail', true);
-  if (process.env.COFFER_SMOKE_ATTACHMENTS === '1') {
+  if (process.env.ONEWARDEN_SMOKE_ATTACHMENTS === '1') {
     await click('button::-p-text(取回)');
     console.log(`  Waiting for attachment download; test destination: ${downloads}`);
     await popup.waitForFunction(async () => {
       const api = (globalThis as any).browser ?? (globalThis as any).chrome;
       return (await api.downloads.search({})).some((download: any) => download.state === 'complete');
-    }, { timeout: process.env.COFFER_SMOKE_HEADED === '1' ? 60_000 : 15_000 });
+    }, { timeout: process.env.ONEWARDEN_SMOKE_HEADED === '1' ? 60_000 : 15_000 });
     const file = await popup.evaluate(async () => {
       const api = (globalThis as any).browser ?? (globalThis as any).chrome;
       return (await api.downloads.search({})).find((download: any) => download.state === 'complete');
@@ -264,9 +318,9 @@ try {
     await click(`nav button::-p-text(${label})`);
   }
   await navigation('生成器');
-  await popup.waitForSelector('[aria-label="关闭生成器"]', { visible: true });
+  await popup.waitForSelector('[aria-labelledby="generator-title"] [data-page-back]', { visible: true });
   check('generator opens from shared navigation', true);
-  await click('[aria-label="关闭生成器"]');
+  await click('[aria-labelledby="generator-title"] [data-page-back]');
   await navigation('安全报告');
   await popup.waitForSelector('button[aria-label="导航"]', { visible: true });
   check('security report retains narrow navigation', (await popup.evaluate(() => document.body.textContent)).includes('安全报告'));
@@ -276,10 +330,20 @@ try {
   await navigation('全部');
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   await openNavigation();
-  await click('[aria-label="设置"]');
-  await popup.waitForSelector('[aria-label="关闭设置"]', { visible: true });
+  await click('[aria-label="账户菜单"]');
+  check('account menu omits the redundant account-home action', await popup.$eval('#profile-account-menu', (node: Element) => !node.textContent?.includes('返回账户首页')));
+  await click('[role="menuitem"]::-p-text(设置)');
+  await popup.waitForSelector('[aria-labelledby="settings-title"] [data-page-back]', { visible: true });
   check('settings opens from the shared drawer', true);
-  await click('[aria-label="关闭设置"]');
+  check('narrow settings starts in a full-width directory',
+    await popup.$('[aria-label="设置目录"]') !== null && await popup.$('[aria-label="设置分组"]') === null);
+  await click('#settings-link-appearance');
+  await popup.waitForSelector('#settings-panel-appearance', { visible: true });
+  check('settings directory opens a single content page', await popup.$('[aria-label="设置目录"]') === null);
+  await click('[aria-label="返回设置目录"]');
+  await popup.waitForFunction(() => document.activeElement?.id === 'settings-link-appearance');
+  check('settings back returns to directory and restores focus', true);
+  await click('[aria-labelledby="settings-title"] [data-page-back]');
 
   const tabId = await popup.evaluate(async (url: string) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
@@ -288,30 +352,31 @@ try {
   check('test site tab is available', typeof tabId === 'number');
   const fields = await popup.evaluate(async (id: number) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return api.tabs.sendMessage(id, { type: 'coffer:read-fields' });
+    return api.tabs.sendMessage(id, { type: '1warden:read-fields' });
   }, tabId);
   check('real content script bridge responds', fields !== undefined);
   const denial = await popup.evaluate(async (id: number) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
     return api.scripting.executeScript({ target: { tabId: id }, func: async () => {
       const contentApi = (globalThis as any).browser ?? (globalThis as any).chrome;
-      return contentApi.runtime.sendMessage({ type: 'coffer:application', method: 'reveal', args: ['smoke-alpha', { kind: 'password' }] });
+      return contentApi.runtime.sendMessage({ type: '1warden:application', method: 'reveal', args: ['smoke-alpha', { kind: 'password' }] });
     } });
   }, tabId);
   check('content context cannot invoke privileged reveal RPC', denial[0]?.result?.ok === false
     && !JSON.stringify(denial).includes(secret), JSON.stringify(denial));
   const fill = await popup.evaluate(async (id: number) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return api.runtime.sendMessage({ type: 'coffer:fill', itemId: 'smoke-alpha', tabId: id, application: true });
+    return api.runtime.sendMessage({ type: '1warden:fill', itemId: 'smoke-alpha', tabId: id, application: true });
   }, tabId);
   check('background fill accepts explicit request', fill?.ok === true, JSON.stringify(fill));
   await login.waitForFunction((expected: string) => (document.querySelector('#password') as HTMLInputElement)?.value === expected, {}, secret);
   check('real site receives username and password', await login.$eval('#email', (input: HTMLInputElement) => input.value) === username);
 
   await openPopup(true);
+  await enterHome();
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   await screenshot('vault-440');
-  if (process.env.COFFER_SMOKE_CLIPBOARD === '1') {
+  if (process.env.ONEWARDEN_SMOKE_CLIPBOARD === '1') {
     const copyPassword = async () => {
       await click('.vault-list li > button');
       await click('div.group:has(> span[title="密码"]) button[aria-label="复制"]');
@@ -328,6 +393,7 @@ try {
       popup.setDefaultTimeout(15_000);
       await popup.setViewport({ width: 440, height: 600 });
       await openPopup();
+      await enterHome();
       await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
     };
     await copyPassword();
@@ -340,18 +406,24 @@ try {
     check('clipboard cleanup preserves a later copy', await popup.evaluate(() => navigator.clipboard.readText()) === laterCopy);
     await popup.evaluate(() => navigator.clipboard.writeText(''));
   }
-  await openNavigation();
-  await click('nav button::-p-text(锁定)');
+  // Lock is a vault shortcut; the account menu's logout is a different operation.
+  await popup.focus('[aria-label="搜索条目"]');
+  if (name === 'chrome') {
+    await popup.keyboard.down('Control');
+    await popup.keyboard.press('l');
+    await popup.keyboard.up('Control');
+  } else await popup.evaluate(() => window.dispatchEvent(new KeyboardEvent('keydown', { key: 'l', ctrlKey: true, bubbles: true })));
   await popup.waitForSelector('input[type="password"]', { visible: true });
   const locked = await rpc('snapshot');
   check('lock clears vault display and retains account', locked.ok && locked.result.status === 'locked'
     && locked.result.items.length === 0 && locked.result.account?.email === username);
   const stored = await popup.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return api.storage.session.get('coffer.session');
+    return api.storage.session.get('1warden.session');
   });
-  check('lock removes persisted session keys', stored['coffer.session'] === undefined);
+  check('lock removes persisted session keys', stored['1warden.session'] === undefined);
   await openPopup(true);
+  await enterHome();
   await popup.waitForSelector('input[type="password"]', { visible: true });
   check('reopening preserves locked account state', (await rpc('snapshot')).result.status === 'locked');
   check('no uncaught UI errors', errors.length === 0, errors.join('\n'));

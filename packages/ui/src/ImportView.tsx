@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { IMPORT_FORMATS, type ImportFormatId } from '@coffer/vault';
+import { IMPORT_FORMATS, type ImportFormatId } from '@1warden/vault';
 import { IconAlert, IconCheck, IconImport } from './icons';
 
 /**
@@ -137,11 +137,6 @@ export function ImportView({
               <option key={f.id} value={f.id}>{f.label}</option>
             ))}
           </select>
-          {preview && (
-            <p className="mt-1.5 truncate text-xs text-[var(--ink-tertiary)]" title={preview.fileName}>
-              {preview.fileName}
-            </p>
-          )}
         </div>
       )}
 

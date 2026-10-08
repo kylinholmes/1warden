@@ -4,9 +4,9 @@ import { createFakeServer, fakeJwt } from './testing/fake-server';
 import {
   deriveMasterKey, stretchMasterKey, makeUserKey, KDF_TYPE_PBKDF2,
   type SymmetricKey, type KdfConfig,
-} from '@coffer/crypto';
+} from '@1warden/crypto';
 
-const EMAIL = 'coffer-test@example.com';
+const EMAIL = 'onewarden-test@example.com';
 const PASSWORD = 'Test-Master-Password-123!';
 const SERVER = 'https://vault.test';
 const ITERATIONS = 1000;

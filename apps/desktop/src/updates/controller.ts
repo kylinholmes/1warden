@@ -1,3 +1,4 @@
+import { createStore } from '@1warden/state';
 /** Updates are independent of vault sessions and carry only app version/download state. */
 export type DownloadEvent =
   | { event: 'Started'; data: { contentLength?: number } }
@@ -37,9 +38,9 @@ const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
 /** One owner per main window; a prepared bundle stays ready until a normal or explicit restart. */
 export function createAppUpdater(backend: UpdateBackend): AppUpdater {
-  let state: Readonly<UpdateState> = { phase: 'idle', currentVersion: null, targetVersion: null,
-    downloadedBytes: 0, totalBytes: null, checkedAt: null, error: null };
-  const listeners = new Set<() => void>();
+  const store = createStore<Readonly<UpdateState>>(() => ({ phase: 'idle', currentVersion: null, targetVersion: null,
+    downloadedBytes: 0, totalBytes: null, checkedAt: null, error: null }));
+  const subscriptions = new Set<() => void>();
   let started = false;
   let disposed = false;
   let generation = 0;
@@ -51,12 +52,11 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
 
   function publish(patch: Partial<UpdateState>) {
     if (disposed) return;
-    state = { ...state, ...patch };
-    for (const listener of listeners) listener();
+    store.setState(patch);
   }
   const current = (version: number) => !disposed && version === generation;
   function loadVersion(): Promise<void> {
-    if (state.currentVersion !== null) return Promise.resolve();
+    if (store.getState().currentVersion !== null) return Promise.resolve();
     versionRequest ??= backend.currentVersion().then((currentVersion) => {
       publish({ currentVersion });
     }).finally(() => { versionRequest = null; });
@@ -78,14 +78,14 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
       downloading = true;
       publish({ phase: 'downloading', targetVersion: release.version });
       await release.downloadAndInstall((event) => {
-        if (!current(version) || state.phase !== 'downloading') return;
+        if (!current(version) || store.getState().phase !== 'downloading') return;
         if (event.event === 'Started') {
           const length = event.data.contentLength;
           publish({ totalBytes: typeof length === 'number' && Number.isFinite(length) && length > 0 ? length : null,
             downloadedBytes: 0 });
         } else if (event.event === 'Progress') {
           const chunk = event.data.chunkLength;
-          if (Number.isFinite(chunk) && chunk >= 0) publish({ downloadedBytes: state.downloadedBytes + chunk });
+          if (Number.isFinite(chunk) && chunk >= 0) publish({ downloadedBytes: store.getState().downloadedBytes + chunk });
         } else publish({ phase: 'installing' });
       });
       // Finished is a download event. Verification and installation must also succeed.
@@ -99,7 +99,7 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
   }
 
   function check(): Promise<void> {
-    if (disposed || state.phase === 'ready' || state.phase === 'restarting') return Promise.resolve();
+    if (disposed || store.getState().phase === 'ready' || store.getState().phase === 'restarting') return Promise.resolve();
     if (pending) return pending;
     const version = ++generation;
     const request = Promise.resolve().then(() => run(version)).finally(() => {
@@ -111,7 +111,7 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
 
   function restart(): Promise<void> {
     if (pendingRestart) return pendingRestart;
-    if (disposed || state.phase !== 'ready') return Promise.resolve();
+    if (disposed || store.getState().phase !== 'ready') return Promise.resolve();
     publish({ phase: 'restarting', error: null });
     const request = backend.restart().catch(() => {
       publish({ phase: 'ready', error: '无法重启，请稍后再试。' });
@@ -121,8 +121,11 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
   }
 
   return {
-    getSnapshot: () => state,
-    subscribe(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
+    getSnapshot: store.getState,
+    subscribe(listener) {
+      const stop = store.subscribe(listener); subscriptions.add(stop);
+      return () => { stop(); subscriptions.delete(stop); };
+    },
     start() {
       if (started || disposed) return;
       started = true;
@@ -134,7 +137,8 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
     restart,
     dispose() {
       disposed = true; generation++;
-      clearTimeout(startup); clearInterval(interval); listeners.clear();
+      clearTimeout(startup); clearInterval(interval);
+      for (const stop of subscriptions) stop(); subscriptions.clear();
     },
   };
 }

@@ -1,10 +1,11 @@
 import { lockedAccount } from './account-target';
 import {
   buildProfileItem, isProfileItem, parseProfile, selectProfileItem, profileRevision,
+  buildPreferencesItem, buildDeviceItem, parseProfileSettings, validatePreferences,
   buildReport, checkBreaches, hasTotp, IMPORT_FORMATS, parseImport, searchItems, totpCode,
   type VaultClient, type VaultItem,
-} from '@coffer/vault';
-import { fromBase64, toBase64 } from '@coffer/crypto';
+} from '@1warden/vault';
+import { fromBase64, toBase64 } from '@1warden/crypto';
 import { summarise } from '../../../../packages/ui/src/summary';
 import { reportBrief } from '../../../../packages/ui/src/SecurityReportView';
 import type { ProfileCache } from './profile-cache';
@@ -106,7 +107,19 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
     return result;
   }
   let lastCached = '';
-  let savingProfile = false;
+  let metadataTail: Promise<unknown> = Promise.resolve();
+  function writeMetadata(build: (old: VaultItem | undefined) => VaultItem | undefined): Promise<void> {
+    const session = client.getSession();
+    const key = session.getKey();
+    const result = metadataTail.then(async () => {
+      if (!key || key !== session.getKey() || !session.isUnlocked()) throw new Error('保险库已锁定，请重新解锁');
+      if (!client.hasVerifiedSync() || session.syncing) throw new Error('个人资料尚未完成同步，请稍候；同步失败时请重新解锁');
+      const draft = build(selectProfileItem(session.items));
+      if (draft) { await guarded(() => client.saveItem(draft)); await snapshot(); }
+    });
+    metadataTail = result.catch(() => {});
+    return result;
+  }
   async function snapshot(): Promise<ApplicationSnapshot> {
     const s = client.getSession();
     const account = s.account;
@@ -117,9 +130,13 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
     const item = s.isUnlocked() ? selectProfileItem(items) : undefined;
     let profile = null;
     let profileError = null;
+    let profileSettings = null;
+    let profileSettingsError = null;
     if (item) {
       try { profile = parseProfile(item); }
       catch (e) { profileError = e instanceof Error ? e.message : '个人资料读取失败'; }
+      try { profileSettings = parseProfileSettings(item); }
+      catch (e) { profileSettingsError = e instanceof Error ? e.message : '同步设置读取失败'; }
     }
     if (account && profileCache) {
       const signature = JSON.stringify([account.serverUrl, account.email, profile]);
@@ -141,6 +158,7 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
     return {
       revision, status, account: account ? structuredClone(account) : null, syncing,
       profile, profileVersion: profileRevision(item), profileError, profileReady,
+      profileSettings, profileSettingsError,
       items: s.isUnlocked() ? activeItems().map(summarise) : [],
       folders: s.isUnlocked() ? s.folders.map((f) => ({ ...f })) : [],
     };
@@ -162,17 +180,22 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
       if (account) client.getSession().setAccount(account);
     },
     async saveProfile(profile, expectedVersion) {
-      activeItems();
-      if (!client.hasVerifiedSync() || client.getSession().syncing) throw new Error('个人资料尚未完成同步，请稍候；同步失败时请重新解锁');
-      if (savingProfile) throw new Error('个人资料正在保存，请稍候');
-      const old = selectProfileItem(client.getSession().items);
-      if (profileRevision(old) !== expectedVersion) throw new Error('个人资料已被更新，请重新打开设置');
-      const draft = buildProfileItem(profile, old);
-      savingProfile = true;
-      try {
-        await guarded(() => client.saveItem(draft));
-        await snapshot();
-      } finally { savingProfile = false; }
+      return writeMetadata(old => {
+        if (profileRevision(old) !== expectedVersion) throw new Error('个人资料已被更新，请重新打开设置');
+        return buildProfileItem(profile, old);
+      });
+    },
+    async savePreferences(preferences, expected) {
+      const value = validatePreferences(preferences);
+      const base = expected === null ? null : validatePreferences(expected);
+      return writeMetadata(old => {
+        const current = old ? parseProfileSettings(old).preferences : null;
+        if (JSON.stringify(current) !== JSON.stringify(base)) throw new Error('同步偏好已被更新，请先载入最新设置');
+        return buildPreferencesItem(value, old);
+      });
+    },
+    async recordDevice(device) {
+      return writeMetadata(old => buildDeviceItem(device, Date.now(), old));
     },
     async search(query) { return searchItems(activeItems(), client.getSession().folders, query).map((h) => summarise(h.item)); },
     async getItem(id) { return itemDetail(find(id)); },

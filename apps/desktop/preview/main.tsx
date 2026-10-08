@@ -1,3 +1,4 @@
+import { useLocalStore, useStoreField } from '@1warden/state/react';
 /**
  * 界面预览 —— 用固定的假数据渲染各个界面，供截图核对排版。
  *
@@ -6,7 +7,7 @@
  *
  * 构建：`bun run preview:build`（产物 `dist-preview/`，不打包进产品）
  */
-import { StrictMode, useEffect, useState } from 'react';
+import { StrictMode, useEffect } from 'react';
 import { createRoot } from 'react-dom/client';
 import { SecurityReportView } from '../src/screens/SecurityReport';
 import { VaultView, ItemDetail, EmptyDetail } from '../src/screens/VaultView';
@@ -18,14 +19,14 @@ import { Generator } from '../src/screens/Generator';
 import { Connect } from '../src/screens/Connect';
 import { Unlock } from '../src/screens/Unlock';
 import { ToastProvider, useToast, type ToastInput } from '../src/components/Toast';
-import { ItemEditor, installHost } from '@coffer/ui';
+import { ItemEditor, installHost } from '@1warden/ui';
 import { initPlatform } from '../src/platform';
 import { initTheme, setThemeMode, type ThemeMode } from '../src/theme';
-import { emptyLogin, VaultClient, type VaultItem, type VaultFolder } from '@coffer/vault';
+import { emptyLogin, VaultClient, type VaultItem, type VaultFolder } from '@1warden/vault';
 import { createApplicationClient } from '../src/application/client';
 import { createVaultService, itemDetail } from '../src/application/service';
-import { makeUserKey } from '@coffer/crypto';
-import { IS_EXTENSION, summarise } from '@coffer/ui';
+import { makeUserKey } from '@1warden/crypto';
+import { IS_EXTENSION, summarise } from '@1warden/ui';
 import './preview.css';
 
 /*
@@ -142,7 +143,7 @@ if (which === 'detail') previewVault.getSession().replaceData([DETAIL], FOLDERS)
 /*
  * ⚠️ 预览也**必须装宿主**，否则「记住的账户」在预览里恒为空。
  *
- * 账户存储搬进 `@coffer/ui` 之后走的是 `host().storage`。宿主没装时
+ * 账户存储搬进 `@1warden/ui` 之后走的是 `host().storage`。宿主没装时
  * `readAccounts()` 会抛，而它把异常吞掉、回 `[]`（对产品是对的：存储坏了
  * 不该挡住连接）—— 于是预览里**恒为「一个都没存」**，账户选择那一屏截不到。
  *
@@ -170,7 +171,7 @@ installHost({
  * 这里种的是**假数据**，和这个文件里其他假数据一样，只为把界面撑到有代表性的状态。
  */
 if (params.has('accounts')) {
-  localStorage.setItem('coffer.accounts', JSON.stringify([
+  localStorage.setItem('1warden.accounts', JSON.stringify([
     { serverUrl: 'https://vault.example.com', email: 'me@example.com' },
     { serverUrl: 'https://vault.acme-corp.internal', email: 'zhang@acme.example' },
     { serverUrl: 'http://192.168.1.10:8080', email: 'admin@home.lan' },
@@ -271,7 +272,11 @@ function cssFreeze(offset: number): void {
  *   flow=settled 默认，静止的开着的样子
  */
 function SettingsPreview({ flow }: { flow: string }) {
-  const [open, setOpen] = useState(flow !== 'open');
+  const viewStore = useLocalStore(() => {
+    const open = flow !== 'open';
+    return { open };
+  });
+  const [open, setOpen] = useStoreField(viewStore, 'open');
 
   useEffect(() => {
     if (flow === 'exit') {
@@ -295,7 +300,7 @@ function SettingsPreview({ flow }: { flow: string }) {
         account="me@example.com"
         serverUrl="https://vault.example.com"
         onClose={() => setOpen(false)}
-        initialSection={(new URLSearchParams(location.search).get('section') ?? 'account') as SectionId}
+        {...(params.has('section') ? { initialSection: params.get('section') as SectionId } : {})}
       />
     </>
   );
@@ -373,7 +378,11 @@ function ToastPreview({ variant }: { variant: string }) {
  * 关掉之后留一个「重新打开」的按钮：既是给手点，也是给 CDP 驱动的脚本点。
  */
 function EditorPreview({ item }: { item: VaultItem | null }) {
-  const [open, setOpen] = useState(true);
+  const viewStore = useLocalStore(() => {
+    const open = true;
+    return { open };
+  });
+  const [open, setOpen] = useStoreField(viewStore, 'open');
   return (
     <>
       <VaultView client={fakeClient} onLock={() => {}} />
@@ -391,7 +400,11 @@ function EditorPreview({ item }: { item: VaultItem | null }) {
 }
 
 function GeneratorPreview() {
-  const [open, setOpen] = useState(true);
+  const viewStore = useLocalStore(() => {
+    const open = true;
+    return { open };
+  });
+  const [open, setOpen] = useStoreField(viewStore, 'open');
   return (
     <>
       <VaultView client={fakeClient} onLock={() => {}} />

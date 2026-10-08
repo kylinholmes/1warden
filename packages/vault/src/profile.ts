@@ -3,8 +3,8 @@ import type { VaultItem } from './model';
 /** Only these presentation preferences may be cached outside the unlocked vault. */
 export interface UserProfile { displayName: string; avatarDataUrl: string | null }
 export const PROFILE_AVATAR_MAX_CHARS = 5600;
-const SCHEMA = 'coffer.profile';
-const MARKER = 'coffer:record-type';
+const SCHEMA = '1warden.profile';
+const MARKER = '1warden:record-type';
 const MAX_NOTE_BYTES = 7000;
 
 export function validateProfile(value: unknown): UserProfile {

@@ -1,5 +1,5 @@
 {
-  "name": "@coffer/ui",
+  "name": "@1warden/ui",
   "version": "0.0.0",
   "private": true,
   "type": "module",
@@ -10,9 +10,10 @@
     "./clipboard": "./src/clipboard.ts"
   },
   "dependencies": {
+    "@1warden/state": "workspace:*",
     "react": "^19.0.0",
-    "@coffer/vault": "workspace:*",
-    "@coffer/crypto": "workspace:*"
+    "@1warden/vault": "workspace:*",
+    "@1warden/crypto": "workspace:*"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

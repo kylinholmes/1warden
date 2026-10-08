@@ -1,20 +1,31 @@
-import { useEffect, useRef, useState } from 'react';
-import type { ImportFormatId } from '@coffer/vault';
-import { ImportView, NavTrigger, type ImportOutcome, type ImportPreview } from '@coffer/ui';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useEffect, useRef } from 'react';
+import type { ImportFormatId } from '@1warden/vault';
+import { ImportView, PageHeader, type ImportOutcome, type ImportPreview } from '@1warden/ui';
 import type { ApplicationClient, ImportFile } from '../application/types';
 import { toBase64 } from '../base64';
 
 /** File parsing and encryption belong to the application service on every host. */
-export function ImportScreen({ client, onImported }: {
+export function ImportScreen({ client, onImported, onBack }: {
   client: ApplicationClient;
   onImported: () => void;
+  onBack?: () => void;
 }) {
-  const [file, setFile] = useState<ImportFile | null>(null);
-  const [preview, setPreview] = useState<ImportPreview | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [parsing, setParsing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [result, setResult] = useState<ImportOutcome | null>(null);
+  const viewStore = useLocalStore(() => {
+    const file = (null) as ImportFile | null;
+    const preview = (null) as ImportPreview | null;
+    const busy = false;
+    const parsing = false;
+    const error = (null) as string | null;
+    const result = (null) as ImportOutcome | null;
+    return { file, preview, busy, parsing, error, result };
+  });
+  const [file, setFile] = useStoreField(viewStore, 'file');
+  const [preview, setPreview] = useStoreField(viewStore, 'preview');
+  const [busy, setBusy] = useStoreField(viewStore, 'busy');
+  const [parsing, setParsing] = useStoreField(viewStore, 'parsing');
+  const [error, setError] = useStoreField(viewStore, 'error');
+  const [result, setResult] = useStoreField(viewStore, 'result');
   const request = useRef(0);
   useEffect(() => () => { request.current++; }, []);
 
@@ -88,10 +99,8 @@ export function ImportScreen({ client, onImported }: {
 
   return (
     <div className="flex h-full flex-col">
-      <header className="band shrink-0 px-8" data-tauri-drag-region="deep">
-        <NavTrigger />
-        <h2 className="min-w-0 flex-1 truncate text-lg font-semibold">导入</h2>
-      </header>
+      <PageHeader navigation title="导入" onBack={onBack} backLabel="返回保险库"
+        breadcrumbs={[{ label: '保险库', ...(onBack ? { onSelect: onBack } : {}) }, { label: '导入' }]} />
       <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7">
         <div className="mx-auto w-full" style={{ maxWidth: 'var(--detail-w)' }}>
           {parsing && <p role="status" className="mb-4 text-sm text-[var(--ink-secondary)]">正在读取文件…</p>}

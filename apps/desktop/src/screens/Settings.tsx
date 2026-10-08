@@ -1,13 +1,12 @@
-import { lazy, Suspense, useEffect, useState, useSyncExternalStore, type ReactNode } from 'react';
-import { ProfileEditor } from '../components/ProfileEditor';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { lazy, Suspense, useEffect, useRef, type ReactNode } from 'react';
+import { primaryShortcut, quickShortcut, detectOs } from '../platform';
 import type { ApplicationClient, ApplicationCapabilities } from '../application/types';
-import { FloatingPanel } from '@coffer/ui';
-import { Segmented } from '@coffer/ui';
-import { useShowTypes } from '../prefs';
-import { getThemeMode, setThemeMode, subscribeTheme, type ThemeMode } from '../theme';
+import { BrandMark, FloatingPanel, PageHeader, isCompactLayout, useCompactLayout } from '@1warden/ui';
+import { AccountAppearance } from '../components/AccountAppearance';
 import {
-  IconClose, IconGear, IconIdentity, IconInfo, IconKeyboard, IconPalette, IconShield,
-} from '@coffer/ui';
+  IconChevronDown, IconInfo, IconKeyboard, IconPalette, IconShield,
+} from '@1warden/ui';
 
 /**
  * 设置面板 —— 容器、分组、交互是真的；**「外观」这一组已经接入**，
@@ -29,16 +28,17 @@ import {
  *
  * ## 版面
  *
- * 左侧一列分组、右侧内容，和主窗口的三栏是同一种骨架的缩小版 ——
+ * 所有平台按可用宽度：足够宽时左右分栏，窄窗口逐级进入子页面。
+ * 返回目录时保留刚访问的分组焦点；显式指定 initialSection 时支持直达。
+ * 宽屏和主窗口的三栏是同一种骨架的缩小版 ——
  * 面板里的导航栏用 `--surface-chrome`，和主窗口侧栏同一层。
  * 这不是巧合：用户刚从这个面板的「左边那一列」点过来，
  * 那个位置本来就该是同一个东西。
  */
 
-export type SectionId = 'account' | 'security' | 'appearance' | 'autofill' | 'about';
+export type SectionId = 'security' | 'appearance' | 'autofill' | 'about';
 
 const SECTIONS: Array<{ id: SectionId; label: string; icon: ReactNode }> = [
-  { id: 'account', label: '账户', icon: <IconIdentity size={16} /> },
   { id: 'security', label: '安全', icon: <IconShield size={16} /> },
   { id: 'appearance', label: '外观', icon: <IconPalette size={16} /> },
   { id: 'autofill', label: '自动填充', icon: <IconKeyboard size={16} /> },
@@ -49,8 +49,10 @@ declare const __PLATFORM__: 'desktop' | 'extension' | 'mobile' | undefined;
 // Keep this import behind the literal build define so other targets emit no updater chunk.
 const DesktopAppUpdates = typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop'
   ? lazy(() => import('../components/AppUpdates')) : null;
+const DesktopQuickSearchSettings = typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop'
+  ? lazy(() => import('../components/QuickSearchSettings')) : null;
 
-export function Settings({ client, open, account, serverUrl, onClose, initialSection = 'account', capabilities = { native: false, browser: false, saveAttachments: false }, onDisconnect }: {
+export function Settings({ client, open, onClose, initialSection, capabilities = { native: false, browser: false, saveAttachments: false } }: {
   client?: ApplicationClient;
   open: boolean;
   account: string;
@@ -63,67 +65,85 @@ export function Settings({ client, open, account, serverUrl, onClose, initialSec
    *
    * 不是为测试留的口子 —— 它对应一条真实的路径：自动填充失败时，
    * 界面提示「需要辅助功能权限」，用户点过去应该**直接落在
-   * 自动填充那一组**，而不是先看到「账户」再自己找。
+   * 自动填充那一组**，而不是先看到默认分组再自己找。
    */
   initialSection?: SectionId;
 }) {
-  const [section, setSection] = useState<SectionId>(initialSection);
-  const [disconnecting, setDisconnecting] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  useEffect(() => { if (open) { setSection(initialSection); setError(null); } }, [open, initialSection]);
-  async function disconnect(): Promise<void> {
-    if (!onDisconnect || disconnecting) return;
-    setDisconnecting(true); setError(null);
-    try { await onDisconnect(); } catch (e) { setError(e instanceof Error ? e.message : '断开连接失败'); }
-    finally { setDisconnecting(false); }
-  }
+  const compact = useCompactLayout();
+  const viewStore = useLocalStore(() => {
+    const page = (initialSection ?? (isCompactLayout() ? null : 'appearance')) as SectionId | null;
+    return { page };
+  });
+  const [page, setPage] = useStoreField(viewStore, 'page');
+  const section = page ?? 'appearance';
+  const showingDirectory = compact && page === null;
+  const contentRef = useRef<HTMLDivElement>(null);
+  const lastSection = useRef<SectionId>(section);
+  useEffect(() => {
+    if (open) setPage(initialSection ?? (isCompactLayout() ? null : 'appearance'));
+  }, [open, initialSection]);
+  // Remember the visible default section when expanding the directory to a wide layout.
+  useEffect(() => { if (open && !compact && page === null) setPage('appearance'); }, [open, compact, page]);
+  useEffect(() => {
+    if (!open || !compact) return;
+    if (page) contentRef.current?.focus({ preventScroll: true });
+    else document.getElementById(`settings-link-${lastSection.current}`)?.focus({ preventScroll: true });
+  }, [open, compact, page]);
+  function setSection(next: SectionId) { lastSection.current = next; setPage(next); }
+  function back() { setPage(null); }
   /*
    * 主题的真相在 theme.ts、类别开关的真相在 prefs.ts（都是模块级 +
    * localStorage），组件只是它们的视图 ——
-   * 用 useState 在这里存一份的话，预览页或别处改了主题，这个控件不会知道。
+   * 在这里单独复制主题的话，预览页或别处改了主题，这个控件不会知道。
    */
-  const theme = useSyncExternalStore(subscribeTheme, getThemeMode);
-  const [showTypes, setShowTypes] = useShowTypes();
 
   return (
     <FloatingPanel
       open={open}
-      onClose={onClose}
+      onClose={compact && page ? back : onClose}
       labelledBy="settings-title"
       className="h-[min(520px,calc(100vh-32px))] max-w-[640px]"
       footer={
         <>
           {/* 底栏按分组说实话：外观那组的主题是真能用的，其余三组还没接 */}
           <span className="min-w-0 truncate">
-            {section === 'appearance'
-              ? '主题与类别显示立即生效；灰色选项暂不可用'
+            {showingDirectory ? '1Warden' : section === 'appearance'
+              ? '主题与类别显示立即生效并自动同步'
               : section === 'security' ? '灰色选项暂不可调整'
               : section === 'autofill' ? '在条目详情中使用自动填充'
               : '1Warden'}
           </span>
-          <span className="shrink-0">
-            <kbd className="text-2xs">esc</kbd> 关闭
-          </span>
+          {!compact && <span className="shrink-0">
+            <kbd className="text-2xs">esc</kbd> {compact && page ? '返回' : '关闭'}
+          </span>}
         </>
       }
     >
-      <div className="panel-head">
-        <IconGear size={15} className="shrink-0 text-[var(--ink-tertiary)]" />
-        <h2 id="settings-title" className="min-w-0 flex-1 truncate text-md font-medium">
-          设置
-        </h2>
-        <button onClick={onClose} aria-label="关闭设置" title="关闭  esc" className="btn btn-ghost -mr-1 p-1.5">
-          <IconClose size={15} />
-        </button>
-      </div>
+      <PageHeader panel title="设置" titleId="settings-title" onBack={compact && page ? back : onClose}
+        backLabel={compact && page ? '返回设置目录' : '返回上一页'} onClose={onClose}
+        breadcrumbs={showingDirectory ? [{ label: '设置' }] : [
+          { label: '设置', ...(compact ? { onSelect: back } : {}) },
+          { label: SECTIONS.find(s => s.id === section)!.label },
+        ]} />
 
       <div className="flex min-h-0 flex-1">
+        {showingDirectory && <nav aria-label="设置目录" className="min-w-0 flex-1 overflow-y-auto p-4">
+          <p className="mb-4 text-sm text-[var(--ink-tertiary)]">调整应用行为与使用偏好</p>
+          <div className="card overflow-hidden">
+            {SECTIONS.map((s) => <button key={s.id} id={`settings-link-${s.id}`} onClick={() => setSection(s.id)}
+              className="flex min-h-14 w-full items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3 text-left last:border-b-0 hover:bg-[var(--surface-hover)] focus-visible:bg-[var(--surface-hover)]">
+              <span className="text-[var(--accent)]">{s.icon}</span>
+              <span className="flex-1 text-md">{s.label}</span>
+              <IconChevronDown size={16} className="-rotate-90 text-[var(--ink-tertiary)]" />
+            </button>)}
+          </div>
+        </nav>}
         {/*
           分组导航用 tab 的语义（role="tablist"）而不是 aria-current 的链接：
           切换分组**不离开**这个面板，右侧内容是同一次交互里的另一块面板 ——
           这正是 tab 的定义。键盘的左右箭头也因此能直接切分组。
         */}
-        <nav
+        {!compact && <nav
           role="tablist"
           aria-label="设置分组"
           aria-orientation="vertical"
@@ -161,27 +181,16 @@ export function Settings({ client, open, account, serverUrl, onClose, initialSec
               </button>
             );
           })}
-        </nav>
+        </nav>}
 
-        <div
-          role="tabpanel"
+        {!showingDirectory && <div
+          ref={contentRef}
+          role={compact ? 'region' : 'tabpanel'}
           id={`settings-panel-${section}`}
-          aria-labelledby={`settings-tab-${section}`}
+          aria-labelledby={compact ? 'settings-title' : `settings-tab-${section}`}
           tabIndex={-1}
           className="min-w-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5 outline-none"
         >
-          {section === 'account' && (<>
-            {client && open && <ProfileEditor client={client} />}
-            <Group title="账户" hint="这些来自你连接的那台服务器，不在这里改">
-              <Row label="邮箱" value={account || '—'} />
-              <Row label="服务器" value={serverUrl || '—'} />
-              <Row label="断开并清除本机数据" hint="保险库在服务器上的内容不受影响">
-                <button className="btn btn-danger" onClick={() => { void disconnect(); }} disabled={!onDisconnect || disconnecting}>{disconnecting ? '正在断开…' : '断开连接'}</button>
-              </Row>
-              {error && <p role="alert" className="py-3 text-xs text-[var(--risk)]">{error}</p>}
-            </Group>
-          </>)}
-
           {section === 'security' && (
             <Group title="安全" hint="锁定与剪贴板的行为">
               <Row label="解锁后自动锁定" hint="解锁 15 分钟后自动锁定；重新打开界面不会延长期限">
@@ -190,56 +199,14 @@ export function Settings({ client, open, account, serverUrl, onClose, initialSec
               <Row label="复制后清空剪贴板" hint="只在剪贴板里还是我们写进去的值时才清">
                 <Select disabled value="30" options={[['10', '10 秒'], ['30', '30 秒'], ['60', '1 分钟'], ['0', '不清空']]} />
               </Row>
-              <Row label="已泄露密码检查" hint="只发送 SHA-1 哈希的前 5 个字符">
-                <Check disabled />
-              </Row>
+              <Row label="已泄露密码检查" hint="在安全报告中按需开启检查；只发送 SHA-1 哈希的前 5 个字符" />
             </Group>
           )}
 
-          {section === 'appearance' && (
-            <Group title="外观" hint="界面本身的样子">
-              {/*
-                ⚠️ 三态，不是一个开关：「跟随系统」是**独立的一个选项**，
-                不是「关」的意思。做成开关（亮/暗）的话，选过亮色的用户
-                就再也回不到跟随系统了 —— 而「晚上自动变暗」这件事
-                恰恰是很多人对系统主题的唯一用法。
-
-                分段控件而不是下拉框：三个选项一眼全在，而且当前选的是哪个
-                直接看得见（这是设置项，不是表单输入）。
-              */}
-              <Row label="主题" hint="改了立即生效，下次打开还是它">
-                <Segmented<ThemeMode>
-                  label="主题"
-                  value={theme}
-                  onChange={setThemeMode}
-                  options={[
-                    { value: 'system', label: '跟随系统' },
-                    { value: 'light', label: '亮色' },
-                    { value: 'dark', label: '暗色' },
-                  ]}
-                />
-              </Row>
-              {/*
-                侧栏「类别」那一节。
-                ⚠️ 默认**开着** —— 这个开关藏在设置里，而关掉之后侧栏
-                完全没有入口。默认关等于这个功能不存在。
-              */}
-              <Row label="侧栏按类别分组" hint="在「文件夹」下面按条目类型（登录 / 信用卡 …）再分一组">
-                <Segmented<'on' | 'off'>
-                  label="侧栏按类别分组"
-                  value={showTypes ? 'on' : 'off'}
-                  onChange={(v) => setShowTypes(v === 'on')}
-                  options={[{ value: 'on', label: '显示' }, { value: 'off', label: '隐藏' }]}
-                />
-              </Row>
-              <Row label="列表密度" hint="一行里显示多少条记录">
-                <Select disabled value="comfortable" options={[['comfortable', '标准'], ['compact', '紧凑']]} />
-              </Row>
-              <Row label="动效" hint="关闭后所有过渡立即完成">
-                <Check disabled checked />
-              </Row>
-            </Group>
-          )}
+          {section === 'appearance' && (<div className="space-y-6">
+            <AccountAppearance {...(client ? { client } : {})} />
+            {DesktopQuickSearchSettings && capabilities.native && <Suspense fallback={null}><DesktopQuickSearchSettings /></Suspense>}
+          </div>)}
 
           {section === 'autofill' && (
             <Group title="自动填充" hint={capabilities.browser ? '在当前浏览器中使用已保存的登录' : '让密码进到其他应用里'}>
@@ -248,8 +215,8 @@ export function Settings({ client, open, account, serverUrl, onClose, initialSec
                 <Row label="保存登录" hint="在网站登录后，可在列表上方保存或更新登录信息" />
               </>}
               {capabilities.native && <>
-                <Row label="桌面自动填充" hint="在条目详情中输入到其他应用；需要辅助功能权限" />
-                <Row label="快速面板快捷键"><Kbd>⌘</Kbd><Kbd>⇧</Kbd><Kbd>\</Kbd></Row>
+                <Row label="桌面自动填充" hint={detectOs() === 'win' ? '在条目详情中向当前窗口发送按键；不支持管理员权限窗口' : '在条目详情中输入到其他应用；需要辅助功能权限'} />
+                <Row label="快速面板快捷键"><Kbd>{quickShortcut()}</Kbd></Row>
               </>}
               {!capabilities.native && !capabilities.browser && <Row label="复制登录信息" hint="在条目详情中复制用户名、密码或验证码" />}
             </Group>
@@ -257,13 +224,14 @@ export function Settings({ client, open, account, serverUrl, onClose, initialSec
 
           {section === 'about' && (
             <Group title="关于" hint="1Warden">
+              <div className="flex items-center gap-3 py-4"><BrandMark size={48} /><span className="text-lg font-semibold">1Warden</span></div>
               {DesktopAppUpdates && capabilities.native && <Suspense fallback={null}><DesktopAppUpdates /></Suspense>}
               <Row label="数据在哪里" hint="条目在服务端加密，主密码与本机派生的密钥永不发送" />
               <Row label="许可" hint="自有实现，未使用禁止用于 Vaultwarden 的官方 SDK" />
-              <Shortcuts native={capabilities.native} />
+              {!compact && <Shortcuts native={capabilities.native} />}
             </Group>
           )}
-        </div>
+        </div>}
       </div>
     </FloatingPanel>
   );
@@ -320,10 +288,6 @@ function Select({ value, options, disabled }: {
   );
 }
 
-function Check({ checked, disabled }: { checked?: boolean; disabled?: boolean }) {
-  return <input type="checkbox" defaultChecked={checked} disabled={disabled} tabIndex={-1} />;
-}
-
 function Kbd({ children }: { children: ReactNode }) {
   return (
     <kbd className="rounded-[var(--radius-sm)] border border-[var(--border-subtle)] bg-[var(--surface-well)] px-1.5 py-0.5 text-2xs text-[var(--ink-secondary)]">
@@ -335,10 +299,10 @@ function Kbd({ children }: { children: ReactNode }) {
 /** 快捷键一览 —— 面板里唯一「真的有用」的一组信息，所以它不叫占位 */
 function Shortcuts({ native }: { native: boolean }) {
   const keys: Array<[string, string]> = [
-    ...(native ? [['⌘⇧\\', '打开快速面板'] as [string, string]] : []),
-    ['⌘F', '搜索条目'],
-    ['⌘N', '新建条目'],
-    ['⌘L', '锁定保险库'],
+    ...(native ? [[quickShortcut(), '打开快速面板'] as [string, string]] : []),
+    [primaryShortcut('F'), '搜索条目'],
+    [primaryShortcut('N'), '新建条目'],
+    [primaryShortcut('L'), '锁定保险库'],
   ];
   return (
     <div className="border-t border-[var(--border-subtle)] py-3">

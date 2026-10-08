@@ -68,7 +68,7 @@ describe('independent browser account sessions', () => {
   it('migrates the existing single-session slot without reauthentication', async () => {
     const { store, values, a } = fixture();
     await store.start(a);
-    delete values['coffer.sessions'];
+    delete values['1warden.sessions'];
     await store.select(null);
     expect(await store.select(a.account)).toEqual(a);
   });
@@ -82,7 +82,7 @@ describe('independent browser account sessions', () => {
     const waiting = new Promise<void>((resolve) => { started = resolve; });
     area.get = async (keys) => {
       const value = await get(keys);
-      if (keys === 'coffer.session') { started(); await new Promise<void>((resolve) => { finish = resolve; }); }
+      if (keys === '1warden.session') { started(); await new Promise<void>((resolve) => { finish = resolve; }); }
       return value;
     };
     const reading = store.load(); await waiting;

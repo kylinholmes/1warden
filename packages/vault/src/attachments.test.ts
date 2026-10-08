@@ -1,6 +1,6 @@
 import { describe, it, expect, beforeAll } from 'vitest';
-import { makeUserKey, encryptBytes } from '@coffer/crypto';
-import type { SymmetricKey } from '@coffer/crypto';
+import { makeUserKey, encryptBytes } from '@1warden/crypto';
+import type { SymmetricKey } from '@1warden/crypto';
 import { unwrapAttachmentKey, decryptAttachmentContent, attachmentBytes } from './attachments';
 
 let key: SymmetricKey;

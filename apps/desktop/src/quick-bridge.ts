@@ -5,14 +5,15 @@
  *
  * 快速面板是一个**独立窗口**，有自己的 JS 上下文 —— 主窗口内存里的会话它
  * 天然拿不到。看上去最直接的做法是把解好的条目通过 Tauri 的 event 传过去，
- * 但那意味着**明文密码跨 IPC 边界序列化**，而 spec 对密钥这一层的要求是
- * 「跨进程边界时绝不能序列化它」。
+ * 但那意味着把明文密码和会话信息暴露给本来只负责搜索的第二个 WebView。
  *
- * 所以面板从头到尾**不持有任何密文或明文**：它只发查询、收结果。
+ * 所以面板不持有密码、密钥或条目密文：它只发查询、收摘要。
+ * Windows 的显式复制由主窗口调用仅 main 可用的原生剪贴板命令；
+ * 只有待复制的那段文本进入系统剪贴板，密钥和整库数据不参与该调用。
  *
- *   quick  ──coffer:query {query}──▶  main（唯一持有会话的地方）
- *   quick  ◀─coffer:results {items}─  main   ← 只有名称与用户名，没有密码
- *   quick  ──coffer:action {...}───▶  main   ← 复制/输入由主窗口执行
+ *   quick  ──1warden:query {query}──▶  main（唯一持有会话的地方）
+ *   quick  ◀─1warden:results {items}─  main   ← 只有名称与用户名，没有密码
+ *   quick  ──1warden:action {...}───▶  main   ← 复制/输入由主窗口执行
  *
  * 面板能看到的最敏感的东西是「用户名」。密码连它都看不到。
  */
@@ -68,25 +69,25 @@ export const MAIN_WINDOW = 'main';
 
 /** 面板 → 主窗口：搜什么 */
 export function askMain(query: string, seq: number): Promise<void> {
-  return emitTo(MAIN_WINDOW, 'coffer:query', { query, seq });
+  return emitTo(MAIN_WINDOW, '1warden:query', { query, seq });
 }
 
 /** 主窗口 → 面板：搜到了什么 */
 export function onResults(fn: (r: QuickResults) => void): Promise<UnlistenFn> {
-  return listen<QuickResults>('coffer:results', (e) => fn(e.payload));
+  return listen<QuickResults>('1warden:results', (e) => fn(e.payload));
 }
 
 /** 面板 → 主窗口：执行动作（复制 / 输入） */
-export function askAction(itemId: string, action: QuickAction): Promise<void> {
-  return emitTo(MAIN_WINDOW, 'coffer:action', { itemId, action });
+export function askAction(itemId: string, action: QuickAction, requestId?: number): Promise<void> {
+  return emitTo(MAIN_WINDOW, '1warden:action', { itemId, action, requestId });
 }
 
 /** 主窗口 → 面板：动作结果，用来给用户一句反馈 */
-export function onActionResult(fn: (r: { ok: boolean; message: string }) => void): Promise<UnlistenFn> {
-  return listen<{ ok: boolean; message: string }>('coffer:action-result', (e) => fn(e.payload));
+export function onActionResult(fn: (r: { ok: boolean; message: string; requestId?: number }) => void): Promise<UnlistenFn> {
+  return listen<{ ok: boolean; message: string; requestId?: number }>('1warden:action-result', (e) => fn(e.payload));
 }
 
 /** 面板 → 主窗口：我需要一份初始结果（面板刚显示出来时） */
 export function askInitial(seq: number): Promise<void> {
-  return emitTo(MAIN_WINDOW, 'coffer:query', { query: '', seq });
+  return emitTo(MAIN_WINDOW, '1warden:query', { query: '', seq });
 }

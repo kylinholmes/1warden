@@ -1,3 +1,4 @@
+import { useLocalStore, useStoreField } from '@1warden/state/react';
 /**
  * 列表行左侧那个方块 —— 有条目自己的图标，而不是按类型共用一个。
  *
@@ -29,9 +30,9 @@
  * 字段由有 VaultItem 的那一方算好过桥。两条路共用这一个实现，
  * 规则就不会在几处之间长歪。
  */
-import { useEffect, useState } from 'react';
-import { avatarOf, iconDomainOf, type VaultItem } from '@coffer/vault';
-import type { IconStore } from '@coffer/vault';
+import { useEffect } from 'react';
+import { avatarOf, iconDomainOf, type VaultItem } from '@1warden/vault';
+import type { IconStore } from '@1warden/vault';
 import { TypeIcon } from './icons';
 
 /**
@@ -62,7 +63,7 @@ export interface IconProps {
  *
  * 扩展端在后台算好同样的值随摘要过来，所以那边不调这个函数。
  * 两边的算法必须是同一套：`avatarOf` / `iconDomainOf` 都在
- * `@coffer/vault` 里，一处定义。
+ * `@1warden/vault` 里，一处定义。
  */
 export function iconPropsOf(item: VaultItem): IconProps {
   const avatar = avatarOf(item);
@@ -94,7 +95,11 @@ export function IconGlyph({ domain, text, hue, type, store, size }: {
   store: IconStore | null;
   size?: number;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
+  const viewStore = useLocalStore(() => {
+    const url = (null) as string | null;
+    return { url };
+  });
+  const [url, setUrl] = useStoreField(viewStore, 'url');
 
   useEffect(() => {
     // 换了条目就把上一个的图标清掉，否则会先显示上一条的图标再换 ——

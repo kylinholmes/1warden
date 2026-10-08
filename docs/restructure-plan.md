@@ -48,8 +48,8 @@
 
 | 提交 | 合掉了什么 | 合并时发现 |
 |---|---|---|
-| `86a9244` | 安全报告 → `@coffer/ui/SecurityReportView` | 弹窗那份**少两栏**（已泄露的密码、即将到期）—— 功能缺失，不是样式差异 |
-| 本次 | 两步验证 → `@coffer/ui/TwoFactorForm` | 扩展端**从来没有接过 `TwoFactorChallenge`**（整个目录里 `twoFactor` 出现 0 次）—— **开了两步验证的 Vaultwarden 用户登不进扩展** |
+| `86a9244` | 安全报告 → `@1warden/ui/SecurityReportView` | 弹窗那份**少两栏**（已泄露的密码、即将到期）—— 功能缺失，不是样式差异 |
+| 本次 | 两步验证 → `@1warden/ui/TwoFactorForm` | 扩展端**从来没有接过 `TwoFactorChallenge`**（整个目录里 `twoFactor` 出现 0 次）—— **开了两步验证的 Vaultwarden 用户登不进扩展** |
 
 两件的形状一样：不是「两边写得不一样」，是**一边根本没写**，
 而类型检查、测试、构建全都不会报。
@@ -75,7 +75,7 @@ macOS 红绿灯上、截图里少一个按钮）—— 全都是只有肉眼看�
 
 搬家时会撞上两件事，都是先想清楚才不用返工的：
 
-### ① ✅ 已做：账户存储搬进 `@coffer/ui/accounts.ts`
+### ① ✅ 已做：账户存储搬进 `@1warden/ui/accounts.ts`
 
 `useAccounts()` 加载中回 `null`（和「一个都没存」的 `[]` 分开），
 `Connect.tsx` 在 `null` 时渲染占位、**不渲染表单**。⚠️ 占位放在 JSX 里
@@ -88,7 +88,7 @@ macOS 红绿灯上、截图里少一个按钮）—— 全都是只有肉眼看�
 现在预览也装了一份等价的宿主（不走 `installDesktopHost()`，
 那会把 Rust 的 `tauriFetch` 带进来）。
 
-### ①·二 ✅ 已做：整个连接屏合进 `@coffer/ui/ConnectScreen`
+### ①·二 ✅ 已做：整个连接屏合进 `@1warden/ui/ConnectScreen`
 
 账户存储做出来之后，整块就搬得动了 —— 桌面端的连接屏删成「外壳 + 证书插槽」，
 弹窗接同一个组件。**两端从此只有一份**：账户列表、快速解锁、完整表单、
@@ -144,7 +144,7 @@ type ConnectOutcome =
 「已保存账户」的状态（桩没有 `host().storage` 的内容），得先给桩
 预置几条 —— 否则又是「改完没肉眼看过」，见上一节。
 
-### ①·三 ✅ 已做：生成器合进 `@coffer/ui/GeneratorBody`
+### ①·三 ✅ 已做：生成器合进 `@1warden/ui/GeneratorBody`
 
 `Segmented` 一并搬进共享包（它只依赖 react）。桌面端只剩浮层外壳，
 弹窗把内容铺在列表那一层 —— **两个外壳，一份内容**。
@@ -154,7 +154,7 @@ type ConnectOutcome =
 还有一个更安静的：弹窗把大小写写死成开、数字符号可关，**两类都关掉时
 `generatePassword` 会抛**，而桌面端有一道 `disabled` 挡着。
 
-### ①·四 ✅ 已做：导入合进 `@coffer/ui/ImportView`
+### ①·四 ✅ 已做：导入合进 `@1warden/ui/ImportView`
 
 同一族最后一个。弹窗那份违反了桌面端明写的三条硬要求里的两条
 （跳过逐条、失败逐条），而导入是**一次性、不可重来**的操作。详见提交 `47f1d9a`。
@@ -190,8 +190,8 @@ type ConnectOutcome =
 
 | 依赖 | 桌面端 | 扩展端 |
 |---|---|---|
-| `client.saveItem(draft)` | 进程内直接调 | 需要新的 `coffer:save-item` 消息 → 后台 `c.saveItem` |
-| `client.getSession().folders` | 进程内 | 已有 `coffer:folders`（id + name） |
+| `client.saveItem(draft)` | 进程内直接调 | 需要新的 `1warden:save-item` 消息 → 后台 `c.saveItem` |
+| `client.getSession().folders` | 进程内 | 已有 `1warden:folders`（id + name） |
 | `FloatingPanel`（外壳） | 桌面端组件 | 弹窗整屏只有 440px，浮层没意义 —— 和生成器同一种分法：**两个外壳，一份内容** |
 
 `draft` 是完整的 `VaultItem`（`blankItem()` 造一个空的）。
@@ -202,8 +202,8 @@ type ConnectOutcome =
 额外泄露 → 直接做，和桌面端同一份。
 
 **编辑**：弹窗要先**拿到条目现有的字段**才能显示在表单里，而它现在拿不到
-—— 读那条路是刻意封死的（`coffer:item` 只回 notes / card / identity /
-sshKey / secureNote，**不含 login 的密码**；密码要 `coffer:reveal` 一个字段
+—— 读那条路是刻意封死的（`1warden:item` 只回 notes / card / identity /
+sshKey / secureNote，**不含 login 的密码**；密码要 `1warden:reveal` 一个字段
 一个字段地要）。
 
 所以编辑有两条路，**得先决定**：
@@ -260,8 +260,8 @@ sshKey / secureNote，**不含 login 的密码**；密码要 `coffer:reveal` 一
 
 ### 做法（已经推演完，下一步是机械的）
 
-**自定义字段**：`coffer:item` 回 `{ name, type, value }[]`，但 **type === 1 的
-`value` 回 `null`**；揭示走扩展后的 `coffer:reveal`（`field: 'custom'` + 序号）。
+**自定义字段**：`1warden:item` 回 `{ name, type, value }[]`，但 **type === 1 的
+`value` 回 `null`**；揭示走扩展后的 `1warden:reveal`（`field: 'custom'` + 序号）。
 
 ⚠️ 关键发现：**`SecretField` 已经有 `getValue`**（异步，现在只用于复制）。
 把「揭示」也接到它上面就够 —— 现在的揭示读的是同步的 `value`，
@@ -300,7 +300,7 @@ sshKey / secureNote，**不含 login 的密码**；密码要 `coffer:reveal` 一
 | `src/screens/Connect.tsx`（500） | `Popup.tsx` 的 `ConnectForm` | 合并，**以桌面端为准** |
 | `src/screens/SecurityReport.tsx`（276） | `Popup.tsx` 的 `SecurityReport` | 合并，同上 |
 | `src/screens/Import.tsx`（341） | `Popup.tsx` 的 `ImportScreen` | 合并，同上 |
-| `src/screens/Generator.tsx`（272） | `Popup.tsx` 的 `Generator` | **只共享逻辑**。桌面是浮层、弹窗是内联 —— 两个外壳，一个 `@coffer/crypto` |
+| `src/screens/Generator.tsx`（272） | `Popup.tsx` 的 `Generator` | **只共享逻辑**。桌面是浮层、弹窗是内联 —— 两个外壳，一个 `@1warden/crypto` |
 | `src/screens/ItemEditor.tsx`（587） | **没有** | 留桌面端。⚠️ 用户要求过功能对齐，将来扩展也要 |
 | `src/screens/Settings.tsx`（332） | **没有** | 留桌面端 |
 | `src/screens/Unlock.tsx`（134） | **没有**（扩展的解锁在连接表单里） | 留桌面端 |
@@ -314,7 +314,7 @@ sshKey / secureNote，**不含 login 的密码**；密码要 `coffer:reveal` 一
 
 | | 桌面端 | 扩展端 |
 |---|---|---|
-| 条目 | `VaultClient` 在进程内，直接 `await` | `ext.runtime.sendMessage({type:'coffer:search'})` |
+| 条目 | `VaultClient` 在进程内，直接 `await` | `ext.runtime.sendMessage({type:'1warden:search'})` |
 | 解锁态 | 进程内的会话状态 | 同上，走消息 |
 | 明文 | 就在这个进程里 | **不出后台**（弹窗只收摘要） |
 
@@ -332,7 +332,7 @@ sshKey / secureNote，**不含 login 的密码**；密码要 `coffer:reveal` 一
 - **`.vault-shell` 不能是 `container-type: inline-size`**：弹窗按内容撑开，
   加了它整个弹窗会塌成 0 宽（踩过两次）。守卫在
   `extension/shared-css-wiring.test.ts`。
-- **MAIN world 的脚本不能引 `@coffer/ui`**（那里没有扩展 API）。守卫同上。
+- **MAIN world 的脚本不能引 `@1warden/ui`**（那里没有扩展 API）。守卫同上。
 - **Tailwind 要显式 `@source` 指向共享包**。守卫同上。
 - **块注释里不要写 glob** —— `星号斜杠` 会把注释提前闭合，报的是
   「Unexpected token」这种指错方向的错。这一轮犯了三次
@@ -562,10 +562,10 @@ Rust 侧移进桌面端的：`rfd`（系统文件对话框）、`tray-icon` / `i
 | | 回答什么 |
 |---|---|
 | `390×844` | 排版在窄屏下成不成立 |
-| `COFFER_SHOT_TOUCH=1` | 这套交互在**没有 hover 的手指下**成不成立 |
+| `ONEWARDEN_SHOT_TOUCH=1` | 这套交互在**没有 hover 的手指下**成不成立 |
 
 之前那次验收只做了前者（`mobile: false`）。现在 `ui-shot.ts` 两样都有，
-还多了 `COFFER_SHOT_TAP=<选择器>` —— 用**触摸**点一下再拍。
+还多了 `ONEWARDEN_SHOT_TAP=<选择器>` —— 用**触摸**点一下再拍。
 （用 `element.click()` 是不行的：它走鼠标那条路，会把 `:hover` 也置上，
 等于把要验的前提自己抹掉。）
 

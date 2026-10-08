@@ -10,16 +10,16 @@ import { createFakeServer } from '../packages/vault/src/testing/fake-server';
 const product = process.argv[2] ?? 'edge';
 if (!['edge', 'zen'].includes(product)) throw Error('Usage: bun scripts/profile-smoke.ts edge|zen');
 const firefox = product === 'zen';
-const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.COFFER_PUPPETEER
-  ?? '/tmp/coffer-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
-const directory = mkdtempSync(join(tmpdir(), `coffer-profile-${product}-`));
-const output = mkdtempSync(join(tmpdir(), `coffer-profile-artifacts-${product}-`));
+const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.ONEWARDEN_PUPPETEER
+  ?? '/tmp/onewarden-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
+const directory = mkdtempSync(join(tmpdir(), `onewarden-profile-${product}-`));
+const output = mkdtempSync(join(tmpdir(), `onewarden-profile-artifacts-${product}-`));
 const dist = join(directory, 'extension');
 cpSync(resolve('apps/desktop', firefox ? 'dist-firefox' : 'dist-extension'), dist, { recursive: true });
 const uuid = '6c9c9b48-fb39-4c95-b193-227a60e6db85';
-const realUpstream = process.env.COFFER_PROFILE_REAL_URL;
+const realUpstream = process.env.ONEWARDEN_PROFILE_REAL_URL;
 if (realUpstream && !['localhost', '127.0.0.1', '[::1]'].includes(new URL(realUpstream).hostname)) throw Error('Real test server must be loopback');
-const email = realUpstream ? 'coffer-test@example.com' : 'profile@example.invalid';
+const email = realUpstream ? 'onewarden-test@example.com' : 'profile@example.invalid';
 const masterPassword = realUpstream ? 'Test-Master-Password-123!' : 'Synthetic-Profile-Test!42';
 let cleanupId: string | undefined;
 let cleanupHeaders: Headers | undefined;
@@ -70,26 +70,53 @@ let checks = 0;
 function check(ok: unknown, name: string) { if (!ok) throw Error(name); checks++; console.log(`PASS ${product}: ${name}`); }
 try {
   browser = await puppeteer.launch({ browser: firefox ? 'firefox' : 'chrome', headless: true, userDataDir: directory,
-    executablePath: firefox ? '/Applications/Zen.app/Contents/MacOS/zen' : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
+    executablePath: firefox ? process.env.ONEWARDEN_ZEN ?? '/Applications/Zen.app/Contents/MacOS/zen'
+      : process.env.ONEWARDEN_EDGE ?? (process.platform === 'win32' ? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe' : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
     enableExtensions: true, ...(firefox ? { args: ['--remote-allow-system-access'], extraPrefsFirefox: {
-      'extensions.webextensions.uuids': JSON.stringify({ 'coffer@coffer.app': uuid }),
-    } } : { pipe: true }),
+      'extensions.webextensions.uuids': JSON.stringify({ '1warden@1warden.app': uuid }),
+    } } : { pipe: process.platform !== 'win32' }),
   });
   const id = await browser.installExtension(dist);
   const url = `${firefox ? `moz-extension://${uuid}` : `chrome-extension://${id}`}/popup.html`;
   async function open(selector: string) {
     page = await browser.newPage(); await page.setViewport({ width: 440, height: 600 });
     if (firefox) await page.mainFrame().browsingContext.navigate(url, 'interactive'); else await page.goto(url);
+    await page.waitForFunction(() => !!document.querySelector('main button, input[type="email"], .nav-trigger'));
+    if (await page.$('main')) {
+      if (selector === 'input[type="email"]') await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-add-server]')?.click());
+      else if (selector !== 'main li button') await pickHome();
+    }
     await page.waitForSelector(selector);
+  }
+  async function pickHome() {
+    const s = (await rpc('snapshot')).result;
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('main li button')].some(b => !b.disabled));
+    await page.evaluate((target: any) => {
+      const buttons = [...document.querySelectorAll<HTMLButtonElement>('main li button')];
+      const found = buttons.find(b => b.textContent?.includes(target?.email ?? '') && b.textContent?.includes(target ? new URL(target.serverUrl).host : '')) ?? buttons[0];
+      found?.click();
+    }, s.account);
+  }
+  async function homeProfile(displayName: string, avatarDataUrl: string, stage: string) {
+    await page.waitForSelector('main li button');
+    await page.waitForFunction((expected: { email: string; host: string; displayName: string; avatarDataUrl: string }) => {
+      const row = [...document.querySelectorAll<HTMLButtonElement>('main li button')]
+        .find(button => button.textContent?.includes(expected.email) && button.textContent?.includes(expected.host));
+      const img = row?.querySelector('img');
+      return row?.textContent?.includes(expected.displayName) && img?.complete && img.naturalWidth > 0 && img.src === expected.avatarDataUrl;
+    }, { timeout: 5000 }, { email, host: new URL(serverUrl).host, displayName, avatarDataUrl });
+    check(true, `${stage}: home shows decoded saved avatar, display name, email and server together`);
   }
   const rpc = (method: string, args: unknown[] = []) => page.evaluate(async (m: string, a: unknown[]) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return api.runtime.sendMessage({ type: 'coffer:application', method: m, args: a });
+    return api.runtime.sendMessage({ type: '1warden:application', method: m, args: a });
   }, method, args);
   async function settings() {
     // Zen's BiDi cannot synthesize pointer input on privileged extension pages.
     if (firefox) {
-      await page.$eval('[data-key="profile"]', (button: HTMLButtonElement) => button.click());
+      await page.$eval('[aria-label="账户菜单"]', (button: HTMLButtonElement) => button.click());
+      await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('#profile-account-menu button')].find(button => button.textContent?.trim() === '用户详情')!.click());
+      await page.waitForSelector('#profile-link-edit'); await page.$eval('#profile-link-edit', (button: HTMLButtonElement) => button.click());
       await page.waitForSelector('#profile-name'); return;
     }
     if (firefox) await page.$eval('.nav-trigger', (b: HTMLButtonElement) => { b.focus(); b.click(); });
@@ -97,9 +124,9 @@ try {
     await page.waitForFunction(() => { const r = document.querySelector('.nav-drawer-panel')!.getBoundingClientRect(); return r.x >= -0.5 && r.width > 0; });
     if (firefox) await page.$eval('[aria-label="账户菜单"]', (b: HTMLButtonElement) => { b.focus(); b.click(); });
     else await page.click('[aria-label="账户菜单"]');
-    const setting = await page.evaluateHandle(() => Array.from(document.querySelectorAll('#profile-account-menu button')).find((b) => b.textContent?.trim() === '设置'));
+    const setting = await page.evaluateHandle(() => Array.from(document.querySelectorAll('#profile-account-menu button')).find((b) => b.textContent?.trim() === '用户详情'));
     if (firefox) await setting.evaluate((b: HTMLButtonElement) => { b.focus(); b.click(); }); else await setting.asElement().click();
-    await setting.dispose(); await page.waitForSelector('#profile-name');
+    await setting.dispose(); await page.waitForSelector('#profile-link-edit'); await page.click('#profile-link-edit'); await page.waitForSelector('#profile-name');
   }
   async function text(selector: string, value: string) {
     await page.$eval(selector, (input: HTMLInputElement, next: string) => {
@@ -108,8 +135,7 @@ try {
     }, value);
   }
   async function save() {
-    await page.evaluate(() => (Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '保存个人资料') as HTMLButtonElement).click());
-    await page.waitForFunction(() => Array.from(document.querySelectorAll('[role="status"]')).some((s) => s.textContent === '已保存'));
+    await page.waitForFunction(() => Array.from(document.querySelectorAll('[role="status"]')).some((s) => s.textContent === '已同步'));
   }
   async function menuAction(label: string) {
     await page.waitForSelector('.nav-trigger');
@@ -134,10 +160,19 @@ try {
   }
   await open('input[type="email"]');
   check((await rpc('connect', [{ serverUrl, email, masterPassword }])).ok, 'connects through real extension background');
+  // This suite connects through RPC, bypassing the form's remember-account callback.
+  await page.evaluate(async (account: { serverUrl: string; email: string }) => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    await api.storage.local.set({ '1warden.accounts': JSON.stringify([account]) });
+  }, { serverUrl, email });
+  await page.waitForFunction(async () => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return (await api.runtime.sendMessage({ type: '1warden:application', method: 'snapshot', args: [] })).result.profileSettings?.devices.length === 1;
+  });
   const initial = (await rpc('snapshot')).result;
-  if (initial.profileVersion !== null) throw Error('Test account already has a Profile; refusing to overwrite it');
+  if (initial.profile?.displayName || initial.profile?.avatarDataUrl) throw Error('Test account already has a personal Profile; refusing to overwrite it');
   await page.close(); await open('.nav-trigger'); await settings();
-  check(writes.length === 0, 'opening settings never creates a record');
+  check(writes.length === 1, 'only automatic device registration creates the record, not opening settings');
   await text('#profile-name', '彩色测试用户');
   const png = await page.evaluate(() => {
     const c = document.createElement('canvas'); c.width = 600; c.height = 400; const ctx = c.getContext('2d')!;
@@ -152,18 +187,28 @@ try {
     input.files = transfer.files; input.dispatchEvent(new Event('change', { bubbles: true }));
   }, png); else await (await page.$('input[type="file"]')).uploadFile(imagePath);
   await page.waitForFunction(() => !!document.querySelector('#profile-heading')?.parentElement?.querySelector('img'));
+  await page.evaluate(() => (Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '使用此头像') as HTMLButtonElement).click());
   await save();
   const saved = (await rpc('snapshot')).result;
   check(saved.profile.displayName === '彩色测试用户' && saved.profile.avatarDataUrl.startsWith('data:image/jpeg;base64,'), 'saves compressed avatar and display name');
-  check(saved.profile.avatarDataUrl.length <= 5600, 'avatar fits note budget');
-  check(writes.length === 1 && writes[0].method === 'POST', 'first save creates one record');
+  check(saved.profile.avatarDataUrl.length <= 3600, 'avatar fits note budget');
+  check(writes.length >= 2 && writes[0].method === 'POST' && writes.slice(1).every(w => w.method === 'PUT') && ciphers.length === 1, 'automatic profile saves update the device profile record');
   check(writes[0].body.notes.startsWith('2.') && !JSON.stringify(writes[0]).includes('彩色测试用户') && !JSON.stringify(writes[0]).includes('data:image'), 'server receives encrypted profile only');
   check(saved.items.length === initial.items.length && (await rpc('search', ['1Warden'])).result.length === 0, 'profile is hidden from normal browse and search');
   if (!firefox) { await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {})))); await page.screenshot({ path: join(output, 'profile-light.png') }); }
+  await menuAction('添加账户'); await back();
+  await homeProfile('彩色测试用户', saved.profile.avatarDataUrl, 'after profile save and return');
+  await page.close(); await open('main li button');
+  await homeProfile('彩色测试用户', saved.profile.avatarDataUrl, 'after popup reopen');
+  if (!firefox) {
+    await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
+    await page.screenshot({ path: join(output, 'home-saved-profile.png') });
+  }
+  await pickHome(); await page.waitForSelector('.nav-trigger'); await settings();
+  const beforeUpdate = writes.length;
   await text('#profile-name', '更新后的用户'); await save();
-  check(writes.length === 2 && writes[1].method === 'PUT' && ciphers.length === 1, 'second save updates the same record');
-  await text('#profile-name', '不能保存的修改'); rejectWrite = true;
-  await page.evaluate(() => (Array.from(document.querySelectorAll('button')).find((b) => b.textContent === '保存个人资料') as HTMLButtonElement).click());
+  check(writes.length === beforeUpdate + 1 && writes.at(-1).method === 'PUT' && ciphers.length === 1, 'second save updates the same record');
+  rejectWrite = true; await text('#profile-name', '不能保存的修改');
   await page.waitForSelector('[role="alert"]');
   check((await rpc('snapshot')).result.profile.displayName === '更新后的用户', 'failed server write preserves last saved profile'); rejectWrite = false;
   await page.close(); await open('.nav-trigger'); await settings();
@@ -171,6 +216,9 @@ try {
   await rpc('lock'); await page.close(); await open('input[type="password"]');
   check(await page.evaluate(() => document.body.textContent?.includes('更新后的用户') && !!document.querySelector('img')), 'locked screen shows cached name and avatar');
   if (!firefox) await page.screenshot({ path: join(output, 'profile-locked.png') });
+  await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === '返回首页')!.click());
+  await homeProfile('更新后的用户', saved.profile.avatarDataUrl, 'after locking and returning home');
+  await pickHome(); await page.waitForSelector('input[type="password"]');
   await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
     const keys = Object.keys(await api.storage.local.get(null)).filter((k) => k.includes('profile.v1.') || k.includes('synccache.'));
@@ -181,11 +229,35 @@ try {
   await page.close(); await open('.nav-trigger');
   const other = { serverUrl, email: 'other-account@example.invalid' };
   const remote = { serverUrl: 'https://different-backend.example.invalid', email };
+  const remoteProfile = { displayName: '另一个服务器的用户', avatarDataUrl: await page.evaluate(() => {
+    const canvas = document.createElement('canvas'); canvas.width = 24; canvas.height = 24;
+    const ctx = canvas.getContext('2d')!; ctx.fillStyle = '#2cba68'; ctx.fillRect(0, 0, 24, 24);
+    return canvas.toDataURL('image/jpeg', 0.7);
+  }) };
   const authenticationsBeforeSwitch = authenticationRequests;
-  await page.evaluate(async (identities: any[]) => {
+  await page.evaluate(async (identities: any[], remoteProfile: { displayName: string; avatarDataUrl: string }) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    await api.storage.local.set({ 'coffer.accounts': JSON.stringify(identities) });
-  }, [{ serverUrl, email }, other, remote]);
+    const remote = identities[2];
+    await api.storage.local.set({ '1warden.accounts': JSON.stringify(identities),
+      [`profile.v1.${JSON.stringify([remote.serverUrl, remote.email])}`]: JSON.stringify(remoteProfile) });
+  }, [{ serverUrl, email }, other, remote], remoteProfile);
+  await page.close(); await open('main li button');
+  await homeProfile('更新后的用户', saved.profile.avatarDataUrl, 'multiple saved accounts');
+  check(await page.evaluate((targets: { serverUrl: string; email: string }[]) => targets.every(target => {
+    const row = [...document.querySelectorAll<HTMLButtonElement>('main li button')].find(button =>
+      button.textContent?.includes(target.email) && button.textContent?.includes(new URL(target.serverUrl).host));
+    return !!row && !row.querySelector('img') && !row.textContent?.includes('更新后的用户')
+      && row.querySelector('span')?.textContent?.trim() === target.email[0]?.toUpperCase();
+  }), [other]), 'home fallback does not borrow another account avatar or name across email identities');
+  await page.waitForFunction((expected: { email: string; host: string; name: string; avatar: string }) => {
+    const row = [...document.querySelectorAll<HTMLButtonElement>('main li button')].find(button =>
+      button.textContent?.includes(expected.email) && button.textContent?.includes(expected.host));
+    const image = row?.querySelector('img');
+    return row?.textContent?.includes(expected.name) && !row.textContent?.includes('更新后的用户')
+      && image?.complete && image.naturalWidth > 0 && image.src === expected.avatar;
+  }, { timeout: 5000 }, { email, host: new URL(remote.serverUrl).host, name: remoteProfile.displayName, avatar: remoteProfile.avatarDataUrl });
+  check(true, 'same email on a different server shows its own cached avatar and display name');
+  await pickHome(); await page.waitForSelector('.nav-trigger');
   if (!firefox) {
     await page.click('.nav-trigger');
     await page.waitForFunction(() => document.querySelector('.nav-drawer-panel')!.getBoundingClientRect().x >= -0.5);
@@ -200,11 +272,17 @@ try {
   let switched = (await rpc('snapshot')).result;
   check(switched.status === 'locked' && switched.account.email === other.email && switched.items.length === 0 && switched.profile === null,
     'same-server account switch locks and isolates prior data');
+  check(await page.evaluate(async () => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return !(await api.storage.session.get('1warden.connectionDraft'))['1warden.connectionDraft'];
+  }), 'switching accounts never creates a transient login draft');
   await page.close(); await open('input[type="password"]');
   check((await rpc('snapshot')).result.account.email === other.email, 'selected locked account survives popup reopen');
   check((await rpc('switchAccount', [remote])).ok, 'selects same email on a different backend');
   switched = (await rpc('snapshot')).result;
-  check(switched.account.serverUrl === remote.serverUrl && switched.profile === null && switched.status === 'locked', 'different backend uses a distinct locked identity');
+  check(switched.account.serverUrl === remote.serverUrl && switched.profile?.displayName === remoteProfile.displayName
+    && switched.profile?.avatarDataUrl === remoteProfile.avatarDataUrl && switched.status === 'locked' && switched.items.length === 0,
+    'different backend uses a distinct locked identity with only its own cached profile');
   check((await rpc('switchAccount', [{ serverUrl, email }])).ok, 'switches back to original identity');
   check((await rpc('snapshot')).result.status === 'unlocked' && (await rpc('snapshot')).result.profile.displayName === '更新后的用户', 'switching restores the original unlocked profile');
   check(authenticationRequests === authenticationsBeforeSwitch, 'switching back does not authenticate or ask for a password');
@@ -214,9 +292,9 @@ try {
   await text('input[type="email"]', 'unsubmitted@example.invalid');
   await text('input[type="password"]', 'never-save-this-password');
   if (!firefox) await page.screenshot({ path: join(output, 'add-account-with-back.png') });
-  await back(); await page.waitForSelector('.nav-trigger');
+  await back(); await pickHome(); await page.waitForSelector('.nav-trigger');
   check((await rpc('snapshot')).result.status === 'unlocked' && (await rpc('snapshot')).result.account.email === email,
-    'cancel Add Account returns directly to the original unlocked vault');
+    'cancel Add Account returns home and can reenter the original unlocked vault');
   check(authenticationRequests === authenticationsBeforeSwitch, 'cancelling does not authenticate the old account');
   await menuAction('添加账户');
   await page.waitForSelector('input[type="email"]');
@@ -230,7 +308,7 @@ try {
   await page.close(); await open('input[type="email"]');
   check(await page.$eval('input[type="email"]', (input: HTMLInputElement) => input.value) === 'failed-add@example.invalid', 'failed Add Account fields survive popup reopen');
   rejectAuthentication = false;
-  await back(); await page.waitForSelector('.nav-trigger');
+  await back(); await pickHome(); await page.waitForSelector('.nav-trigger');
   check((await rpc('snapshot')).result.status === 'unlocked' && authenticationRequests === authenticationsBeforeSwitch,
     'Back after failed login and popup reopen restores the original session');
   await menuAction('添加账户');
@@ -238,11 +316,20 @@ try {
   check(await page.$eval('input[type="email"]', (i: HTMLInputElement) => i.value) === '', 'add-account opens an empty connection form');
   await rpc('switchAccount', [{ serverUrl, email }]);
   check((await rpc('logout')).ok, 'logout completes');
-  check(await page.evaluate(async () => {
+  check(await page.evaluate(async (account: { serverUrl: string; email: string }, remote: { serverUrl: string; email: string }) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return !Object.keys(await api.storage.local.get(null)).some((k) => k.includes('profile.v1.'));
-  }), 'logout removes local presentation cache');
+    const values = await api.storage.local.get(null);
+    return !values[`profile.v1.${JSON.stringify([account.serverUrl, account.email])}`]
+      && !!values[`profile.v1.${JSON.stringify([remote.serverUrl, remote.email])}`];
+  }, { serverUrl, email }, remote), 'logout removes only this account presentation cache and preserves another server identity');
   console.log(`${checks} checks passed. Artifacts: ${output}`);
+} catch (error) {
+  if (page && !page.isClosed()) {
+    await page.screenshot({ path: join(output, 'failure.png') }).catch(() => {});
+    console.error('Synthetic fixture failure:', await page.evaluate(() => document.body.innerText).catch(() => 'page unavailable'));
+  }
+  console.error(`Artifacts: ${output}`);
+  throw error;
 } finally {
   if (realUpstream && cleanupId && cleanupHeaders) {
     const removed = await fetch(`${realUpstream}/api/ciphers/${cleanupId}`, { method: 'DELETE', headers: cleanupHeaders });

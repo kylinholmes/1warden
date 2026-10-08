@@ -52,3 +52,11 @@ export function detectOs(ua: string = navigator.userAgent): Os {
 export function initPlatform(): void {
   document.documentElement.dataset['os'] = detectOs();
 }
+
+export function primaryShortcut(key: string, os: Os = detectOs()): string {
+  return os === 'mac' || os === 'ios' ? `⌘${key}` : `Ctrl+${key}`;
+}
+
+export function quickShortcut(os: Os = detectOs()): string {
+  return os === 'mac' ? '⌘⇧\\' : 'Ctrl+Shift+\\';
+}

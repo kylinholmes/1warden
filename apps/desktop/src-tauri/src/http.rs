@@ -699,7 +699,7 @@ mod tests {
 
     #[test]
     fn pins_round_trip_through_disk() {
-        let dir = std::env::temp_dir().join(format!("coffer-pins-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("onewarden-pins-test-{}", std::process::id()));
         let path = dir.join("certs.json");
         let _ = std::fs::remove_dir_all(&dir);
 
@@ -723,7 +723,7 @@ mod tests {
     #[test]
     fn missing_pin_file_is_not_an_error() {
         // 首次启动时文件不存在 —— 应该是空存储，而不是崩溃
-        let path = std::env::temp_dir().join("coffer-pins-does-not-exist/never.json");
+        let path = std::env::temp_dir().join("onewarden-pins-does-not-exist/never.json");
         let _ = std::fs::remove_dir_all(path.parent().unwrap());
         assert_eq!(CertPins::load(&path).get("a.com:443"), None);
     }
@@ -731,7 +731,7 @@ mod tests {
     #[test]
     fn corrupt_pin_file_falls_back_to_empty() {
         // 文件被写坏时宁可重新信任，也不能让应用起不来
-        let dir = std::env::temp_dir().join(format!("coffer-pins-corrupt-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("onewarden-pins-corrupt-{}", std::process::id()));
         let path = dir.join("certs.json");
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(&path, "{ 这不是 JSON").unwrap();
@@ -750,7 +750,7 @@ mod tests {
         use super::*;
 
         fn dev_url() -> String {
-            std::env::var("COFFER_DEV_URL").unwrap_or_else(|_| "https://localhost:8443".into())
+            std::env::var("ONEWARDEN_DEV_URL").unwrap_or_else(|_| "https://localhost:8443".into())
         }
 
         /// 建一个全新的 HttpState（意味着全新的连接池）。
@@ -760,7 +760,7 @@ mod tests {
         }
 
         fn scratch_dir(tag: &str) -> PathBuf {
-            let dir = std::env::temp_dir().join(format!("coffer-tofu-{tag}-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("onewarden-tofu-{tag}-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             dir
         }
@@ -841,7 +841,7 @@ mod tests {
             let base = dev_url();
             let url = format!("{base}/api/config");
 
-            let dir = std::env::temp_dir().join(format!("coffer-tofu-restart-{}", std::process::id()));
+            let dir = std::env::temp_dir().join(format!("onewarden-tofu-restart-{}", std::process::id()));
             let _ = std::fs::remove_dir_all(&dir);
             let path = dir.join("pins.json");
 

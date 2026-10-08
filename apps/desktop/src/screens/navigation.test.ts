@@ -12,13 +12,15 @@ const client = {
 
 describe('full-width vault screens', () => {
   it('keeps navigation reachable from import on narrow screens', () => {
-    const html = renderToStaticMarkup(createElement(ImportScreen, { client, onImported() {} }));
+    const html = renderToStaticMarkup(createElement(ImportScreen, { client, onImported() {}, onBack() {} }));
     expect(html).toContain('aria-label="导航"');
+    expect(html).toContain('aria-label="返回保险库"');
   });
 
   it('keeps navigation reachable from the security report on narrow screens', () => {
-    const props = { client, items: [] };
+    const props = { client, items: [], onBack() {} };
     const html = renderToStaticMarkup(createElement(SecurityReportView, props));
     expect(html).toContain('aria-label="导航"');
+    expect(html).toContain('aria-label="返回保险库"');
   });
 });

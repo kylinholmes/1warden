@@ -16,15 +16,15 @@ import { createFakeServer } from '../packages/vault/src/testing/fake-server';
 const product = process.argv[2];
 if (product !== 'edge' && product !== 'zen') throw new Error('Usage: bun scripts/inline-smoke.ts edge|zen');
 const engine = product === 'edge' ? 'chrome' : 'firefox';
-const executable = process.env[`COFFER_${product.toUpperCase()}`] ?? (product === 'edge'
+const executable = process.env[`ONEWARDEN_${product.toUpperCase()}`] ?? (product === 'edge'
   ? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' : '/Applications/Zen.app/Contents/MacOS/zen');
 if (!existsSync(executable)) throw new Error(`Browser not found: ${executable}`);
-const { default: puppeteer } = await import(process.env.COFFER_PUPPETEER
-  ? pathToFileURL(resolve(process.env.COFFER_PUPPETEER)).href : 'puppeteer-core');
-const source = resolve(process.env.COFFER_INLINE_DIST ?? join(import.meta.dir, '../apps/desktop', product === 'edge' ? 'dist-extension' : 'dist-firefox'));
-const artifacts = resolve(process.env.COFFER_SMOKE_OUT ?? mkdtempSync(join(tmpdir(), 'coffer-inline-artifacts-')));
+const { default: puppeteer } = await import(process.env.ONEWARDEN_PUPPETEER
+  ? pathToFileURL(resolve(process.env.ONEWARDEN_PUPPETEER)).href : 'puppeteer-core');
+const source = resolve(process.env.ONEWARDEN_INLINE_DIST ?? join(import.meta.dir, '../apps/desktop', product === 'edge' ? 'dist-extension' : 'dist-firefox'));
+const artifacts = resolve(process.env.ONEWARDEN_SMOKE_OUT ?? mkdtempSync(join(tmpdir(), 'onewarden-inline-artifacts-')));
 mkdirSync(artifacts, { recursive: true });
-const profile = mkdtempSync(join(tmpdir(), `coffer-inline-${product}-`));
+const profile = mkdtempSync(join(tmpdir(), `onewarden-inline-${product}-`));
 const dist = join(profile, 'extension');
 // Later builds in the shared workspace cannot mutate an extension under test.
 cpSync(source, dist, { recursive: true });
@@ -88,7 +88,7 @@ try {
   browser = await puppeteer.launch({ browser: engine, executablePath: executable, headless: true,
     userDataDir: profile, enableExtensions: true, ...(engine === 'chrome' ? { pipe: true } : {
       args: ['--remote-allow-system-access'],
-      extraPrefsFirefox: { 'extensions.webextensions.uuids': JSON.stringify({ 'coffer@coffer.app': uuid }) },
+      extraPrefsFirefox: { 'extensions.webextensions.uuids': JSON.stringify({ '1warden@1warden.app': uuid }) },
     }),
   });
   version = await browser.version();
@@ -106,11 +106,11 @@ try {
   await control.waitForSelector('input[type="email"]');
   const setSeed = () => control.evaluate(async (fixture: unknown) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    await api.storage.session.set({ 'coffer.session': fixture, 'coffer.account': (fixture as any).account });
+    await api.storage.session.set({ '1warden.session': fixture, '1warden.account': (fixture as any).account });
   }, seed);
   const rpc = (method: string, args: unknown[] = []) => control.evaluate(async (m: string, a: unknown[]) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return api.runtime.sendMessage({ type: 'coffer:application', method: m, args: a });
+    return api.runtime.sendMessage({ type: '1warden:application', method: m, args: a });
   }, method, args);
   await setSeed();
   check('trusted background restores synthetic session', (await rpc('snapshot')).result.status === 'unlocked');
@@ -128,23 +128,23 @@ try {
       }, args: [message] });
     return result.result;
   }, tabId, request);
-  const accounts = await fromContent({ type: 'coffer:inline-accounts', url: 'https://unrelated.invalid/', tabId: 999 });
+  const accounts = await fromContent({ type: '1warden:inline-accounts', url: 'https://unrelated.invalid/', tabId: 999 });
   check('content receives only the two matching account labels', isDeepStrictEqual(accounts, {
     unlocked: true, accounts: [{ id: 'a', title: 'Personal account', username: 'a@example.invalid' },
       { id: 'b', title: 'Work account', username: 'b@example.invalid' }],
   }), JSON.stringify(accounts));
-  const denied = await fromContent({ type: 'coffer:inline-fill', itemId: 'unrelated' });
+  const denied = await fromContent({ type: '1warden:inline-fill', itemId: 'unrelated' });
   check('known unrelated item IDs cannot be filled', typeof denied.error === 'string');
-  const reveal = await fromContent({ type: 'coffer:application', method: 'reveal', args: ['a', { kind: 'password' }] });
+  const reveal = await fromContent({ type: '1warden:application', method: 'reveal', args: ['a', { kind: 'password' }] });
   check('content cannot reveal arbitrary vault secrets', reveal.ok === false);
   await login.bringToFront();
   await login.click('#email');
-  await login.waitForSelector('[data-coffer-inline][data-state="accounts"]', { visible: true });
-  check('real content script creates closed shadow chooser', await login.$eval('[data-coffer-inline]', (host: HTMLElement) => host.shadowRoot === null));
+  await login.waitForSelector('[data-onewarden-inline][data-state="accounts"]', { visible: true });
+  check('real content script creates closed shadow chooser', await login.$eval('[data-onewarden-inline]', (host: HTMLElement) => host.shadowRoot === null));
   await login.screenshot({ path: join(artifacts, `${product}-inline-accounts.png`) });
   // The closed shadow tree intentionally is not addressable by page selectors.
   // Click the center of the last visible row using the popup's outer geometry.
-  const box = await login.$eval('[data-coffer-inline]', (host: HTMLElement) => {
+  const box = await login.$eval('[data-onewarden-inline]', (host: HTMLElement) => {
     const rect = host.getBoundingClientRect();
     return { x: rect.left + rect.width / 2, y: rect.bottom - 33 };
   });
@@ -152,15 +152,15 @@ try {
   await login.waitForFunction(() => (document.querySelector('#password') as HTMLInputElement).value === 'Synthetic-b-Password!42');
   check('clicking the second account fills its username and password through background injection',
     await login.$eval('#email', (input: HTMLInputElement) => input.value) === 'b@example.invalid');
-  await login.waitForFunction(() => document.querySelector('[data-coffer-inline]') === null);
+  await login.waitForFunction(() => document.querySelector('[data-onewarden-inline]') === null);
   check('successful fill dismisses the chooser', true);
 
   await rpc('lock');
-  check('locked content response has no accounts', isDeepStrictEqual(await fromContent({ type: 'coffer:inline-accounts' }),
+  check('locked content response has no accounts', isDeepStrictEqual(await fromContent({ type: '1warden:inline-accounts' }),
     { unlocked: false, accounts: [] }));
   await login.bringToFront();
   await login.click('#email');
-  await login.waitForSelector('[data-coffer-inline][data-state="locked"]', { visible: true });
+  await login.waitForSelector('[data-onewarden-inline][data-state="locked"]', { visible: true });
   await login.screenshot({ path: join(artifacts, `${product}-inline-locked.png`) });
   // Observe the actual trusted button's message in the extension's isolated
   // world. Sending a second test request would lose the original gesture.
@@ -172,7 +172,7 @@ try {
       (globalThis as any).__inlineUnlock = { requests: 0, pending: true };
       contentApi.runtime.sendMessage = (...args: any[]) => {
         const response = original(...args);
-        if (args[0]?.type === 'coffer:inline-unlock') {
+        if (args[0]?.type === '1warden:inline-unlock') {
           (globalThis as any).__inlineUnlock.requests++;
           void response.then((reply: unknown) => {
             (globalThis as any).__inlineUnlock = { requests: 1, reply };
@@ -222,7 +222,7 @@ try {
   check('local synthetic authentication unlocks the background session', unlocked.ok === true
     && (await rpc('snapshot')).result.status === 'unlocked', JSON.stringify(unlocked));
   await login.bringToFront();
-  await login.waitForSelector('[data-coffer-inline][data-state="accounts"]', { visible: true });
+  await login.waitForSelector('[data-onewarden-inline][data-state="accounts"]', { visible: true });
   check('chooser resumes with accounts after unlocking', true);
   check('unlock does not automatically overwrite filled credentials',
     await login.$eval('#password', (input: HTMLInputElement) => input.value) === 'Synthetic-b-Password!42');
@@ -240,7 +240,7 @@ try {
     const tab = (await api.tabs.query({})).find((candidate: any) => candidate.url === targetUrl);
     const result = tab ? await api.scripting.executeScript({ target: { tabId: tab.id, frameIds: [0] }, func: () => ({
       unlock: (globalThis as any).__inlineUnlock, focused: document.hasFocus(), active: document.activeElement?.tagName,
-      chooser: document.querySelector('[data-coffer-inline]')?.getAttribute('data-state'),
+      chooser: document.querySelector('[data-onewarden-inline]')?.getAttribute('data-state'),
     }) }) : [];
     return { page: result[0]?.result, popups: api.extension.getViews({ type: 'popup' }).map((view: Window) => view.location.href) };
   }, url).catch(() => ({})));

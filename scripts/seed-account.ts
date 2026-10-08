@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * 用**我们自己的** @coffer/crypto 在本地 Vaultwarden 上注册测试账户（幂等）。
+ * 用**我们自己的** @1warden/crypto 在本地 Vaultwarden 上注册测试账户（幂等）。
  *
  * 为什么不用官方 CLI 注册：CLI 2026.9.1 **没有 register 命令**。
  * 而且用自己的代码注册反而更有价值 —— 注册本身就顺带跑通了整条密钥层级
@@ -22,8 +22,8 @@ prepareBwEnv();
 
 // 默认与 scripts/dev-env.sh 保持一致（HTTPS + 自签证书：官方 CLI 拒绝明文 HTTP）
 const BASE = process.env.VW_URL ?? 'https://localhost:8443';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 const ITERATIONS = 600_000;
 
 /**
@@ -32,9 +32,9 @@ const ITERATIONS = 600_000;
  * 搞错的话 PBKDF2 账户一切正常、Argon2 账户永远「密码错误」，且毫无线索。
  *
  *   bun run seed                                   # PBKDF2（默认）
- *   COFFER_KDF=argon2 COFFER_TEST_EMAIL=a@e.com bun run seed
+ *   ONEWARDEN_KDF=argon2 ONEWARDEN_TEST_EMAIL=a@e.com bun run seed
  */
-const KDF_KIND = process.env.COFFER_KDF ?? 'pbkdf2';
+const KDF_KIND = process.env.ONEWARDEN_KDF ?? 'pbkdf2';
 const ARGON2 = { iterations: 3, memory: 64, parallelism: 4 };
 const kdfConfig = KDF_KIND === 'argon2'
   ? { kdf: KDF_TYPE_ARGON2ID as const, ...ARGON2 }
@@ -76,7 +76,7 @@ async function main() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       email: EMAIL,
-      name: 'Coffer Interop',
+      name: '1Warden Interop',
       masterPasswordHash,
       masterPasswordHint: null,
       key: protectedKey,

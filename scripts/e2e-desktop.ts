@@ -22,9 +22,9 @@ import type { SymmetricKey } from '../packages/crypto/src/index';
 import { decryptCipher, decryptFolder, searchItems, totpCode, hasTotp, writeTotpSecret, encryptCipher, parseBitwardenCsv, parseImport, VaultClient } from '../packages/vault/src/index';
 import type { VaultItem } from '../packages/vault/src/index';
 
-const BASE = process.env.COFFER_APP_URL ?? 'http://127.0.0.1:8080';
-const EMAIL = process.env.COFFER_TEST_EMAIL ?? 'coffer-test@example.com';
-const PASSWORD = process.env.COFFER_TEST_PASSWORD ?? 'Test-Master-Password-123!';
+const BASE = process.env.ONEWARDEN_APP_URL ?? 'http://127.0.0.1:8080';
+const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
+const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 
 let failures = 0;
 function check(name: string, ok: boolean, detail = ''): void {
@@ -57,7 +57,7 @@ async function main() {
   const token = await loginWithPassword(bare, {
     email: EMAIL,
     masterPasswordHash: await hashMasterPassword(masterKey, PASSWORD),
-    device: { type: DEVICE_TYPE.macOSDesktop, identifier: 'e2e-desktop', name: 'Coffer' },
+    device: { type: DEVICE_TYPE.macOSDesktop, identifier: 'e2e-desktop', name: '1Warden' },
   });
   check('登录成功，拿到 access token', token.accessToken.length > 0);
   check('拿到用户密钥（Key 字段）', Boolean(token.key));

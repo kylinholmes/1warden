@@ -29,7 +29,7 @@
 		3042357CA455E66F7AE55507 /* lib.rs */ = {isa = PBXFileReference; path = lib.rs; sourceTree = "<group>"; };
 		334DB15BF737205B77F3659C /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 		661C5E6959018A7AAF828CC4 /* biometric.rs */ = {isa = PBXFileReference; path = biometric.rs; sourceTree = "<group>"; };
-		71222A4FB7EF17EAF8E79AC3 /* coffer_iOS.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = coffer_iOS.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		71222A4FB7EF17EAF8E79AC3 /* 1Warden.app */ = {isa = PBXFileReference; includeInIndex = 0; lastKnownFileType = wrapper.application; path = "1Warden.app"; sourceTree = BUILT_PRODUCTS_DIR; };
 		72DA597BAEF2D42CD95C3ACE /* QuartzCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = QuartzCore.framework; path = System/Library/Frameworks/QuartzCore.framework; sourceTree = SDKROOT; };
 		9B450DF39462E4559064215E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist; path = Info.plist; sourceTree = "<group>"; };
 		9E385F92757D802A3933E8CB /* LaunchScreen.storyboard */ = {isa = PBXFileReference; lastKnownFileType = file.storyboard; path = LaunchScreen.storyboard; sourceTree = "<group>"; };
@@ -44,7 +44,7 @@
 		DB638FCFC4F7DA23A1FDF5AF /* bindings.h */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.h; path = bindings.h; sourceTree = "<group>"; };
 		E72FF7B388EA98E121D50152 /* UIKit.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = UIKit.framework; path = System/Library/Frameworks/UIKit.framework; sourceTree = SDKROOT; };
 		E95897DC3990F72F654C28FE /* main.rs */ = {isa = PBXFileReference; path = main.rs; sourceTree = "<group>"; };
-		EBA07022C5DA75220C439EDB /* coffer_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = coffer_iOS.entitlements; sourceTree = "<group>"; };
+		EBA07022C5DA75220C439EDB /* onewarden_iOS.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = onewarden_iOS.entitlements; sourceTree = "<group>"; };
 		F51A58D9F328B4B519C176FF /* Metal.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = Metal.framework; path = System/Library/Frameworks/Metal.framework; sourceTree = SDKROOT; };
 /* End PBXFileReference section */
 
@@ -67,13 +67,13 @@
 /* End PBXFrameworksBuildPhase section */
 
 /* Begin PBXGroup section */
-		0E2343E68C2F50319EAB61E4 /* coffer */ = {
+		0E2343E68C2F50319EAB61E4 /* onewarden */ = {
 			isa = PBXGroup;
 			children = (
 				AE2344A46C59416DE3AC073C /* main.mm */,
 				6AF96A3B847CDCDAFE837C11 /* bindings */,
 			);
-			path = coffer;
+			path = onewarden;
 			sourceTree = "<group>";
 		};
 		66336BA266CDB12D76C86D2D /* Frameworks */ = {
@@ -102,7 +102,7 @@
 		7572CC7FF0E36C522CED086F /* Sources */ = {
 			isa = PBXGroup;
 			children = (
-				0E2343E68C2F50319EAB61E4 /* coffer */,
+				0E2343E68C2F50319EAB61E4 /* onewarden */,
 			);
 			path = Sources;
 			sourceTree = "<group>";
@@ -117,18 +117,18 @@
 		8113B8D438FACB6EC48053EF /* Products */ = {
 			isa = PBXGroup;
 			children = (
-				71222A4FB7EF17EAF8E79AC3 /* coffer_iOS.app */,
+				71222A4FB7EF17EAF8E79AC3 /* 1Warden.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
 		};
-		AA9BAA3609B54C4D11174282 /* coffer_iOS */ = {
+		AA9BAA3609B54C4D11174282 /* onewarden_iOS */ = {
 			isa = PBXGroup;
 			children = (
-				EBA07022C5DA75220C439EDB /* coffer_iOS.entitlements */,
+				EBA07022C5DA75220C439EDB /* onewarden_iOS.entitlements */,
 				9B450DF39462E4559064215E /* Info.plist */,
 			);
-			path = coffer_iOS;
+			path = onewarden_iOS;
 			sourceTree = "<group>";
 		};
 		C954E388BB45E8E289F662B6 /* src */ = {
@@ -153,7 +153,7 @@
 				A1CBB4CD34DD77FB385AB3A4 /* assets */,
 				334DB15BF737205B77F3659C /* Assets.xcassets */,
 				9E385F92757D802A3933E8CB /* LaunchScreen.storyboard */,
-				AA9BAA3609B54C4D11174282 /* coffer_iOS */,
+				AA9BAA3609B54C4D11174282 /* onewarden_iOS */,
 				78B47BD535AB8456C3F7C51C /* Externals */,
 				7572CC7FF0E36C522CED086F /* Sources */,
 				C954E388BB45E8E289F662B6 /* src */,
@@ -165,9 +165,9 @@
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
-		EC7B4C562D5A9ADD902E54D9 /* coffer_iOS */ = {
+		EC7B4C562D5A9ADD902E54D9 /* onewarden_iOS */ = {
 			isa = PBXNativeTarget;
-			buildConfigurationList = 8E448E1DB63FA652E573A13D /* Build configuration list for PBXNativeTarget "coffer_iOS" */;
+			buildConfigurationList = 8E448E1DB63FA652E573A13D /* Build configuration list for PBXNativeTarget "onewarden_iOS" */;
 			buildPhases = (
 				BF94BC8DDB152F4E64068EA7 /* Build Rust Code */,
 				FC920948313F5921C32AAA8A /* Sources */,
@@ -178,11 +178,11 @@
 			);
 			dependencies = (
 			);
-			name = coffer_iOS;
+			name = onewarden_iOS;
 			packageProductDependencies = (
 			);
-			productName = coffer_iOS;
-			productReference = 71222A4FB7EF17EAF8E79AC3 /* coffer_iOS.app */;
+			productName = "1Warden";
+			productReference = 71222A4FB7EF17EAF8E79AC3 /* 1Warden.app */;
 			productType = "com.apple.product-type.application";
 		};
 /* End PBXNativeTarget section */
@@ -196,7 +196,7 @@
 				TargetAttributes = {
 				};
 			};
-			buildConfigurationList = 20B6328908E8912C2B349EFC /* Build configuration list for PBXProject "coffer" */;
+			buildConfigurationList = 20B6328908E8912C2B349EFC /* Build configuration list for PBXProject "onewarden" */;
 			developmentRegion = en;
 			hasScannedForEncodings = 0;
 			knownRegions = (
@@ -210,7 +210,7 @@
 			projectDirPath = "";
 			projectRoot = "";
 			targets = (
-				EC7B4C562D5A9ADD902E54D9 /* coffer_iOS */,
+				EC7B4C562D5A9ADD902E54D9 /* onewarden_iOS */,
 			);
 		};
 /* End PBXProject section */
@@ -335,7 +335,7 @@
 					arm64,
 				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = coffer_iOS/coffer_iOS.entitlements;
+				CODE_SIGN_ENTITLEMENTS = onewarden_iOS/onewarden_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
@@ -343,14 +343,14 @@
 					"$(inherited)",
 					"\".\"",
 				);
-				INFOPLIST_FILE = coffer_iOS/Info.plist;
+				INFOPLIST_FILE = onewarden_iOS/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = app.coffer.desktop;
+				PRODUCT_BUNDLE_IDENTIFIER = app.onewarden.desktop;
 				PRODUCT_NAME = "1Warden";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -422,7 +422,7 @@
 					arm64,
 				);
 				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
-				CODE_SIGN_ENTITLEMENTS = coffer_iOS/coffer_iOS.entitlements;
+				CODE_SIGN_ENTITLEMENTS = onewarden_iOS/onewarden_iOS.entitlements;
 				CODE_SIGN_IDENTITY = "iPhone Developer";
 				ENABLE_BITCODE = NO;
 				"EXCLUDED_ARCHS[sdk=iphoneos*]" = x86_64;
@@ -430,14 +430,14 @@
 					"$(inherited)",
 					"\".\"",
 				);
-				INFOPLIST_FILE = coffer_iOS/Info.plist;
+				INFOPLIST_FILE = onewarden_iOS/Info.plist;
 				LD_RUNPATH_SEARCH_PATHS = (
 					"$(inherited)",
 					"@executable_path/Frameworks",
 				);
 				"LIBRARY_SEARCH_PATHS[arch=arm64]" = "$(inherited) $(PROJECT_DIR)/Externals/arm64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
 				"LIBRARY_SEARCH_PATHS[arch=x86_64]" = "$(inherited) $(PROJECT_DIR)/Externals/x86_64/$(CONFIGURATION) $(SDKROOT)/usr/lib/swift $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/$(PLATFORM_NAME) $(DEVELOPER_DIR)/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift-5.0/$(PLATFORM_NAME)";
-				PRODUCT_BUNDLE_IDENTIFIER = app.coffer.desktop;
+				PRODUCT_BUNDLE_IDENTIFIER = app.onewarden.desktop;
 				PRODUCT_NAME = "1Warden";
 				SDKROOT = iphoneos;
 				TARGETED_DEVICE_FAMILY = "1,2";
@@ -448,7 +448,7 @@
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
-		20B6328908E8912C2B349EFC /* Build configuration list for PBXProject "coffer" */ = {
+		20B6328908E8912C2B349EFC /* Build configuration list for PBXProject "onewarden" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				362E2005844AE0D0118625C1 /* debug */,
@@ -457,7 +457,7 @@
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = debug;
 		};
-		8E448E1DB63FA652E573A13D /* Build configuration list for PBXNativeTarget "coffer_iOS" */ = {
+		8E448E1DB63FA652E573A13D /* Build configuration list for PBXNativeTarget "onewarden_iOS" */ = {
 			isa = XCConfigurationList;
 			buildConfigurations = (
 				F464F99AD13B73CC0C2FF13F /* debug */,

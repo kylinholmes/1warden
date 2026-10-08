@@ -4,11 +4,11 @@ import { mkdirSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const preview = resolve(process.env.COFFER_PANEL_PREVIEW ?? '/tmp/coffer-panel-preview');
-const output = resolve(process.env.COFFER_PANEL_OUTPUT ?? '/tmp/coffer-panel-motion');
+const preview = resolve(process.env.ONEWARDEN_PANEL_PREVIEW ?? '/tmp/onewarden-panel-preview');
+const output = resolve(process.env.ONEWARDEN_PANEL_OUTPUT ?? '/tmp/onewarden-panel-motion');
 mkdirSync(output, { recursive: true });
-const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.COFFER_PUPPETEER
-  ?? '/tmp/coffer-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
+const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.ONEWARDEN_PUPPETEER
+  ?? '/tmp/onewarden-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
 const server = Bun.serve({
   hostname: '127.0.0.1', port: 0,
   async fetch(request) {
@@ -19,7 +19,7 @@ const server = Bun.serve({
 });
 let browser: any;
 try { browser = await puppeteer.launch({
-  executablePath: process.env.COFFER_EDGE
+  executablePath: process.env.ONEWARDEN_EDGE
     ?? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
   headless: true,
 }); } catch (error) { server.stop(true); throw error; }
@@ -68,7 +68,7 @@ async function closePanel(selector: string, label: string, narrow: boolean) {
     pointerEvents: getComputedStyle(element.parentElement!).pointerEvents,
   }));
   check(`${label}: outgoing card remains mounted and inactive`, exit.inactive && exit.pointerEvents === 'none', exit);
-  check(`${label}: close animation direction`, exit.name === (narrow ? 'coffer-card-out' : 'coffer-panel-out'), exit);
+  check(`${label}: close animation direction`, exit.name === (narrow ? 'onewarden-card-out' : 'onewarden-panel-out'), exit);
   await page.waitForSelector('[role="dialog"]', { hidden: true });
   check(`${label}: overlay removed after close`, await page.$('.floating-layer') === null);
 }
@@ -92,21 +92,21 @@ try {
   await cdp.detach();
   for (const width of [440, 1280]) {
     const height = width === 440 ? 600 : 800;
-    for (const [screen, close] of [['generator', '[aria-label="关闭生成器"]'], ['settings', '[aria-label="关闭设置"]'], ['form', '.panel-foot .btn-quiet']]) {
+    for (const [screen, close] of [['generator', '[aria-labelledby="generator-title"] [data-page-back]'], ['settings', '[aria-labelledby="settings-title"] [data-page-back]'], ['form', '.panel-foot .btn-quiet']]) {
       await visit(screen!, width, height);
       const bounds = await geometry('[role="dialog"]');
       const narrow = width === 440;
       check(`${screen} ${width}: card bounds`, narrow
         ? bounds.x === 0 && bounds.y === 0 && bounds.width === width && bounds.height === height && bounds.radius === '0px'
         : bounds.x > 0 && bounds.y > 0 && bounds.width < width && bounds.height < height, bounds);
-      check(`${screen} ${width}: entrance animation`, bounds.animation === (narrow ? 'coffer-card-in' : 'coffer-panel-in'), bounds);
+      check(`${screen} ${width}: entrance animation`, bounds.animation === (narrow ? 'onewarden-card-in' : 'onewarden-panel-in'), bounds);
       check(`${screen} ${width}: no horizontal document overflow`, !bounds.overflow, bounds);
       await page.screenshot({ path: join(output, `${screen}-${width}.png`) });
       await closePanel(close!, `${screen} ${width}`, narrow);
     }
   }
   await visit('generator');
-  await page.click('[aria-label="关闭生成器"]');
+  await page.click('[aria-labelledby="generator-title"] [data-page-back]');
   await page.waitForSelector('.panel-out');
   await page.click('button.fixed');
   await page.waitForSelector('.panel-in');
@@ -117,6 +117,23 @@ try {
   await page.waitForSelector('[role="dialog"]', { hidden: true });
   check('disconnected opener does not trap focus in the removed panel', await page.evaluate(() => document.activeElement?.closest('.floating-layer') === null));
 
+  for (const width of [440, 1280]) {
+    await visit('form', width, 800);
+    check(`editor ${width}: no duplicate header close`, await page.$('.panel-head [aria-label="关闭"]') === null);
+    await page.type('input[placeholder="例如 GitHub"]', 'Synthetic unsaved draft');
+    await clickButton('取消');
+    await page.waitForFunction(() => document.querySelector('.panel-foot')?.textContent?.includes('放弃改动'));
+    check(`editor ${width}: cancel asks before discarding`, await page.$('[role="dialog"]') !== null);
+    await page.keyboard.press('Escape');
+    await page.waitForFunction(() => !document.querySelector('.panel-foot')?.textContent?.includes('放弃改动'));
+    check(`editor ${width}: Escape cancels confirmation and preserves draft`, await page.$eval('input[placeholder="例如 GitHub"]', (input: HTMLInputElement) => input.value === 'Synthetic unsaved draft'));
+    await clickButton('取消'); await clickButton('继续编辑');
+    check(`editor ${width}: continue editing preserves draft`, await page.$eval('input[placeholder="例如 GitHub"]', (input: HTMLInputElement) => input.value === 'Synthetic unsaved draft'));
+    await clickButton('取消'); await clickButton('放弃改动');
+    await page.waitForSelector('[role="dialog"]', { hidden: true });
+    check(`editor ${width}: only explicit discard closes dirty form`, true);
+  }
+
   await visit('vault');
   await page.focus('[aria-label="搜索条目"]');
   await page.keyboard.down('Meta');
@@ -124,7 +141,7 @@ try {
   await page.keyboard.up('Meta');
   await page.waitForSelector('[aria-labelledby="settings-title"]');
   await settle();
-  check('opening settings transfers focus to the panel', await page.evaluate(() => document.activeElement?.getAttribute('role') === 'dialog'));
+  check('opening settings transfers focus into the panel', await page.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null));
   await page.keyboard.press('Escape');
   await page.waitForSelector('[role="dialog"]', { hidden: true });
   check('Escape restores focus to the connected opener', await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === '搜索条目'));
@@ -133,14 +150,17 @@ try {
   await settle();
   const detail = await geometry('.vault-detail');
   check('narrow detail covers window', detail.x === 0 && detail.y === 0 && detail.width === 440 && detail.height === 600, detail);
-  check('narrow detail uses right-slide entrance', detail.animation === 'coffer-card-in', detail);
+  check('narrow detail uses right-slide entrance', detail.animation === 'onewarden-card-in', detail);
   check('list cannot receive focus behind detail', await page.$eval('.vault-list', (element: HTMLElement) => element.inert));
+  check('underlying list controls cannot paint above the detail', await page.$eval('.vault-list', (element: HTMLElement) => getComputedStyle(element).isolation === 'isolate'));
+  check('detail uses the shared back control', await page.$('[aria-label="返回列表"][data-page-back]') !== null);
   await page.screenshot({ path: join(output, 'detail-440.png') });
   await page.click('[aria-label="返回列表"]');
   await page.waitForSelector('.vault-detail[data-state="closing"] article');
-  check('detail content retained while sliding out', (await geometry('.vault-detail')).animation === 'coffer-card-out');
+  check('detail content retained while sliding out', (await geometry('.vault-detail')).animation === 'onewarden-card-out');
   await page.waitForSelector('.vault-detail article', { hidden: true });
   check('back restores selected row focus', await page.evaluate(() => document.activeElement?.closest('.vault-list') !== null));
+  check('list stacking is restored after detail exits', await page.$eval('.vault-list', (element: HTMLElement) => getComputedStyle(element).isolation === 'auto'));
 
   await page.click('.vault-list li button');
   await page.waitForSelector('.vault-detail article');
@@ -164,6 +184,26 @@ try {
   check('wide detail remains an unanimated adjacent column', (await geometry('.vault-detail')).animation === 'none');
   check('wide list remains interactive', await page.$eval('.vault-list', (element: HTMLElement) => !element.inert));
   await page.screenshot({ path: join(output, 'detail-1280.png') });
+  // The wide column deliberately has no Escape-to-back handler. Return from
+  // the actual full-width user page instead; an Escape here tested no transition.
+  await page.click('[aria-label="账户菜单"]');
+  await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('#profile-account-menu button')]
+    .find(button => button.textContent?.trim() === '用户详情')!.click());
+  await page.waitForSelector('[aria-label="返回保险库"]');
+  await page.evaluate(() => { document.documentElement.dataset.nativeTitlebar = 'windows'; });
+  const frames = await page.evaluate(async () => {
+    const samples: { scroll: number; height: number }[] = [];
+    document.querySelector<HTMLButtonElement>('[aria-label="返回保险库"]')!.click();
+    const start = performance.now();
+    while (performance.now() - start < 450) {
+      const pane = document.querySelector('.vault-detail') as HTMLElement | null;
+      if (pane) samples.push({ scroll: pane.scrollHeight, height: pane.clientHeight });
+      await new Promise(requestAnimationFrame);
+    }
+    return samples;
+  });
+  check('returning to wide empty detail never creates a transient scrollbar', frames.length > 0 && frames.every(f => f.scroll <= f.height), frames);
+  await page.evaluate(() => { delete document.documentElement.dataset.nativeTitlebar; });
 
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   await visit('generator');

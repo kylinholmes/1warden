@@ -1,7 +1,6 @@
-import {
-  createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode,
-} from 'react';
-import { IconAlert, IconCheck, IconClose, IconInfo } from '@coffer/ui';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { IconAlert, IconCheck, IconClose, IconInfo } from '@1warden/ui';
 
 /**
  * 提示条 —— 那些「没有别的地方可放」的即时反馈。
@@ -113,7 +112,11 @@ export function ToastProvider({ children, maxVisible = MAX_VISIBLE }: {
   /** 可见条数上限。默认 3；预览页会调大，好把四种语气一次拍全。 */
   maxVisible?: number;
 }) {
-  const [records, setRecords] = useState<Record_[]>([]);
+  const viewStore = useLocalStore(() => {
+    const records = ([]) as Record_[];
+    return { records };
+  });
+  const [records, setRecords] = useStoreField(viewStore, 'records');
   const nextId = useRef(1);
 
   const show = useCallback((input: ToastInput) => {
@@ -201,7 +204,11 @@ function ToastItem({ rec, onDismiss, onExited }: {
   onDismiss: (id: number) => void;
   onExited: (id: number) => void;
 }) {
-  const [paused, setPaused] = useState(false);
+  const viewStore = useLocalStore(() => {
+    const paused = false;
+    return { paused };
+  });
+  const [paused, setPaused] = useStoreField(viewStore, 'paused');
   const duration = rec.duration;
   const Icon = ICON[rec.tone];
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { decryptString, makeUserKey } from '@coffer/crypto';
+import { decryptString, makeUserKey } from '@1warden/crypto';
 import { VaultClient, type VaultClientState } from './client';
 import { emptyLogin, type VaultItem } from './model';
 import type { ImportedItem } from './import';

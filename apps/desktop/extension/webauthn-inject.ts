@@ -23,11 +23,11 @@ import { asBytes, b64urlFromBytes, bytesFromB64url, serializeAllow } from './web
  */
 
 /** 消息标记。带前缀是为了不和页面自己的 postMessage 撞上 */
-const TAG = 'coffer:webauthn';
-const REPLY = 'coffer:webauthn-reply';
+const TAG = '1warden:webauthn';
+const REPLY = '1warden:webauthn-reply';
 /** 探针。只用来确认转发脚本在不在，**不带任何副作用** */
-const PING = 'coffer:webauthn-ping';
-const PONG = 'coffer:webauthn-pong';
+const PING = '1warden:webauthn-ping';
+const PONG = '1warden:webauthn-pong';
 
 interface Reply {
   id: number;
@@ -241,7 +241,7 @@ function intercept(): void {
 
   // ⚠️ 只接管一次。这份脚本可能被求值两次（重新注入），
   // 那时再包一层会让同一个调用走两遍 —— 而 create 不是幂等的
-  const flag = '__cofferWebauthnInstalled__' as const;
+  const flag = '__onewardenWebauthnInstalled__' as const;
   const w = window as unknown as Record<string, unknown>;
   if (w[flag] === true) return;
   w[flag] = true;

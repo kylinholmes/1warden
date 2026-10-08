@@ -61,7 +61,7 @@ const server = Bun.serve({
 });
 
 const pageUrl = `http://127.0.0.1:${server.port}${relPath}`;
-const profile = mkdtempSync(join(tmpdir(), 'coffer-shot-'));
+const profile = mkdtempSync(join(tmpdir(), 'onewarden-shot-'));
 
 const edge = Bun.spawn([
   EDGE,
@@ -109,7 +109,7 @@ try {
   ws.onmessage = (ev) => {
     const msg = JSON.parse(String(ev.data)) as { id?: number; result?: unknown; method?: string; params?: unknown };
     /*
-     * 打开 COFFER_SHOT_VERBOSE=1 时把页面里的报错打出来。
+     * 打开 ONEWARDEN_SHOT_VERBOSE=1 时把页面里的报错打出来。
      * 截图工具最坑的一种失败是「截出一张全白」—— 页面在渲染时抛了异常，
      * 而截图本身完全成功。没有这条，只能靠猜。
      */
@@ -169,14 +169,14 @@ try {
     await send('Emulation.setFocusEmulationEnabled', { enabled: true });
   } catch { /* 见上 */ }
 
-  if (process.env.COFFER_SHOT_VERBOSE) {
+  if (process.env.ONEWARDEN_SHOT_VERBOSE) {
     await send('Runtime.enable');
     await send('Log.enable');
   }
   /*
    * ⚠️ 手机视口 ≠ 手机。
    *
-   * `COFFER_SHOT_TOUCH=1` 之前，「手机尺寸」那一轮跑的是
+   * `ONEWARDEN_SHOT_TOUCH=1` 之前，「手机尺寸」那一轮跑的是
    * `mobile: false` + 没有触摸模拟 —— 那是**一个窄的桌面窗口**：
    * 有鼠标、有 hover、有精确指针。手机上这三样都没有，
    * 而「导航抽屉靠 `:hover` 打开」这种设计恰恰只有在没有 hover 时才露馅。
@@ -185,7 +185,7 @@ try {
    * 「排版在窄屏下成不成立」，`touch` 才回答「这套交互在手指下成不成立」。
    * 上面 docs 里那次验收只做了前者 —— 记在那里了。
    */
-  const touch = process.env.COFFER_SHOT_TOUCH === '1';
+  const touch = process.env.ONEWARDEN_SHOT_TOUCH === '1';
   await send('Emulation.setTouchEmulationEnabled', { enabled: touch, maxTouchPoints: 5 });
   await send('Emulation.setDeviceMetricsOverride', {
     width, height, deviceScaleFactor: 2, mobile: touch,
@@ -195,10 +195,10 @@ try {
    * 强制配色方案。
    *
    * 无头浏览器跟随系统外观，而开发机常年是暗色 —— 于是亮色主题**永远
-   * 截不到**，两套颜色里有一套没人看过。用 COFFER_SHOT_SCHEME=light 抓一遍，
+   * 截不到**，两套颜色里有一套没人看过。用 ONEWARDEN_SHOT_SCHEME=light 抓一遍，
    * 「亮色下对比度不够」这类问题才可能被发现。
    */
-  const scheme = process.env.COFFER_SHOT_SCHEME;
+  const scheme = process.env.ONEWARDEN_SHOT_SCHEME;
   if (scheme === 'light' || scheme === 'dark') {
     await send('Emulation.setEmulatedMedia', {
       features: [{ name: 'prefers-color-scheme', value: scheme }],
@@ -210,17 +210,17 @@ try {
   /*
    * 等字体与布局稳定。用固定延时而不是 networkidle —— 静态页没有网络活动可等。
    *
-   * 延时可以用 COFFER_SHOT_DELAY 覆盖：动效的**中间帧**只有在那之前拍才拍得到。
+   * 延时可以用 ONEWARDEN_SHOT_DELAY 覆盖：动效的**中间帧**只有在那之前拍才拍得到。
    * 预览页的 `?at=` 会把 CSS 动画定格在指定毫秒处（见 preview/main.tsx），
    * 两者配合才能给出可复现的关键帧截图 —— 靠卡时间点拍动画是拍不准的。
    */
-  const delay = Number(process.env.COFFER_SHOT_DELAY ?? 1200);
+  const delay = Number(process.env.ONEWARDEN_SHOT_DELAY ?? 1200);
   await new Promise((r) => setTimeout(r, delay));
 
   /*
    * 点一下再拍。
    *
-   * `COFFER_SHOT_TAP=<选择器>` —— 用**触摸**点这个元素的中心，等一小会儿
+   * `ONEWARDEN_SHOT_TAP=<选择器>` —— 用**触摸**点这个元素的中心，等一小会儿
    * 让动效走完，然后截图。
    *
    * ⚠️ 为什么是触摸而不是 `element.click()`：`click()` 走的是**鼠标**那条路，
@@ -231,7 +231,7 @@ try {
    * `Input.dispatchTouchEvent` 走的是和手指同一条输入路径，
    * 所以「靠 `:hover` 打开的浮层在触摸下会怎样」这一条才有意义。
    */
-  const tapSelector = process.env.COFFER_SHOT_TAP;
+  const tapSelector = process.env.ONEWARDEN_SHOT_TAP;
   if (tapSelector) {
     const point = await send<{ result?: { value?: { x: number; y: number } | null } }>(
       'Runtime.evaluate',
@@ -249,14 +249,14 @@ try {
     if (!p) {
       // 找不到就**大声**说 —— 静默跳过的话，截出来的是一张「没点过」的图，
       // 而它看起来和「点了没反应」一模一样。
-      throw new Error(`COFFER_SHOT_TAP：找不到 ${tapSelector}`);
+      throw new Error(`ONEWARDEN_SHOT_TAP：找不到 ${tapSelector}`);
     }
     await send('Input.dispatchTouchEvent', {
       type: 'touchStart', touchPoints: [{ x: p.x, y: p.y }],
     });
     await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
     // 等动效走完（--dur-base 是 200 上下，给足余量）
-    await new Promise((r) => setTimeout(r, Number(process.env.COFFER_SHOT_TAP_DELAY ?? 700)));
+    await new Promise((r) => setTimeout(r, Number(process.env.ONEWARDEN_SHOT_TAP_DELAY ?? 700)));
   }
 
   const shot = await send<{ data: string }>('Page.captureScreenshot', {

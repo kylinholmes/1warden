@@ -6,8 +6,8 @@ import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const root = resolve(import.meta.dir, '..');
-const fixture = mkdtempSync(join(tmpdir(), 'coffer-account-menu-'));
-const output = process.env.COFFER_ACCOUNT_MENU_OUTPUT ?? '/tmp/coffer-account-menu-review';
+const fixture = mkdtempSync(join(tmpdir(), 'onewarden-account-menu-'));
+const output = process.env.ONEWARDEN_ACCOUNT_MENU_OUTPUT ?? '/tmp/onewarden-account-menu-review';
 mkdirSync(output, { recursive: true });
 const entry = join(fixture, 'main.tsx');
 writeFileSync(entry, `
@@ -19,7 +19,7 @@ const current = {serverUrl:'https://personal.example',email:'same@example.com',p
 const other = {serverUrl:'https://work.example/team',email:'same@example.com'};
 const locked = {serverUrl:'https://locked.example',email:'locked@example.com'};
 const values = new Map([
- ['coffer.accounts', JSON.stringify([current,other,{...other,serverUrl:other.serverUrl+'/'},locked])],
+ ['1warden.accounts', JSON.stringify([current,other,{...other,serverUrl:other.serverUrl+'/'},locked])],
  ['profile.v1.'+JSON.stringify([other.serverUrl,other.email]),JSON.stringify({displayName:'Work',avatarDataUrl:null})]
 ]);
 window.fixture = {calls:[],writes:0,pending:false,reject:false,finish:null,focus:[]};
@@ -51,8 +51,8 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
   if (new URL(request.url).pathname === '/bundle.js') return new Response(bundle, { headers: { 'Content-Type': 'text/javascript' } });
   return new Response('<!doctype html><meta charset="utf-8"><style>body{font:14px sans-serif;padding:24px}button{display:block;margin:6px;padding:8px}svg{width:16px;height:16px}#root{width:300px}</style><div id="root"></div><button id="outside">Outside</button><script src="/bundle.js"></script>', { headers: { 'Content-Type': 'text/html' } });
 } });
-const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.COFFER_PUPPETEER
-  ?? '/tmp/coffer-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
+const { default: puppeteer } = await import(pathToFileURL(resolve(process.env.ONEWARDEN_PUPPETEER
+  ?? '/tmp/onewarden-browser-tools/node_modules/puppeteer-core/lib/puppeteer/puppeteer-core.js')).href);
 const checks: string[] = [];
 const errors: string[] = [];
 let browser: any;
@@ -61,7 +61,7 @@ function check(name: string, passed: boolean, data?: unknown) {
   checks.push(name); console.log(`✓ ${name}`);
 }
 try {
-  browser = await puppeteer.launch({ executablePath: process.env.COFFER_EDGE
+  browser = await puppeteer.launch({ executablePath: process.env.ONEWARDEN_EDGE
     ?? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', headless: true });
   const page = await browser.newPage(); page.setDefaultTimeout(5000);
   page.on('pageerror', (error: Error) => errors.push(error.message));
@@ -79,6 +79,8 @@ try {
   }
   await page.click('[aria-label="账户菜单"]');
   const menuText = await page.$eval('#profile-account-menu', (menu: HTMLElement) => menu.textContent);
+  check('current account summary does not repeat the trigger avatar', await page.$eval('.account-menu-current', (row: Element) =>
+    !row.querySelector('img, :scope > [aria-hidden="true"]')));
   check('avatar menu has one logout action labelled 登出 and no manual locking action',
     Boolean(menuText?.includes('设置')) && await page.$$eval('#profile-account-menu button', (buttons: Element[]) =>
       buttons.filter(button => button.textContent?.trim() === '登出').length === 1
@@ -134,7 +136,8 @@ try {
   check('successful switch closes the menu', true);
   await open(); await action('添加账户');
   check('adding an account starts an empty switch target', await page.evaluate(() => (window as any).fixture.calls.at(-1).target === null));
-  for (const [label, expected] of [['更新头像与资料', 'profile'], ['设置', 'settings'], ['登出', 'logout']]) {
+  check('account menu does not expose a redundant home action', !menuText?.includes('返回账户首页'));
+  for (const [label, expected] of [['用户详情', 'profile'], ['设置', 'settings'], ['登出', 'logout']]) {
     await open(); await action(label!);
     check(`${label} invokes its own action`, await page.evaluate((name: string) => (window as any).fixture.calls.at(-1).action === name, expected));
   }

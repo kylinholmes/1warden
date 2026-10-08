@@ -1,4 +1,4 @@
-import type { SessionStatus } from '@coffer/vault';
+import type { SessionStatus } from '@1warden/vault';
 
 export type Screen = 'connect' | 'unlock' | 'vault';
 

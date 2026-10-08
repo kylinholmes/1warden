@@ -1,17 +1,18 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
-import type { TwoFactorChallenge } from '@coffer/vault';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
+import { useCallback, useEffect, useRef } from 'react';
+import type { TwoFactorChallenge } from '@1warden/vault';
 import type { ApplicationClient, ConnectionDraft } from '../application/types';
 import type { CertInfo } from '../trust';
 import { twoFactorChallenge } from './auth-error';
 import {
-  ConnectScreen, IconLock, IconSpinner, apiMessageOf, rememberAccount, useAccounts,
+  ConnectScreen, BrandMark, IconSpinner, apiMessageOf, rememberAccount, useAccounts,
   type ConnectCreds, type SavedAccount,
-} from '@coffer/ui';
+} from '@1warden/ui';
 
 /**
  * 连接 / 解锁 —— **桌面端这里只剩外壳和平台专有的那一屏**。
  *
- * 界面本体在 `@coffer/ui` 的 `ConnectScreen`，和扩展弹窗**同一份代码**
+ * 界面本体在 `@1warden/ui` 的 `ConnectScreen`，和扩展弹窗**同一份代码**
  * （账户列表、快速解锁、表单、两步验证都在那边）。这里负责三件共享组件
  * 不该知道的事：
  *
@@ -26,27 +27,37 @@ import {
 interface Props {
   client: ApplicationClient;
   onConnected: () => void;
+  onHome?: () => Promise<void>;
 }
 
 function isCertUntrusted(e: unknown): e is { kind: 'certUntrusted'; fingerprint?: string } {
   return (e as { kind?: string } | null)?.kind === 'certUntrusted';
 }
 
-export function Connect({ client, onConnected }: Props) {
+export function Connect({ client, onConnected, onHome }: Props) {
   const accounts = useAccounts();
 
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [challenge, setChallenge] = useState<TwoFactorChallenge | null>(null);
-  const [cert, setCert] = useState<CertInfo | null>(null);
+  const viewStore = useLocalStore(() => {
+    const busy = false;
+    const error = (null) as string | null;
+    const challenge = (null) as TwoFactorChallenge | null;
+    const cert = (null) as CertInfo | null;
+    const pending = (null) as ConnectCreds | null;
+    const restored = (client.connectionDraft ? undefined : null) as ConnectionDraft | null | undefined;
+    return { busy, error, challenge, cert, pending, restored };
+  });
+  const [busy, setBusy] = useStoreField(viewStore, 'busy');
+  const [error, setError] = useStoreField(viewStore, 'error');
+  const [challenge, setChallenge] = useStoreField(viewStore, 'challenge');
+  const [cert, setCert] = useStoreField(viewStore, 'cert');
   /**
    * 触发证书确认的那一次凭据。
    *
    * ⚠️ 必须留一份：用户核对完证书之后要**原样重跑一次连接**，而那时候
    * 表单已经不在屏幕上了（`cert` 插槽盖住了它），拿不回那两个字段。
    */
-  const [pending, setPending] = useState<ConnectCreds | null>(null);
-  const [restored, setRestored] = useState<ConnectionDraft | null | undefined>(client.connectionDraft ? undefined : null);
+  const [pending, setPending] = useStoreField(viewStore, 'pending');
+  const [restored, setRestored] = useStoreField(viewStore, 'restored');
   const currentDraft = useRef<ConnectionDraft | null>(null);
   const operation = useRef(0);
   const mounted = useRef(true);
@@ -219,10 +230,15 @@ export function Connect({ client, onConnected }: Props) {
       <div className="screen-in w-full max-w-[380px]">
         {restored === undefined ? <p className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在恢复表单…</p> : <ConnectScreen
           accounts={accounts}
-          initialCredentials={restored ?? undefined}
+          initialCredentials={restored ?? (onHome ? { serverUrl: '', email: '' } : undefined)}
           onCredentialsChange={rememberFields}
-          canGoBack={Boolean(restored?.returnAccount)}
-          onBack={() => { void navigate(currentDraft.current?.returnAccount ?? null); }}
+          canGoBack={!!onHome || Boolean(restored?.returnAccount)}
+          onBack={() => {
+            if (!onHome) { void navigate(currentDraft.current?.returnAccount ?? null); return; }
+            const version = ++operation.current; leaving.current = true;
+            setPending(null); setChallenge(null); setCert(null);
+            void onHome().then(() => clearDraft(version));
+          }}
           onPickAccount={(account) => { void navigate(account); }}
           busy={busy}
           error={error}
@@ -239,9 +255,7 @@ export function Connect({ client, onConnected }: Props) {
           ) : undefined}
           brand={
             <>
-              <span className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] bg-[var(--accent)] text-[var(--accent-ink)]">
-                <IconLock size={17} />
-              </span>
+              <BrandMark />
               <span className="text-xl font-semibold tracking-[-0.01em]">1Warden</span>
             </>
           }
