@@ -498,6 +498,16 @@ try {
     await page.keyboard.press('Tab');
     check('quick result buttons retain their own keyboard focus indicator', await page.evaluate(() =>
       document.activeElement?.tagName === 'BUTTON' && getComputedStyle(document.activeElement!).outlineStyle !== 'none'));
+    // Key dispatch completion is not a paint boundary. Keep checking the actual
+    // rendered focus state; a persistent highlight must still fail the test.
+    const blurState = await page.evaluate(() => ({ active: document.activeElement?.tagName,
+      inputFocus: document.querySelector('.quick-search-input')!.matches(':focus-visible'),
+      shadow: getComputedStyle(document.querySelector('.quick-search-head')!).boxShadow }));
+    console.log(`Quick search blur before rendered-state check: ${JSON.stringify(blurState)}`);
+    await page.waitForFunction(() => document.activeElement?.tagName === 'BUTTON'
+      && getComputedStyle(document.activeElement).outlineStyle !== 'none'
+      && !document.querySelector('.quick-search-input')!.matches(':focus-visible')
+      && getComputedStyle(document.querySelector('.quick-search-head')!).boxShadow === 'none', { polling: 'raf' });
     check('leaving search removes its focus indicator', await page.$eval('.quick-search-head', node => getComputedStyle(node).boxShadow === 'none'));
   }
   check('no uncaught UI errors', errors.length === 0, errors);
