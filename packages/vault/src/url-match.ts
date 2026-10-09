@@ -93,6 +93,18 @@ export function displayDomainOf(raw: string): string | null {
   return registrableDomainOf(url);
 }
 
+/**
+ * 图标识别保留服务子域名：cloud.tencent.com 和 mail.google.com 不能先被
+ * 压成基础域名，否则会丢失服务身份。只移除常见 www 前缀与 DNS 末尾点。
+ * 仅供显示，不参与自动填充；远程 favicon 仍可使用 displayDomainOf。
+ */
+export function displayHostnameOf(raw: string): string | null {
+  const url = parseWebUrl(raw, true);
+  if (url === null) return null;
+  const host = url.hostname.toLowerCase().replace(/\.$/, '').replace(/^www\./, '');
+  return host.includes('.') ? host : null;
+}
+
 /** 去掉末尾斜杠，便于比较 —— `https://a.com` 与 `https://a.com/` 是同一个地址 */
 function stripTrailingSlash(s: string): string {
   return s.endsWith('/') ? s.slice(0, -1) : s;

@@ -2,20 +2,23 @@ import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { useCallback, useEffect, useRef } from 'react';
 import { generatePassword, passwordStrength } from '@1warden/crypto';
 import type { VaultItem, VaultFolder, ItemType } from '@1warden/vault';
+import { emptyBankAccount, emptyDriversLicense, emptyPassport } from '@1warden/vault';
 import { FloatingPanel } from './FloatingPanel';
 import { EditorUrls } from './EditorUrls';
+import { EditorCardExpiry, EditorDateField } from './EditorDateFields';
+import { CompoundFieldRow, FIELD_LABEL_CLASS, FIELD_ROW_CLASS } from './CompoundFieldRow';
 import { EditorCustomFields } from './EditorCustomFields';
 import { EditorAddMore } from './EditorAddMore';
 import {
   blankEditorItem, blankLogin, blankCard, blankIdentity, blankSshKey,
-  clearNativeField, createCustomField, customFieldsForItemType, initialVisibleFields,
+  createCustomField, customFieldsForItemType,
   nativeEditorFields, nativeFieldValue, removeLoginUri, savedLoginUris, updateNativeField,
   type NativeEditorField,
 } from './item-editor-fields';
 import { STRENGTH_COLORS, STRENGTH_LABELS } from './strength';
+import { TYPE_LABEL, TYPE_ORDER } from './destinations';
 import {
-  IconCard, IconChevronDown, IconIdentity, IconKey, IconNote,
-  IconSpinner, IconStar, IconTerminal, IconTrash,
+  IconChevronDown, IconSpinner, IconStar, TypeIcon,
 } from './icons';
 
 interface Props {
@@ -38,6 +41,8 @@ const CARD_BRANDS = [
   ['Diners Club', 'Diners Club'], ['Maestro', 'Maestro'], ['RuPay', 'RuPay'], ['Other', '其他'],
 ] as const;
 
+const EDITOR_ROW_CLASS = `${FIELD_ROW_CLASS} border-b border-[var(--border-subtle)] py-2 last:border-b-0`;
+
 /**
  * 新建 / 编辑条目 —— 一个浮在主界面之上的浮层。
  *
@@ -54,7 +59,7 @@ const CARD_BRANDS = [
  *
  * ── 版面：滚动区 + 固定底栏
  *
- * 字段随条目内容和「添加更多」展开。头部不滚（标题和收藏一直在），
+ * 固定字段按类型全部展开，自定义字段按需添加。头部不滚（标题和收藏一直在），
  * 中间滚，**底栏不滚** —— 「保存」必须永远在手指底下，
  * 让用户在长表单里滚到底才能保存是没道理的。
  *
@@ -78,14 +83,18 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
     const isNew = item === null;
     return {
       draft, initial, busy, error, confirming, isNew,
-      visible: initialVisibleFields(draft, isNew), visibleUrls: visibleUrlIndices(draft, isNew),
       pendingFocus: null as string | null,
       undoRemoval: null as { label: string; run: () => void } | null,
       createdFolders: [] as { id: string; name: string }[],
       folderName: '', creatingFolder: false, folderError: null as string | null,
     };
   });
-  const [draft, setDraft] = useStoreField(viewStore, 'draft');
+  const [draft, writeDraft] = useStoreField(viewStore, 'draft');
+  // Zustand updates synchronously: even an event queued before the blocked
+  // state renders cannot change the snapshot already being saved.
+  function setDraft(next: Parameters<typeof writeDraft>[0]) {
+    if (!viewStore.getState().busy) writeDraft(next);
+  }
   /** 打开那一刻的样子 —— 判断「改没改过」就靠它 */
   const [initial, setInitial] = useStoreField(viewStore, 'initial');
   const [busy, setBusy] = useStoreField(viewStore, 'busy');
@@ -99,13 +108,10 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
    * 「新建条目」，像是点错了什么东西。
    */
   const [isNew, setIsNew] = useStoreField(viewStore, 'isNew');
-  // Visibility belongs to this editing session, not to the saved data. Clearing a
-  // control must not unmount it beneath the user while they are still typing.
-  const [visible, setVisible] = useStoreField(viewStore, 'visible');
-  const [visibleUrls, setVisibleUrls] = useStoreField(viewStore, 'visibleUrls');
   const [pendingFocus, setPendingFocus] = useStoreField(viewStore, 'pendingFocus');
   const [undoRemoval, setUndoRemoval] = useStoreField(viewStore, 'undoRemoval');
   const editorBody = useRef<HTMLDivElement>(null);
+  const restoreAfterSave = useRef<HTMLElement | null>(null);
   const [createdFolders, setCreatedFolders] = useStoreField(viewStore, 'createdFolders');
   const [folderName, setFolderName] = useStoreField(viewStore, 'folderName');
   const [creatingFolder, setCreatingFolder] = useStoreField(viewStore, 'creatingFolder');
@@ -125,14 +131,12 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
   useEffect(() => {
     if (!open) return;
     const start = itemRef.current ?? newEditorItem();
+    setBusy(false);
     setIsNew(itemRef.current === null);
     setInitial(start);
     setDraft(start);
     setError(null);
-    setBusy(false);
     setConfirming(false);
-    setVisible(initialVisibleFields(start, itemRef.current === null));
-    setVisibleUrls(visibleUrlIndices(start, itemRef.current === null));
     setPendingFocus(null);
     setUndoRemoval(null);
     setFolderName('');
@@ -141,11 +145,22 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
   }, [open]);
 
   useEffect(() => {
+    if (busy || !error) return;
+    const target = restoreAfterSave.current;
+    restoreAfterSave.current = null;
+    if (target?.isConnected) target.focus({ preventScroll: true });
+  }, [busy, error]);
+
+  useEffect(() => {
     if (!pendingFocus) return;
     const field = editorBody.current?.querySelector<HTMLElement>(pendingFocus);
-    const input = field?.matches('button,input,textarea,select') ? field : field?.querySelector<HTMLElement>('input:not([disabled]),textarea:not([disabled]),select:not([disabled]),button:not([disabled])');
+    // Row actions may precede inputs visually/semantically (for example URL
+    // delete in its label line). Add/undo should focus editable content first.
+    const input = field?.matches('button,input,textarea,select') ? field
+      : field?.querySelector<HTMLElement>('input:not([disabled]),textarea:not([disabled]),select:not([disabled])')
+        ?? field?.querySelector<HTMLElement>('button:not([disabled])');
     if (input) { input.focus(); input.scrollIntoView?.({ block: 'nearest' }); setPendingFocus(null); }
-  }, [pendingFocus, visible, draft]);
+  }, [pendingFocus, draft]);
 
   function patch(p: Partial<VaultItem>) { setDraft((d) => ({ ...d, ...p })); }
   function patchLogin(p: Partial<NonNullable<VaultItem['login']>>) {
@@ -163,43 +178,21 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
    */
   const dirty = JSON.stringify(draft) !== JSON.stringify(initial);
 
-  function addNative(id: string) {
-    setVisible(current => current.includes(id) ? current : [...current, id]);
-    if (id === 'login.uris') {
-      const index = draft.login?.uris.length ?? 0;
-      patchLogin({ uris: [...(draft.login?.uris ?? []), { uri: '', match: null }] });
-      setVisibleUrls(current => [...current, index]);
-      setPendingFocus(`[data-editor-url="${index}"]`);
-    } else setPendingFocus(`[data-editor-field="${id}"]`);
-  }
-
-  function removeNative(field: NativeEditorField) {
-    setPendingFocus('[data-editor-add-more]');
-    const original = draft;
-    setDraft(current => clearNativeField(current, field.id));
-    setVisible(current => current.filter(id => id !== field.id));
-    setUndoRemoval({ label: field.label, run: () => {
-      setDraft(current => field.keys.reduce((result, key) => updateNativeField(result, key,
-        nativeFieldValue(original, key) as string | null), current));
-      setVisible(current => current.includes(field.id) ? current : [...current, field.id]);
-      setPendingFocus(`[data-editor-field="${field.id}"]`);
-    } });
+  function addUrl() {
+    const uris = draft.login?.uris.length ? draft.login.uris : [{ uri: '', match: null }];
+    patchLogin({ uris: [...uris, { uri: '', match: null }] });
+    setPendingFocus(`[data-editor-url="${uris.length}"]`);
   }
 
   function removeUrl(index: number) {
-    setPendingFocus('[data-editor-add-more]');
+    setPendingFocus(`[data-editor-url="${Math.max(0, index - 1)}"]`);
     const removed = draft.login!.uris[index]!;
-    const lastVisible = visibleUrls.length === 1;
     patchLogin({ uris: removeLoginUri(draft.login!.uris, index) });
-    setVisibleUrls(current => current.filter(i => i !== index).map(i => i > index ? i - 1 : i));
-    if (lastVisible) setVisible(current => current.filter(id => id !== 'login.uris'));
     setUndoRemoval({ label: '网址', run: () => {
       setDraft(current => {
         const uris = [...(current.login?.uris ?? [])]; uris.splice(index, 0, removed);
         return { ...current, login: { ...blankLogin(), ...current.login, uris } };
       });
-      setVisibleUrls(current => [...current.map(i => i >= index ? i + 1 : i), index].sort((a, b) => a - b));
-      setVisible(current => current.includes('login.uris') ? current : [...current, 'login.uris']);
       setPendingFocus(`[data-editor-url="${index}"]`);
     } });
   }
@@ -218,7 +211,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
   }
 
   async function createFolder() {
-    if (!onCreateFolder || !folderName.trim() || creatingFolder) return;
+    if (!onCreateFolder || !folderName.trim() || viewStore.getState().busy || viewStore.getState().creatingFolder) return;
     setCreatingFolder(true); setFolderError(null);
     try {
       const folder = await onCreateFolder(folderName.trim());
@@ -230,16 +223,28 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
 
   function renderNative(field: NativeEditorField) {
     const value = String(nativeFieldValue(draft, field.id) ?? '');
-    return <Row key={field.id} label={field.label} fieldId={field.id}
-      {...(field.kind === 'urls' ? {} : { onRemove: () => removeNative(field) })}>
-      {field.kind === 'urls' ? <EditorUrls uris={draft.login?.uris ?? []} visibleIndices={visibleUrls}
-        onChange={uris => patchLogin({ uris })} onRemove={removeUrl} />
-      : field.kind === 'expiry' ? <div className="grid min-w-0 grid-cols-2 gap-2">
-        {(['card.expMonth', 'card.expYear'] as const).map((key, index) => <input key={key}
-          value={String(nativeFieldValue(draft, key) ?? '')} className="field min-w-0" inputMode="numeric"
-          placeholder={index === 0 ? '月' : '年'} aria-label={index === 0 ? '月份' : '年份'}
-          onChange={event => setDraft(current => updateNativeField(current, key, event.target.value))} />)}
-      </div>
+    if (field.kind === 'compound') return <CompoundFieldRow key={field.id} editor label={field.label} fieldId={field.id}>
+        {field.keys.map((key, index) => <label key={key} data-compound-cell className={FIELD_ROW_CLASS}>
+          <span data-field-label className={FIELD_LABEL_CLASS}>{field.labels?.[index]}</span>
+          <div data-field-value className="min-w-0 w-full">
+            <input value={String(nativeFieldValue(draft, key) ?? '')} className="field min-w-0 w-full"
+              aria-label={field.labels?.[index]} autoComplete="off" spellCheck={false}
+              onChange={event => setDraft(current => updateNativeField(current, key, event.target.value))} />
+          </div>
+        </label>)}
+    </CompoundFieldRow>;
+    return <Row key={field.id} label={field.label} fieldId={field.id} hideLabel={field.id === 'notes' || field.kind === 'urls'}>
+      {field.kind === 'urls' ? <EditorUrls uris={draft.login?.uris ?? []}
+        onChange={uris => patchLogin({ uris })} onRemove={removeUrl} onAdd={addUrl} />
+      : field.kind === 'date' ? <EditorDateField value={value} label={field.label}
+        onChange={value => setDraft(current => updateNativeField(current, field.id, value))} />
+      : field.kind === 'expiry' ? <EditorCardExpiry month={draft.card?.expMonth ?? ''} year={draft.card?.expYear ?? ''}
+        onChange={(month, year) => setDraft(current => {
+          let next = current;
+          if (month !== (current.card?.expMonth ?? '')) next = updateNativeField(next, 'card.expMonth', month);
+          if (year !== (current.card?.expYear ?? '')) next = updateNativeField(next, 'card.expYear', year);
+          return next;
+        })} />
       : field.id === 'card.brand' ? <select value={value} aria-label={field.label} className="field min-w-0"
         onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))}>
         <option value="">选择卡片品牌</option>
@@ -266,12 +271,15 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
       </>}
     </Row>;
   }
-  const shownFields = nativeEditorFields(draft.type).filter(field => visible.includes(field.id));
+  const shownFields = nativeEditorFields(draft.type);
   const nativeGroups = [...new Set(shownFields.map(field => field.group))];
   const allFolders = [...folders, ...createdFolders.filter(folder => !folders.some(existing => existing.id === folder.id))];
 
 
   async function save() {
+    if (viewStore.getState().busy || viewStore.getState().creatingFolder) return;
+    const draft = viewStore.getState().draft;
+    restoreAfterSave.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setBusy(true);
     setError(null);
     try {
@@ -310,10 +318,12 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
       onClose={handleClose}
       labelledBy="editor-title"
       className="max-w-[620px]"
-      footer={confirming ? (
+      footer={<div className="@container min-w-0 w-full py-2">
+        <div className="flex min-w-0 flex-col gap-2 @[420px]:flex-row @[420px]:items-center @[420px]:justify-between">
+        {confirming ? (
         <>
-          <span className="min-w-0 truncate text-[var(--ink-secondary)]">有未保存的改动，关掉就没了</span>
-          <span className="flex shrink-0 items-center gap-2">
+          <span className="min-w-0 break-words text-[var(--ink-secondary)]">有未保存的改动，关掉就没了</span>
+          <span className="flex shrink-0 items-center gap-2 self-end @[420px]:self-auto">
             <button onClick={() => setConfirming(false)} className="btn btn-quiet">继续编辑</button>
             <button onClick={onCancel} className="btn btn-danger">放弃改动</button>
           </span>
@@ -323,9 +333,9 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
           {/* 保存的结果贴着保存按钮说 —— 长表单里用户早就滚到底了，
               报错放在表单顶部等于没报 */}
           {error
-            ? <span className="min-w-0 truncate text-[var(--risk)]" title={error}>{error}</span>
-            : <span className="min-w-0 truncate">{isNew ? '新条目会加密后存到服务器' : '改动会加密后存到服务器'}</span>}
-          <span className="flex shrink-0 items-center gap-2">
+            ? <span role="alert" className="min-w-0 break-words whitespace-pre-wrap [overflow-wrap:anywhere] text-[var(--risk)]">{error}</span>
+            : <span className="min-w-0 break-words">{isNew ? '新条目会加密后存到服务器' : '改动会加密后存到服务器'}</span>}
+          <span className="flex shrink-0 items-center gap-2 self-end @[420px]:self-auto">
             <button onClick={requestClose} disabled={busy || creatingFolder} className="btn btn-quiet">取消</button>
             <button onClick={save} disabled={busy || creatingFolder} className="btn btn-primary">
               {busy && <IconSpinner size={14} />}
@@ -333,7 +343,9 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
             </button>
           </span>
         </>
-      )}
+        )}
+        </div>
+      </div>}
     >
       <div className="panel-head">
         <h2 id="editor-title" className="min-w-0 flex-1 truncate text-md font-medium">
@@ -341,6 +353,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
         </h2>
         <button
           type="button"
+          disabled={busy}
           onClick={() => patch({ favorite: !draft.favorite })}
           title={draft.favorite ? '取消收藏' : '加入收藏'}
           aria-pressed={draft.favorite}
@@ -352,24 +365,23 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
         </button>
       </div>
 
-      <div ref={editorBody} className="min-h-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-5">
+      {/* inert blocks all pointer/keyboard edits while saving. A fieldset here
+          makes Edge omit layout for reused native-field rows when opening an
+          existing item; keep the regular scrolling container instead. */}
+      <div ref={editorBody} inert={busy} aria-busy={busy}
+        className={`min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-5${busy ? ' opacity-70' : ''}`}>
         {isNew && <Group title="类型">
-          <div className="grid grid-cols-5 gap-2 py-3">
-            {([
-              ['login', '登录', <IconKey size={17} />], ['secureNote', '笔记', <IconNote size={17} />],
-              ['card', '信用卡', <IconCard size={17} />], ['identity', '身份', <IconIdentity size={17} />],
-              ['sshKey', 'SSH 密钥', <IconTerminal size={17} />],
-            ] as const).map(([type, label, icon]) => <button key={type} type="button" aria-pressed={draft.type === type}
+          <div className="grid grid-cols-2 gap-2 py-3 @[400px]:grid-cols-4">
+            {TYPE_ORDER.map(type => <button key={type} type="button" aria-pressed={draft.type === type}
               onClick={() => {
                 if (type === draft.type) return;
                 const next = itemWithType(draft, type);
-                setDraft(next); setVisible(initialVisibleFields(next, true));
-                setVisibleUrls(visibleUrlIndices(next, true)); setUndoRemoval(null);
+                setDraft(next); setUndoRemoval(null);
               }}
               className={`flex min-w-0 flex-col items-center gap-1.5 rounded-[var(--radius-md)] border px-1 py-3 text-xs ${
                 draft.type === type ? 'border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--ink-primary)]'
                   : 'border-[var(--border-subtle)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]'}`}>
-              <span className={draft.type === type ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}>{icon}</span>{label}
+              <span className={draft.type === type ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}><TypeIcon type={type} size={17} /></span>{TYPE_LABEL[type]}
             </button>)}
           </div>
         </Group>}
@@ -390,7 +402,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
           <span className="min-w-0 truncate">已移除 {undoRemoval.label}</span>
           <button type="button" className="btn btn-quiet" onClick={() => { undoRemoval.run(); setUndoRemoval(null); }}>撤销移除</button>
         </div>}
-        <EditorAddMore key={`${open}-${draft.type}`} itemType={draft.type} visible={visible} onNative={addNative}
+        <EditorAddMore key={`${open}-${draft.type}`} itemType={draft.type}
           onCustom={type => {
             const field = createCustomField(type, draft.type);
             if (!field) return;
@@ -448,23 +460,17 @@ function Group({ title, children }: { title?: string; children: React.ReactNode 
 }
 
 /**
- * 一行：标签在左，控件在右。
- *
- * 和详情页的 `SecretField` 用同一个 76px 标签列 —— 编辑态与只读态对齐，
- * 切换时视线不用重新找位置。
+ * 独立字段：标签在上、控件在下，与详情页共享相同的单列阅读顺序。
+ * 小操作仍与其输入放在内容层，不让长标签挤占输入空间。
  */
-function Row({ label, fieldId, onRemove, children }: {
-  label: string; fieldId?: string; onRemove?: () => void; children: React.ReactNode;
+function Row({ label, fieldId, hideLabel = false, children }: {
+  label: string; fieldId?: string; hideLabel?: boolean; children: React.ReactNode;
 }) {
   return <div data-editor-field={fieldId}
-    className="flex flex-col items-start gap-2 border-b border-[var(--border-subtle)] py-3 last:border-b-0 @[340px]:flex-row @[340px]:gap-3">
-    <span className="shrink-0 text-sm text-[var(--ink-tertiary)] @[340px]:w-[76px] @[340px]:pt-[9px]">{label}</span>
-    <div className="flex w-full min-w-0 flex-1 items-start gap-2">
+    className={EDITOR_ROW_CLASS}>
+    {!hideLabel && <span data-field-label className={FIELD_LABEL_CLASS}>{label}</span>}
+    <div data-field-value className="flex min-w-0 w-full items-start gap-2">
       <div className="min-w-0 flex-1">{children}</div>
-      {onRemove && <button type="button" onClick={onRemove} aria-label={`移除${label}`} title={`移除${label}`}
-        className="shrink-0 rounded-[var(--radius-sm)] p-2.5 text-[var(--ink-tertiary)] hover:bg-[var(--surface-hover)] hover:text-[var(--risk)]">
-        <IconTrash size={15} />
-      </button>}
     </div>
   </div>;
 }
@@ -506,10 +512,10 @@ function StrengthMeter({ value }: { value: string }) {
   const { score, entropyBits } = passwordStrength(value);
 
   return (
-    <span className="mt-2 flex items-center gap-2.5">
-      <span className="flex gap-1" aria-hidden>
+    <span className="mt-2 flex min-w-0 flex-wrap items-center gap-x-2.5 gap-y-1">
+      <span className="flex min-w-0 max-w-full gap-1" aria-hidden>
         {[0, 1, 2, 3, 4].map((i) => (
-          <span key={i} className="h-1 w-7 rounded-full transition-colors duration-[var(--dur-base)]"
+          <span key={i} className="h-1 min-w-0 w-7 rounded-full transition-colors duration-[var(--dur-base)]"
             style={{ background: i <= score ? STRENGTH_COLORS[score] : 'var(--border-subtle)' }} />
         ))}
       </span>
@@ -521,23 +527,21 @@ function StrengthMeter({ value }: { value: string }) {
 }
 
 function newEditorItem(): VaultItem {
-  const item = blankEditorItem();
-  return { ...item, login: { ...item.login!, uris: [{ uri: '', match: null }] } };
-}
-
-function visibleUrlIndices(item: VaultItem, isNew: boolean): number[] {
-  return (item.login?.uris ?? []).flatMap((uri, index) => uri.uri !== '' || isNew ? [index] : []);
+  return blankEditorItem();
 }
 
 function itemWithType(draft: VaultItem, type: ItemType): VaultItem {
-  const rawType = { login: 1, secureNote: 2, card: 3, identity: 4, sshKey: 5, unknown: -1 }[type];
+  const rawType = { login: 1, secureNote: 2, card: 3, identity: 4, sshKey: 5, bankAccount: 6, driversLicense: 7, passport: 8, unknown: -1 }[type];
   return {
     ...draft, type, rawType, customFields: customFieldsForItemType(draft.customFields, type),
-    login: type === 'login' ? { ...blankLogin(), uris: [{ uri: '', match: null }] } : null,
+    login: type === 'login' ? blankLogin() : null,
     card: type === 'card' ? blankCard() : null,
     identity: type === 'identity' ? blankIdentity() : null,
     secureNote: type === 'secureNote' ? { type: 0 } : null,
     sshKey: type === 'sshKey' ? blankSshKey() : null,
+    bankAccount: type === 'bankAccount' ? emptyBankAccount() : null,
+    driversLicense: type === 'driversLicense' ? emptyDriversLicense() : null,
+    passport: type === 'passport' ? emptyPassport() : null,
   };
 }
 

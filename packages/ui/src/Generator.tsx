@@ -52,7 +52,7 @@ export function GeneratorBody({ className = '' }: { className?: string }) {
     const includeNumber = false;
     const nonce = 0;
     const value = '';
-    return { kind, length, lower, upper, digits, symbols, avoidAmbiguous, words, separator, capitalize, includeNumber, nonce, value };
+    return { kind, length, lower, upper, digits, symbols, avoidAmbiguous, words, separator, capitalize, includeNumber, nonce, value, copyError: null as string | null };
   });
   const [kind, setKind] = useStoreField(viewStore, 'kind');
 
@@ -78,6 +78,8 @@ export function GeneratorBody({ className = '' }: { className?: string }) {
    */
   const [nonce, setNonce] = useStoreField(viewStore, 'nonce');
   const [value, setValue] = useStoreField(viewStore, 'value');
+  const [copyError, setCopyError] = useStoreField(viewStore, 'copyError');
+  useEffect(() => { setCopyError(null); }, [value]);
 
   const classes = [lower, upper, digits, symbols].filter(Boolean).length;
 
@@ -122,11 +124,13 @@ export function GeneratorBody({ className = '' }: { className?: string }) {
         </button>
         <CopyButton
           getValue={async () => value}
-          onCopied={scheduleClipboardClear}
+          onCopied={copied => { setCopyError(null); scheduleClipboardClear(copied); }}
+          onError={() => setCopyError('复制失败，请重试；剪贴板内容未更新。')}
           className="btn btn-primary gap-1.5"
         />
       </div>
 
+      {copyError && <p role="alert" className="mt-2 text-sm text-[var(--risk)]">{copyError}</p>}
       {strength && (
         <div className="mt-3.5 flex items-start gap-2.5">
           <span className="mt-[5px] flex shrink-0 gap-1" aria-hidden>

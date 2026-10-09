@@ -177,9 +177,18 @@ try {
   await page.keyboard.press('Escape'); await page.waitForSelector('.avatar-crop-frame', { hidden: true });
   check('Escape cancels only crop and preserves the name draft', await page.$eval('#profile-name', (input: HTMLInputElement) => input.value === '裁剪与同步测试'));
   await (await page.$('input[type="file"]')).uploadFile(imagePath); await page.waitForSelector('.avatar-crop-frame');
+  // Mounting the cropper focuses and scrolls its frame in an effect. Wait for
+  // that layout before measuring coordinates, otherwise the first native drag
+  // can start at the pre-scroll position and never reach the cropper.
+  await page.waitForFunction(() => document.activeElement === document.querySelector('.avatar-crop-frame'));
+  await page.evaluate(() => new Promise<void>(done => requestAnimationFrame(() => requestAnimationFrame(() => done()))));
   const box = await (await page.$('.avatar-crop-frame')).boundingBox();
+  const beforeDrag = await page.$eval('.avatar-crop-frame img', (image: HTMLImageElement) => image.style.left);
   await page.mouse.move(box.x + box.width / 2, box.y + box.height / 2); await page.mouse.down();
   await page.mouse.move(box.x - box.width / 2, box.y + box.height / 2, { steps: 8 }); await page.mouse.up();
+  const afterDrag = await page.$eval('.avatar-crop-frame img', (image: HTMLImageElement) => image.style.left);
+  console.log('Crop drag source offset:', { beforeDrag, afterDrag, frame: box });
+  check('pointer drag moves the crop source before zooming', beforeDrag !== afterDrag);
   await text(page, '#avatar-zoom', '2');
   await page.screenshot({ path: join(output, native ? 'native-crop.png' : 'extension-crop.png') });
   await button(page, '使用此头像');
@@ -212,10 +221,35 @@ try {
   await button(page, '隐藏');
   await until(async () => { const p = parseProfileSettings(await read()).preferences; return p?.palette === 'dracula' && p.mode === 'dark' && !p.showTypes; }, 'automatic preference save');
   check('preferences and device history coexist with the saved avatar', parseProfile(await read()).avatarDataUrl === saved.avatarDataUrl && parseProfileSettings(await read()).devices.length === 1);
+  // Exercise actual controls and encrypted writes, rather than injecting local
+  // preferences. Finish on plate so the isolated second client must receive it.
+  for (const option of [{ value: 'plate', label: '统一底板' }, { value: 'original', label: '原貌' }] as const) {
+    const beforeIconWrite = writes.length;
+    await button(page, option.label);
+    await page.waitForFunction((value: string) => document.documentElement.dataset.iconStyle === value, {}, option.value);
+    await until(async () => parseProfileSettings(await read()).preferences?.iconStyle === option.value, `${option.value} icon style encrypted save`);
+    check(`${option.value} icon style applies locally and round-trips through encrypted account settings`,
+      await page.$eval('[role="radiogroup"][aria-label="图标样式"] [aria-checked="true"]', (node: Element) => node.textContent?.trim()) === option.label
+      && writes.length > beforeIconWrite && writes.at(-1)?.body.notes.startsWith('2.') && !JSON.stringify(writes.at(-1)?.body).includes('"iconStyle"'));
+    await page.$eval('[role="radiogroup"][aria-label="图标样式"]', (node: HTMLElement) => node.scrollIntoView({ block: 'center' }));
+    await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
+    await page.screenshot({ path: join(output, `settings-icon-${option.value}.png`) });
+  }
+  await button(page, '统一底板');
+  await until(async () => parseProfileSettings(await read()).preferences?.iconStyle === 'plate', 'plate icon style ready for second installation');
   const second = await extensionPage('device-b'); await login(second);
   await until(async () => parseProfileSettings(await read()).devices.length === 2, 'second installation registration');
-  await second.waitForFunction(() => document.documentElement.dataset.palette === 'dracula' && document.documentElement.dataset.theme === 'dark');
+  await second.waitForFunction(() => document.documentElement.dataset.palette === 'dracula' && document.documentElement.dataset.theme === 'dark' && document.documentElement.dataset.iconStyle === 'plate');
   check('fresh second installation decrypts and applies account appearance', true);
+  await second.reload();
+  // Reopening intentionally lands on the account picker, even when its saved
+  // session is unlocked. Select our synthetic account before entering settings.
+  await pickAccount(second); await second.waitForSelector('[aria-label="账户菜单"]');
+  await second.waitForFunction(() => document.documentElement.dataset.iconStyle === 'plate');
+  await section(second, 'preferences');
+  check('synced icon style survives reopening the isolated second client',
+    await second.$eval('[role="radiogroup"][aria-label="图标样式"] [aria-checked="true"]', (node: Element) => node.textContent?.trim() === '统一底板')
+    && parseProfileSettings(await read()).preferences?.iconStyle === 'plate');
   await openDetails(second); await section(second, 'edit');
   check('second installation receives the synced profile', await second.$eval('#profile-name', (i: HTMLInputElement) => i.value === '裁剪与同步测试'));
   await section(second, 'devices');
@@ -224,6 +258,8 @@ try {
   await second.screenshot({ path: join(output, 'user-details-devices.png') });
   await section(second, 'preferences'); await second.click('.palette-trigger'); await second.click('[role="option"][id$="-github"]');
   await until(async () => parseProfileSettings(await read()).preferences?.palette === 'github', 'second automatic save');
+  check('changing another appearance setting retains the synced icon style',
+    await second.$eval('html', (node: HTMLElement) => node.dataset.iconStyle === 'plate') && parseProfileSettings(await read()).preferences?.iconStyle === 'plate');
   if (!native) {
     const stale = await rpc(page, 'savePreferences', [{ mode: 'light', palette: 'ayu', showTypes: true }, { mode: 'dark', palette: 'dracula', showTypes: false }]);
     check('stale first device cannot overwrite the newer account record', !stale.ok && parseProfileSettings(await read()).preferences?.palette === 'github');

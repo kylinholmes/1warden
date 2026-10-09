@@ -48,6 +48,52 @@ export interface CipherSshKeyDto {
   fingerprint?: string | null;
 }
 
+/** Native type 6. Every property is an EncString, including accountType. */
+export interface CipherBankAccountDto {
+  bankName?: string | null;
+  nameOnAccount?: string | null;
+  accountType?: string | null;
+  accountNumber?: string | null;
+  routingNumber?: string | null;
+  branchNumber?: string | null;
+  pin?: string | null;
+  swiftCode?: string | null;
+  iban?: string | null;
+  bankContactPhone?: string | null;
+}
+
+/** Native type 7. Dates are encrypted strings, not plaintext metadata. */
+export interface CipherDriversLicenseDto {
+  firstName?: string | null;
+  middleName?: string | null;
+  lastName?: string | null;
+  dateOfBirth?: string | null;
+  licenseNumber?: string | null;
+  issuingCountry?: string | null;
+  issuingState?: string | null;
+  issueDate?: string | null;
+  expirationDate?: string | null;
+  issuingAuthority?: string | null;
+  licenseClass?: string | null;
+}
+
+/** Native type 8. All properties, including dates, are EncStrings. */
+export interface CipherPassportDto {
+  surname?: string | null;
+  givenName?: string | null;
+  dateOfBirth?: string | null;
+  sex?: string | null;
+  birthPlace?: string | null;
+  nationality?: string | null;
+  issuingCountry?: string | null;
+  passportNumber?: string | null;
+  passportType?: string | null;
+  nationalIdentificationNumber?: string | null;
+  issuingAuthority?: string | null;
+  issueDate?: string | null;
+  expirationDate?: string | null;
+}
+
 export interface CipherLoginDto {
   username?: string | null;
   password?: string | null;
@@ -129,6 +175,9 @@ export interface CipherDto {
    * 我们发的是 2026.10.0（见 http.ts 的 CLIENT_VERSION）。
    */
   sshKey?: CipherSshKeyDto | null;
+  bankAccount?: CipherBankAccountDto | null;
+  driversLicense?: CipherDriversLicenseDto | null;
+  passport?: CipherPassportDto | null;
   fields?: CipherFieldDto[] | null;
   passwordHistory?: CipherPasswordHistoryDto[] | null;
   /** ⚠️ 无附件时是 **null**，不是空数组 */
@@ -165,8 +214,8 @@ export interface SyncResult {
 
 /**
  * CipherType。
- * ⚠️ 6/7/8 是 2026 年新增的，老服务端不认识 —— 按接口稳定性原则，
- * 收到时按「未知类型」只读展示，不提供编辑。
+ * 6/7/8 are supported by Vaultwarden 1.37.4 and current Bitwarden clients.
+ * Older servers may reject creating these types; never downgrade them to notes.
  */
 export const CIPHER_TYPE = {
   login: 1, secureNote: 2, card: 3, identity: 4,

@@ -1,22 +1,18 @@
 import { useEffect, useRef } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import type { CustomField, ItemType } from '@1warden/vault';
-import { availableNativeFields, linkedFieldTargets } from './item-editor-fields';
+import { linkedFieldTargets } from './item-editor-fields';
 import { IconPlus } from './icons';
 
 /** An in-panel picker keeps its width and focus inside FloatingPanel. */
-export function EditorAddMore({ itemType, visible, onNative, onCustom }: {
+export function EditorAddMore({ itemType, onCustom }: {
   itemType: ItemType;
-  visible: readonly string[];
-  onNative: (id: string) => void;
   onCustom: (type: CustomField['type']) => void;
 }) {
   const store = useLocalStore(() => ({ expanded: false }));
   const [expanded, setExpanded] = useStoreField(store, 'expanded');
   const wrapper = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
-  const fields = availableNativeFields(itemType, visible);
-  const groups = [...new Set(fields.map(field => field.group))];
   const customTypes: { type: CustomField['type']; label: string }[] = [
     { type: 0, label: '文本' }, { type: 1, label: '隐藏' }, { type: 2, label: '开关' },
     ...(linkedFieldTargets(itemType).length ? [{ type: 3 as const, label: '关联' }] : []),
@@ -81,20 +77,13 @@ export function EditorAddMore({ itemType, visible, onNative, onCustom }: {
       }}>
       <button ref={trigger} data-editor-add-more type="button" className="btn btn-quiet gap-1.5" aria-haspopup="menu"
         aria-expanded={expanded} aria-controls="editor-add-more-menu" onClick={() => setExpanded(value => !value)}>
-        <IconPlus size={14} />添加更多
+        <IconPlus size={14} />添加自定义字段
       </button>
-      {expanded && <div id="editor-add-more-menu" role="menu" aria-label="添加更多"
+      {expanded && <div id="editor-add-more-menu" role="menu" aria-label="添加自定义字段"
         className="mt-2 max-h-[280px] min-w-0 overflow-x-hidden overflow-y-auto rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-overlay)] p-2">
-        {groups.map(group => <div key={group} role="group" aria-label={group}>
-          <p className="px-2 pb-1 pt-2 text-xs text-[var(--ink-tertiary)]">{group}</p>
-          {fields.filter(field => field.group === group).map(field =>
-            <button key={field.id} role="menuitem" type="button" data-add-field={field.id}
-              className="block w-full rounded-[var(--radius-sm)] px-2 py-2 text-left text-sm text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]"
-              onClick={() => { setExpanded(false); onNative(field.id); }}>{field.label}</button>)}
-        </div>)}
         <div role="group" aria-label="自定义字段">
           <p className="px-2 pb-1 pt-2 text-xs text-[var(--ink-tertiary)]">自定义字段</p>
-          {customTypes.map(({ type, label }) => <button key={type} role="menuitem" type="button"
+          {customTypes.map(({ type, label }) => <button key={type} data-add-custom={type} role="menuitem" type="button"
             className="block w-full rounded-[var(--radius-sm)] px-2 py-2 text-left text-sm text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]"
             onClick={() => { setExpanded(false); onCustom(type); }}>自定义 · {label}</button>)}
         </div>

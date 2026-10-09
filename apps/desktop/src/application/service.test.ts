@@ -1,6 +1,7 @@
 import type { CipherDto } from '@1warden/api';
 import { describe, expect, it, vi } from 'vitest';
-import { VaultClient, decryptCipher, emptyLogin, emptyIdentity, buildProfileItem, buildPreferencesItem, parseProfileSettings, type VaultItem } from '@1warden/vault';
+import { VaultClient, decryptCipher, emptyLogin, emptyIdentity, emptyBankAccount, emptyDriversLicense, emptyPassport,
+  buildProfileItem, buildPreferencesItem, parseProfileSettings, type VaultItem } from '@1warden/vault';
 import { concatBytes, deriveMasterKey, encryptBytes, encryptString, decryptString, makeUserKey, stretchMasterKey } from '@1warden/crypto';
 import { createVaultService, editableDraft, mergeEditableDraft } from './service';
 import { createProfileCache } from './profile-cache';
@@ -32,6 +33,43 @@ function restored(items = [record()], fetchImpl: typeof fetch = async () => { th
 }
 
 describe('application display boundary', () => {
+  it('runs organization analysis locally and returns no credential material or hidden/deleted records', async () => {
+    const one = { ...record(), attachments: [], passwordHistory: [], card: null, sshKey: null,
+      login: { ...record().login!, fido2Credentials: [], uris: [{ uri: 'https://example.com', match: null }] } };
+    const two = { ...structuredClone(one), id: 'second' };
+    const { client, service } = restored([one, two, { ...one, id: 'trash', deletedAt: '2026-01-01' },
+      { ...one, id: 'archived', archivedAt: '2026-01-01' }, { ...buildProfileItem({ displayName: 'Me', avatarDataUrl: null }), id: 'profile' }]);
+    const save = vi.spyOn(client, 'saveItem'); const refresh = vi.spyOn(client, 'refresh');
+    const report = await service.organizationReport();
+    expect(report).toMatchObject({ total: 2, checked: 2, skipped: 0,
+      duplicates: [{ kind: 'identical', itemIds: ['record', 'second'], reason: 'checkedContentMatches' }] });
+    const wire = JSON.stringify(report);
+    for (const secret of ['login-secret', 'JBSWY3DPEHPK3PXP', 'hidden-field', 'wrapped-item-key', 'searchable memo']) expect(wire).not.toContain(secret);
+    expect(save).not.toHaveBeenCalled(); expect(refresh).not.toHaveBeenCalled();
+    await service.lock(); await expect(service.organizationReport()).rejects.toThrow(/解锁/);
+  });
+  it('keeps native bank and document secrets out of detail until explicitly requested', async () => {
+    const item = record();
+    item.bankAccount = { ...emptyBankAccount(), bankName: 'Example Bank', accountNumber: 'bank-secret', pin: 'pin-secret', iban: 'iban-secret' };
+    item.driversLicense = { ...emptyDriversLicense(), firstName: 'Example', licenseNumber: 'license-secret' };
+    item.passport = { ...emptyPassport(), surname: 'Example', passportNumber: 'passport-secret', nationalIdentificationNumber: 'national-id-secret' };
+    const { service } = restored([item]);
+    const detail = await service.getItem(item.id);
+    expect(detail.bankAccount).toMatchObject({ bankName: 'Example Bank', hasAccountNumber: true, hasPin: true, hasIban: true });
+    expect(detail.driversLicense?.hasLicenseNumber).toBe(true);
+    expect(detail.passport).toMatchObject({ hasPassportNumber: true, hasNationalIdentificationNumber: true });
+    const wire = JSON.stringify([detail, await service.snapshot()]);
+    for (const [kind, value] of [
+      ['bankAccountNumber', 'bank-secret'], ['bankPin', 'pin-secret'], ['bankIban', 'iban-secret'],
+      ['licenseNumber', 'license-secret'], ['passportNumber', 'passport-secret'],
+      ['nationalIdentificationNumber', 'national-id-secret'],
+    ] as const) {
+      expect(wire).not.toContain(value);
+      expect(await service.reveal(item.id, { kind })).toBe(value);
+    }
+    await service.lock();
+    await expect(service.reveal(item.id, { kind: 'bankPin' })).rejects.toThrow();
+  });
   it('projects custom-field presence without exposing hidden values and keeps boolean false visible', async () => {
     const item = record();
     item.customFields = [
@@ -117,6 +155,23 @@ describe('application display boundary', () => {
 });
 
 describe('edit ownership', () => {
+  it.each([
+    ['bankAccount', 6, emptyBankAccount()],
+    ['driversLicense', 7, emptyDriversLicense()],
+    ['passport', 8, emptyPassport()],
+  ] as const)('merges native %s without dropping its type block', (type, rawType, fields) => {
+    const old: VaultItem = { ...record(), type, rawType, login: null, [type]: fields };
+    const merged = mergeEditableDraft(editableDraft(old), old);
+    expect(merged.type).toBe(type);
+    expect(merged.rawType).toBe(rawType);
+    expect(merged[type]).toEqual(fields);
+    expect(merged.wrappedKey).toBe(old.wrappedKey);
+  });
+
+  it('rejects unknown or mismatched native type IDs instead of downgrading them', () => {
+    expect(() => mergeEditableDraft({ ...record(), type: 'unknown', rawType: 9 })).toThrow();
+    expect(() => mergeEditableDraft({ ...record(), type: 'passport', rawType: 6 })).toThrow();
+  });
   it('permits editing a single record without exporting cryptographic metadata or history', () => {
     const draft = editableDraft(record());
     expect(draft.login?.password).toBe('login-secret');

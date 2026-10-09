@@ -1,5 +1,6 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react';
+import { createPortal } from 'react-dom';
 import { IconAlert, IconCheck, IconClose, IconInfo } from '@1warden/ui';
 
 /**
@@ -114,9 +115,70 @@ export function ToastProvider({ children, maxVisible = MAX_VISIBLE }: {
 }) {
   const viewStore = useLocalStore(() => {
     const records = ([]) as Record_[];
-    return { records };
+    return { records, bottom: 16 };
   });
   const [records, setRecords] = useStoreField(viewStore, 'records');
+  const [bottom, setBottom] = useStoreField(viewStore, 'bottom');
+  const regionRef = useRef<HTMLElement>(null);
+  const fallbackRef = useRef<HTMLDivElement>(null);
+  const lastOutsideFocus = useRef<HTMLElement | null>(null);
+  // Keep one portal host for the provider's lifetime. Moving the host, rather
+  // than changing the portal target, preserves notification timers and focus.
+  const notificationHost = useMemo(() => {
+    if (typeof document === 'undefined') return null;
+    const host = document.createElement('div');
+    host.style.display = 'contents';
+    return host;
+  }, []);
+  useLayoutEffect(() => {
+    if (!notificationHost) return;
+    function placeNotifications() {
+      const panels = document.querySelectorAll<HTMLElement>('.floating-layer[data-open="true"] .panel');
+      const parent = panels.item(panels.length - 1) ?? fallbackRef.current;
+      if (!parent || notificationHost!.parentElement === parent) return;
+      const active = document.activeElement;
+      parent.append(notificationHost!);
+      // appendChild can blur a focused descendant. Preserve keyboard position
+      // when a parent dialog closes, but opening a dialog still focuses its title.
+      if (active instanceof HTMLElement && notificationHost!.contains(active)) active.focus({ preventScroll: true });
+    }
+    function rememberFocus(event: FocusEvent) {
+      if (event.target instanceof HTMLElement && !notificationHost!.contains(event.target)) {
+        lastOutsideFocus.current = event.target;
+      }
+    }
+    // Dialogs can open after a persistent error is shown. Put its controls
+    // inside the top dialog's DOM/a11y tree, not outside an aria-modal boundary.
+    const changes = new MutationObserver(placeNotifications);
+    changes.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-open'] });
+    document.addEventListener('focusin', rememberFocus);
+    placeNotifications();
+    return () => { changes.disconnect(); document.removeEventListener('focusin', rememberFocus); notificationHost.remove(); };
+  }, [notificationHost]);
+  const visible = records.some(record => record.status !== 'queued');
+  useLayoutEffect(() => {
+    if (!visible) return;
+    let footer: Element | null = null;
+    const resize = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(measure);
+    function measure() {
+      const panels = document.querySelectorAll('.floating-layer[data-open="true"] .panel');
+      const current = panels.item(panels.length - 1)?.querySelector('.panel-foot') ?? null;
+      if (footer !== current) { resize?.disconnect(); footer = current; if (footer) resize?.observe(footer); }
+      const bounds = footer?.getBoundingClientRect();
+      const region = regionRef.current?.getBoundingClientRect();
+      // Notifications must not cover the active dialog's actions. Measure the
+      // actual footer (including wrapping/safe areas), not a guessed row height.
+      const overlaps = bounds && region && bounds.left < region.right && bounds.right > region.left
+        && bounds.bottom > window.innerHeight - 16 - region.height;
+      setBottom(overlaps ? Math.max(16, window.innerHeight - bounds.top + 12) : 16);
+    }
+    const changes = new MutationObserver(measure);
+    changes.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ['data-open'] });
+    window.addEventListener('resize', measure);
+    document.addEventListener('animationend', measure, true);
+    measure();
+    return () => { resize?.disconnect(); changes.disconnect(); window.removeEventListener('resize', measure); document.removeEventListener('animationend', measure, true); };
+  }, [visible, setBottom]);
   const nextId = useRef(1);
 
   const show = useCallback((input: ToastInput) => {
@@ -141,6 +203,16 @@ export function ToastProvider({ children, maxVisible = MAX_VISIBLE }: {
   }, []);
 
   const dismiss = useCallback((id: number) => {
+    const item = regionRef.current?.querySelector(`[data-toast-id="${id}"]`);
+    if (item?.contains(document.activeElement)) {
+      const next = Array.from(regionRef.current!.querySelectorAll<HTMLElement>('li:not([inert]) .toast-close'))
+        .find(button => !item.contains(button));
+      const panel = regionRef.current!.closest<HTMLElement>('[role="dialog"]');
+      const previous = lastOutsideFocus.current;
+      const canRestore = previous?.isConnected && !previous.closest('[inert]') && !previous.matches(':disabled')
+        && (!panel || panel.contains(previous));
+      (next ?? (canRestore ? previous : panel))?.focus({ preventScroll: true });
+    }
     setRecords((rs) => rs.map((r) => (r.id === id ? { ...r, status: 'leaving' } : r)));
   }, []);
 
@@ -169,13 +241,14 @@ export function ToastProvider({ children, maxVisible = MAX_VISIBLE }: {
   return (
     <ToastContext.Provider value={api}>
       {children}
+      <div ref={fallbackRef} className="contents" />
       {/*
         容器常驻（空的时候也留一个空的 ol）—— 见文件头关于 live region
         必须在插入前就存在的那一段。
         pointer-events-none 落在容器上、auto 落在每一条上：
         没有提示条时右下角那一片不该挡住底下的按钮。
       */}
-      <section aria-label="通知" className="pointer-events-none fixed bottom-4 right-4 z-[60]">
+      {notificationHost && createPortal(<section ref={regionRef} aria-label="通知" className="pointer-events-none fixed right-4 z-[60]" style={{ bottom }}>
         <ol className="flex flex-col gap-2">
           {/*
             ⚠️ 排队的**不渲染**。
@@ -187,7 +260,7 @@ export function ToastProvider({ children, maxVisible = MAX_VISIBLE }: {
             <ToastItem key={r.id} rec={r} onDismiss={dismiss} onExited={remove} />
           ))}
         </ol>
-      </section>
+      </section>, notificationHost)}
     </ToastContext.Provider>
   );
 }
@@ -235,6 +308,9 @@ function ToastItem({ rec, onDismiss, onExited }: {
       role={assertive ? 'alert' : 'status'}
       aria-live={assertive ? 'assertive' : 'polite'}
       aria-atomic="true"
+      inert={rec.status === 'leaving'}
+      aria-hidden={rec.status === 'leaving' || undefined}
+      data-toast-id={rec.id}
       onMouseEnter={() => setPaused(true)}
       onMouseLeave={() => setPaused(false)}
       onFocus={() => setPaused(true)}

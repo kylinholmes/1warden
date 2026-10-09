@@ -20,10 +20,10 @@
  * 比统一的钥匙图标还难看。
  */
 import type { IdentityFields, VaultItem } from './model';
-import { displayDomainOf } from './url-match';
+import { displayDomainOf, displayHostnameOf } from './url-match';
 
 /**
- * 这条条目该用哪个站点的图标。
+ * 这条条目该用哪个站点的图标。保留子域名，供 UI 区分同一品牌下的服务。
  *
  * 先看条目自己存的网址，再退回**条目名**：导入进来的条目经常没有网址、
  * 名字本身就是个域名（Bitwarden 的 CSV 导出就是直接把
@@ -31,10 +31,10 @@ import { displayDomainOf } from './url-match';
  */
 export function iconDomainOf(item: VaultItem): string | null {
   for (const u of item.login?.uris ?? []) {
-    const domain = displayDomainOf(u.uri);
+    const domain = displayHostnameOf(u.uri);
     if (domain !== null) return domain;
   }
-  return displayDomainOf(item.name);
+  return displayHostnameOf(item.name);
 }
 
 /**
@@ -79,6 +79,14 @@ export function summaryOf(item: VaultItem): string | null {
         || identityName(id);
     }
 
+    case 'bankAccount':
+      return item.bankAccount?.bankName?.trim() || item.bankAccount?.nameOnAccount?.trim() || null;
+    case 'driversLicense':
+      return [item.driversLicense?.firstName, item.driversLicense?.middleName, item.driversLicense?.lastName]
+        .map((value) => value?.trim()).filter(Boolean).join(' ') || null;
+    case 'passport':
+      return [item.passport?.givenName, item.passport?.surname]
+        .map((value) => value?.trim()).filter(Boolean).join(' ') || null;
     default:
       // 笔记、SSH 密钥、以及服务端有新类型而我们还没建模的那些
       return null;
@@ -142,6 +150,8 @@ function hueOf(key: string): number {
 export function avatarOf(item: VaultItem): { text: string; hue: number } {
   // 有站点的按**域名**取色：同一个站点的多条登录应该是同一个颜色，
   // 否则「工作账号」和「私人账号」两个 GitHub 条目会一个绿一个紫
-  const key = iconDomainOf(item) ?? item.name;
+  const iconHost = iconDomainOf(item);
+  // 字母兜底的颜色仍按基础域名计算，不因新增子站图标而改变。
+  const key = (iconHost === null ? null : displayDomainOf(iconHost)) ?? item.name;
   return { text: initialsOf(item.name), hue: hueOf(key) };
 }

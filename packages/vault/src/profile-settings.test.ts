@@ -6,6 +6,22 @@ const prefs = { mode: 'system' as const, palette: 'graphite', showTypes: false }
 const device = { id: 'install-1', name: 'Windows · Edge', platform: 'windows' as const, client: 'extension' as const };
 const profile = { displayName: 'Lin', avatarDataUrl: null };
 describe('encrypted account preferences and device history', () => {
+  it('syncs icon style and preserves the selection when legacy clients omit it', () => {
+    const original = buildPreferencesItem({ ...prefs, iconStyle: 'plate' });
+    expect(parseProfileSettings(original).preferences?.iconStyle).toBe('plate');
+    const legacyEdit = buildPreferencesItem({ ...prefs, palette: 'dracula' }, original);
+    expect(parseProfileSettings(legacyEdit).preferences?.iconStyle).toBe('plate');
+    expect(parseProfileSettings(buildPreferencesItem({ ...prefs, iconStyle: 'original' }, legacyEdit)).preferences?.iconStyle).toBe('original');
+  });
+  it('defaults missing or future icon styles for display while preserving a future stored value', () => {
+    expect(validatePreferences(prefs).iconStyle ?? 'original').toBe('original');
+    const old = buildPreferencesItem(prefs);
+    const doc = JSON.parse(old.notes!);
+    doc.settings.preferences.iconStyle = 'future-style'; old.notes = JSON.stringify(doc);
+    expect(parseProfileSettings(old).preferences?.iconStyle ?? 'original').toBe('original');
+    const edited = buildPreferencesItem({ ...prefs, palette: 'ayu', iconStyle: 'original' }, old);
+    expect(JSON.parse(edited.notes!).settings.preferences.iconStyle).toBe('future-style');
+  });
   it('reads legacy profiles and preserves profile and unknown fields on settings edits', () => {
     const old = buildProfileItem(profile);
     old.notes = JSON.stringify({ ...JSON.parse(old.notes!), future: { keep: true } });

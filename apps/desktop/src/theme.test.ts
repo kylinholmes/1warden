@@ -89,4 +89,16 @@ describe('appearance persistence and system mode', () => {
     expect(() => theme.setThemePalette('graphite')).not.toThrow();
     expect(dataset.palette).toBe('graphite');
   });
+  it('defaults to original icon artwork and syncs icon style between windows without echoing writes', async () => {
+    const theme = await import('./theme'); theme.initTheme();
+    expect(theme.getIconStyle()).toBe('original'); expect(dataset.iconStyle).toBe('original');
+    theme.setIconStyle('plate');
+    expect(values.get('1warden.iconStyle')).toBe('plate'); expect(dataset.iconStyle).toBe('plate');
+    values.set('1warden.iconStyle', 'original');
+    events.get('storage')!({ key: '1warden.iconStyle', storageArea: localStorage });
+    expect(theme.getIconStyle()).toBe('original');
+    values.set('1warden.iconStyle', 'future');
+    events.get('storage')!({ key: '1warden.iconStyle', storageArea: localStorage });
+    expect(theme.getIconStyle()).toBe('original'); expect(values.get('1warden.iconStyle')).toBe('future');
+  });
 });

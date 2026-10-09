@@ -1,7 +1,8 @@
 import { decryptString, decryptBytes, DecryptError, sha256, utf8Encode, toBase64Url } from '@1warden/crypto';
 import type { SymmetricKey } from '@1warden/crypto';
 import type { CipherDto, FolderDto, CipherFieldDto } from '@1warden/api';
-import { cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
+import { cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity, emptySshKey,
+  emptyBankAccount, emptyDriversLicense, emptyPassport } from './model';
 import type {
   VaultItem, VaultFolder, LoginFields, CardFields, IdentityFields, SshKeyFields,
   CustomField, PasswordHistoryEntry, Attachment,
@@ -204,6 +205,20 @@ async function decryptIdentity(raw: NonNullable<CipherDto['identity']>, ctx: Dec
   return out;
 }
 
+/** Native types 6–8 contain only encrypted strings. Decode only known keys;
+ * unknown ciphertext stays in owner-only preservation state, never in the UI.
+ */
+async function decryptNativeFields<T extends { [K in keyof T]: string | null }>(
+  raw: unknown, out: T, ctx: DecodeContext,
+): Promise<T> {
+  const data = raw !== null && typeof raw === 'object' && !Array.isArray(raw)
+    ? raw as Record<string, unknown> : {};
+  for (const field of Object.keys(out) as Array<keyof T & string>) {
+    out[field] = (await ctx.read(data[field])).value as T[typeof field];
+  }
+  return out;
+}
+
 async function decryptFields(raw: CipherDto['fields'], ctx: DecodeContext): Promise<CustomField[]> {
   if (raw == null) return [];
   if (!Array.isArray(raw)) { ctx.failures.push('列表结构无法读取'); return []; }
@@ -276,7 +291,7 @@ export async function decryptCipher(dto: CipherDto, userKey: SymmetricKey): Prom
     },
   };
 
-  for (const field of ['login', 'card', 'identity', 'secureNote', 'sshKey'] as const) {
+  for (const field of ['login', 'card', 'identity', 'secureNote', 'sshKey', 'bankAccount', 'driversLicense', 'passport'] as const) {
     const value = dto[field];
     if (value != null && (typeof value !== 'object' || Array.isArray(value))) failures.push(`${field} 无法读取`);
   }
@@ -305,6 +320,9 @@ export async function decryptCipher(dto: CipherDto, userKey: SymmetricKey): Prom
     identity: dto.identity ? await decryptIdentity(dto.identity, ctx) : null,
     secureNote: dto.secureNote ? { type: dto.secureNote.type ?? 0 } : null,
     sshKey: dto.sshKey ? await decryptSshKey(dto.sshKey, ctx) : null,
+    bankAccount: dto.bankAccount != null ? await decryptNativeFields(dto.bankAccount, emptyBankAccount(), ctx) : null,
+    driversLicense: dto.driversLicense != null ? await decryptNativeFields(dto.driversLicense, emptyDriversLicense(), ctx) : null,
+    passport: dto.passport != null ? await decryptNativeFields(dto.passport, emptyPassport(), ctx) : null,
 
     customFields: await decryptFields(dto.fields, ctx),
     passwordHistory: await decryptHistory(dto.passwordHistory, ctx),

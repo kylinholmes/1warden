@@ -18,7 +18,7 @@ function ConnectedPreferences({ client, children }: { client: ApplicationClient;
     <fieldset disabled={!ready} className="min-w-0 space-y-6">{children(edited)}</fieldset>
     <div className="border-t border-[var(--border-subtle)] pt-1">
       <AutosaveStatus field={preferences} retry={() => { void store.retry('preferences'); }} discard={() => { store.discard('preferences'); applyPreferences(store.getSnapshot().preferences.value); }} />
-      <p className="mt-2 text-xs text-[var(--ink-tertiary)]">明暗模式、配色和侧栏分组自动加密同步。快速搜索与快捷键仅保存在各设备。</p>
+      <p className="mt-2 text-xs text-[var(--ink-tertiary)]">明暗模式、配色、图标样式和侧栏分组自动加密同步。快速搜索与快捷键仅保存在各设备。</p>
       {!ready && <p className="mt-2 text-xs text-[var(--ink-secondary)]">等待保险库完成同步后即可修改。</p>}
       {snapshot.profileSettingsError && <p role="alert" className="mt-2 text-xs text-[var(--risk)]">{snapshot.profileSettingsError}</p>}
     </div>

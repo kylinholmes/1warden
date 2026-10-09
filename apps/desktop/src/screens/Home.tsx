@@ -30,8 +30,8 @@ export function Home({ session, busy, onPick, onOther }: { session: ApplicationS
   const saved = useAccounts();
   const accounts = [...(saved ?? [])];
   if (session.account && !accounts.some(a => accountKey(a) === accountKey(session.account!))) accounts.unshift(session.account);
-  return <main aria-label="账户首页" className="below-titlebar flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
-    <div className="screen-in w-full max-w-[380px]">
+  return <main aria-label="账户首页" className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
+    <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
       <div className="mb-7 flex items-center gap-2.5"><BrandMark /><span className="text-xl font-semibold">1Warden</span></div>
       <h1 className="mb-5 text-md font-medium text-[var(--ink-secondary)]">{saved === null ? '正在读取账户' : accounts.length ? '选择要连接的账户' : '添加服务器，开始使用'}</h1>
       {saved === null ? <p className="flex items-center gap-2 text-sm text-[var(--ink-tertiary)]"><IconSpinner size={16} />正在读取账户…</p> : <AccountPicker accounts={accounts} busy={busy} onPick={onPick} onOther={onOther}

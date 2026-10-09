@@ -11,6 +11,27 @@ function deferred<T>() {
 const unlocked: ApplicationSnapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked', revision: 1 };
 
 describe('application client lifecycle', () => {
+  it.each(['lock', 'switchAccount'] as const)('rejects organization findings crossing a %s boundary', async boundary => {
+    const report = deferred<Awaited<ReturnType<ApplicationService['organizationReport']>>>();
+    const client = createApplicationClient({ snapshot: async () => unlocked, organizationReport: () => report.promise,
+      lock: async () => {}, switchAccount: async () => {} } as unknown as ApplicationService, options);
+    await client.initialize();
+    const pending = client.organizationReport(); const rejected = expect(pending).rejects.toThrow(/锁定|过期/);
+    if (boundary === 'lock') await client.lock(); else await client.switchAccount(null);
+    report.resolve({ total: 1, checked: 1, skipped: 0, duplicates: [], missingUrls: [], missingUsernames: [], lowInformationNames: [], unfiled: ['old-account-id'] });
+    await rejected; client.dispose();
+  });
+  it('refreshes visible sync failure metadata even when an explicit retry rejects', async () => {
+    let current = { ...unlocked };
+    const client = createApplicationClient({
+      snapshot: async () => current,
+      sync: async () => { current = { ...current, syncError: '同步失败', revision: 2 }; throw Error('offline'); },
+    } as unknown as ApplicationService, options);
+    await client.initialize();
+    await expect(client.sync()).rejects.toThrow('offline');
+    expect(client.getSnapshot().syncError).toBe('同步失败');
+    client.dispose();
+  });
   it('allows its own successful connection to publish the new account', async () => {
     let notify = () => {};
     let connected = false;

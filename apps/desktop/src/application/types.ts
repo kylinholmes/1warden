@@ -1,9 +1,11 @@
 import type { AccountTarget } from './account-target';
 import type {
-  UserProfile, ProfilePreferences, ProfileDeviceInput, ProfileSettings, AccountInfo, Attachment, CardFields, ConnectParams, IdentityFields,
-  ImportFormatId, LoginUri, SessionStatus, VaultFolder, VaultItem,
+  UserProfile, ProfilePreferences, ProfileDeviceInput, ProfileSettings, AccountInfo, Attachment, CardFields, ConnectParams, IdentityFields, OrganizationReport,
+  BankAccountFields, DriversLicenseFields, PassportFields, ImportFormatId, LoginUri, SessionStatus, VaultFolder, VaultItem,
 } from '@1warden/vault';
 import type { ImportOutcome, ImportPreview, ItemSummary, ReportBrief } from '@1warden/ui';
+
+export interface TrashItemSummary extends ItemSummary { restoreError: string | null }
 
 /** The UI sees a stable snapshot of display data, never a session or its keys. */
 export interface ApplicationSnapshot {
@@ -11,6 +13,8 @@ export interface ApplicationSnapshot {
   status: SessionStatus;
   account: AccountInfo | null;
   syncing: boolean;
+  syncError: string | null;
+  lastSyncedAt: number | null;
   profile: UserProfile | null;
   profileVersion: string | null;
   profileError: string | null;
@@ -29,6 +33,12 @@ export type SecretRef =
   | { kind: 'cardNumber' }
   | { kind: 'cardCode' }
   | { kind: 'privateKey' }
+  | { kind: 'bankAccountNumber' }
+  | { kind: 'bankPin' }
+  | { kind: 'bankIban' }
+  | { kind: 'licenseNumber' }
+  | { kind: 'passportNumber' }
+  | { kind: 'nationalIdentificationNumber' }
   | { kind: 'custom'; index: number }
   | { kind: 'history'; index: number };
 
@@ -47,6 +57,13 @@ export interface ItemDetailData {
   card: (Omit<CardFields, 'number' | 'code'> & { hasNumber: boolean; hasCode: boolean }) | null;
   identity: IdentityFields | null;
   sshKey: { publicKey: string | null; fingerprint: string | null; hasPrivateKey: boolean } | null;
+  bankAccount?: (Omit<BankAccountFields, 'accountNumber' | 'pin' | 'iban'> & {
+    hasAccountNumber: boolean; hasPin: boolean; hasIban: boolean;
+  }) | null;
+  driversLicense?: (Omit<DriversLicenseFields, 'licenseNumber'> & { hasLicenseNumber: boolean }) | null;
+  passport?: (Omit<PassportFields, 'passportNumber' | 'nationalIdentificationNumber'> & {
+    hasPassportNumber: boolean; hasNationalIdentificationNumber: boolean;
+  }) | null;
   customFields: { name: string; value: string | null; type: 0 | 1 | 2 | 3; linkedId: number | null; hasValue?: boolean }[];
   passwordHistory: { lastUsedDate: string }[];
   attachments: Pick<Attachment, 'id' | 'fileName' | 'size' | 'sizeName' | 'failed'>[];
@@ -74,6 +91,8 @@ export interface ApplicationCapabilities {
 /** Explicit operations, shared by the local service and the browser message bridge. */
 export interface ApplicationService {
   snapshot(): Promise<ApplicationSnapshot>;
+  /** Fetch current server data, unlike ApplicationClient.refresh which only reads a snapshot. */
+  sync(): Promise<void>;
   connect(params: ConnectParams): Promise<void>;
   connectWithTwoFactor(code: string, provider: number, remember: boolean): Promise<void>;
   unlock(password: string): Promise<void>;
@@ -91,6 +110,8 @@ export interface ApplicationService {
   toggleFavorite(id: string): Promise<void>;
   moveToFolder(id: string, folderId: string | null): Promise<void>;
   moveToTrash(id: string): Promise<void>;
+  listTrash(): Promise<TrashItemSummary[]>;
+  restoreItem(id: string): Promise<void>;
   deletePermanently(id: string): Promise<void>;
   createFolder(name: string): Promise<VaultFolder>;
   renameFolder(id: string, name: string): Promise<void>;
@@ -103,6 +124,7 @@ export interface ApplicationService {
   removePasskey(id: string, credentialId: string): Promise<void>;
   clearPasswordHistory(id: string): Promise<void>;
   securityReport(now: number): Promise<ReportBrief>;
+  organizationReport(): Promise<OrganizationReport>;
   checkBreaches(): Promise<ReportBrief['breached']>;
   parseImport(file: ImportFile): Promise<ImportPreview>;
   importData(file: ImportFile): Promise<ImportOutcome>;
@@ -148,5 +170,6 @@ export type ApplicationRequest = {
 }[ApplicationMethod];
 
 export const EMPTY_SNAPSHOT: ApplicationSnapshot = {
+  syncError: null, lastSyncedAt: null,
   revision: 0, status: 'loggedOut', account: null, syncing: false, items: [], folders: [], profile: null, profileVersion: null, profileError: null, profileReady: false,
 };

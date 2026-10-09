@@ -83,6 +83,8 @@ export interface SyncEngineOptions {
   deps: SyncDeps;
   session: VaultSession;
   onError?: (e: unknown) => void;
+  /** A restored live session already owns fresher data, including a known empty vault. */
+  hydrateCache?: boolean;
 }
 
 export interface SyncOutcome {
@@ -91,16 +93,20 @@ export interface SyncOutcome {
   failedCount: number;
 }
 
+type SessionData = Pick<VaultSession, 'items' | 'folders'>;
+
 export class SyncEngine {
   private readonly deps: SyncDeps;
   private readonly session: VaultSession;
   private readonly onError: ((e: unknown) => void) | undefined;
   private lastRevision: number | null = null;
   private inFlight: Promise<SyncOutcome> | null = null;
+  private hydratedKey: SymmetricKey | null = null;
 
   constructor(opts: SyncEngineOptions) {
     this.deps = opts.deps;
     this.session = opts.session;
+    if (opts.hydrateCache === false) this.hydratedKey = this.session.getKey();
     if (opts.onError) this.onError = opts.onError;
   }
 
@@ -138,10 +144,17 @@ export class SyncEngine {
   async hydrateFromCache(key: SymmetricKey): Promise<void> {
     const account = this.session.account;
     const sessionKey = this.session.getKey();
+    if (!sessionKey || this.hydratedKey === sessionKey) return;
+    this.hydratedKey = sessionKey;
+    // Cached ciphertext is a first-paint fallback, not authoritative enough to
+    // replace newer in-memory edits/restorations during an offline retry.
+    const items = this.session.items;
+    const folders = this.session.folders;
+    if (items.length > 0 || folders.length > 0) return;
     if (!this.deps.cache || !account) return;
     try {
       const cached = await this.deps.cache.load(account);
-      if (cached) await this.apply(cached, key, sessionKey);
+      if (cached && this.session.items === items && this.session.folders === folders) await this.apply(cached, key, sessionKey);
     } catch (e) {
       this.onError?.(e);
     }
@@ -157,8 +170,17 @@ export class SyncEngine {
     return key !== null && this.session.getKey() === key && this.session.isUnlocked();
   }
 
-  private async apply(raw: ApiSyncResult, key: SymmetricKey, sessionKey: SymmetricKey | null): Promise<number> {
-    if (!this.currentSession(sessionKey)) return 0;
+  private currentData(data: SessionData): boolean {
+    return this.session.items === data.items && this.session.folders === data.folders;
+  }
+
+  private dataSnapshot(): SessionData {
+    return { items: this.session.items, folders: this.session.folders };
+  }
+
+  private async apply(raw: ApiSyncResult, key: SymmetricKey, sessionKey: SymmetricKey | null,
+    baseline: SessionData = this.dataSnapshot()): Promise<number | null> {
+    if (!this.currentSession(sessionKey) || !this.currentData(baseline)) return null;
     // ⚠️ 服务端不做过滤 —— 分区必须在这里做，否则已删除的密码会进列表
     const { active } = partitionCiphers(raw.ciphers ?? []);
 
@@ -185,7 +207,10 @@ export class SyncEngine {
     }
 
     // Status alone is insufficient: a new unlock can finish while old decryption is pending.
-    if (this.currentSession(sessionKey)) this.session.replaceData(items, folders);
+    // Both network and decryption can overlap a committed local edit. Never
+    // replace that acknowledged write with this older server/cache snapshot.
+    if (!this.currentSession(sessionKey) || !this.currentData(baseline)) return null;
+    this.session.replaceData(items, folders);
     return failedCount;
   }
 
@@ -198,48 +223,45 @@ export class SyncEngine {
      * `getRevisionDate()` 本身是一次网络往返；排在它后面的话，
      * 「秒开」就还得先等一个请求回来 —— 那正是要省掉的东西。
      */
-    /*
-     * ⚠️ **不按 `force` 区分** —— 每次都先读缓存。
-     *
-     * 早先写成「只有 force（首次登录）才读」，理由是「首次才需要秒开」。
-     * 那条在**锁定再解锁**这条路上是错的：用户锁一次再解一次，
-     * 走的也是这条同步，而那时缓存明明在，却没有被用上 ——
-     * 表现是「我明明刚同步过，解锁还是空的」。
-     *
-     * 缓存本来就是「上次看到的样子」，任何一次同步都该先拿它垫上。
-     */
+    // Each unlock may hydrate once. Subsequent retries must retain newer local
+    // writes rather than reapplying the previous server snapshot from disk.
     const account = this.session.account;
-    if (this.deps.cache && account) {
+    await this.hydrateFromCache(opts.unlockedKey);
+
+    // A local write may finish while a response is in flight. Retry from a new
+    // server snapshot rather than sharing the per-item write queue (restore and
+    // archive already call refresh inside that queue). Bound sustained churn.
+    for (let attempt = 0; attempt < 3; attempt++) {
+      if (!this.currentSession(sessionKey)) return skipped();
+      const baseline = this.dataSnapshot();
+      const revision = await this.deps.getRevisionDate();
+      if (!this.currentSession(sessionKey)) return skipped();
+      if (!this.currentData(baseline)) continue;
+      if (opts.force !== true && this.lastRevision !== null && revision <= this.lastRevision) {
+        return skipped();
+      }
+
+      const raw = await this.deps.sync();
+      const failedCount = await this.apply(raw, opts.unlockedKey, sessionKey, baseline);
+      if (!this.currentSession(sessionKey)) return skipped();
+      // Superseded responses cannot update either the ciphertext cache or the
+      // revision marker: the next attempt must actually fetch fresh data.
+      if (failedCount === null) continue;
+      const committed = this.dataSnapshot();
+
+      // 拿到新的才写缓存。写失败不影响本次同步 —— 只是下次还得全量拉
       try {
-        const cached = await this.deps.cache.load(account);
-        if (cached) await this.apply(cached, opts.unlockedKey, sessionKey);
+        if (account) await this.deps.cache?.save(account, raw);
       } catch (e) {
-        // 缓存坏了不该让同步失败 —— 下面还会去拉真的
         this.onError?.(e);
       }
+
+      // 只有成功才推进；失败时保持原值，下次仍会真的去同步
+      if (!this.currentSession(sessionKey)) return skipped();
+      if (!this.currentData(committed)) continue;
+      this.lastRevision = revision;
+      return { skipped: false, itemCount: this.session.items.length, failedCount };
     }
-
-    if (!this.currentSession(sessionKey)) return skipped();
-    const revision = await this.deps.getRevisionDate();
-    if (!this.currentSession(sessionKey)) return skipped();
-    if (opts.force !== true && this.lastRevision !== null && revision <= this.lastRevision) {
-      return { skipped: true, itemCount: this.session.items.length, failedCount: 0 };
-    }
-
-    const raw = await this.deps.sync();
-    const failedCount = await this.apply(raw, opts.unlockedKey, sessionKey);
-    if (!this.currentSession(sessionKey)) return skipped();
-
-    // 拿到新的才写缓存。写失败不影响本次同步 —— 只是下次还得全量拉
-    try {
-      if (account) await this.deps.cache?.save(account, raw);
-    } catch (e) {
-      this.onError?.(e);
-    }
-
-    // 只有成功才推进；失败时保持原值，下次仍会真的去同步
-    if (!this.currentSession(sessionKey)) return skipped();
-    this.lastRevision = revision;
-    return { skipped: false, itemCount: this.session.items.length, failedCount };
+    throw new Error('同步期间记录持续变化，请稍后重试');
   }
 }

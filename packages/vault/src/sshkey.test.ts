@@ -140,8 +140,8 @@ describe('从 Bitwarden JSON 导入 SSH key', () => {
   /** 认不出的类型仍然当笔记 —— 但**内容要留住** */
   it('still falls back to a note for a type we do not model', () => {
     const json = JSON.stringify({ encrypted: false, folders: [], items: [
-      { id: 'b1', type: 6, name: '银行账户', notes: '账号在备注里', favorite: false },
+      { id: 'b1', type: 99, name: '未来类型', notes: '内容在备注里', favorite: false },
     ] });
-    expect(parseBitwardenJson(json).items[0]).toMatchObject({ name: '银行账户', type: 'secureNote' });
+    expect(parseBitwardenJson(json).items[0]).toMatchObject({ name: '未来类型', type: 'secureNote' });
   });
 });

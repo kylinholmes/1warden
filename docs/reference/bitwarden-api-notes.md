@@ -3,6 +3,12 @@
 > 来源：对 `dani-garcia/vaultwarden` 1.37.3、`bitwarden/server`、`bitwarden/clients` 源码的直接阅读（2026-10-04）。
 > **本文档纠正了设计文档初稿中的若干错误假设**，实现时以本文档为准。
 > 未经运行中的服务器验证 —— 全部读自源码。
+>
+> 2026-10-09 补核：原生类型 6–8 按 [Vaultwarden 1.37.4](https://github.com/dani-garcia/vaultwarden/blob/1.37.4/src/api/core/ciphers.rs)
+> 和 Bitwarden 官方 [银行账户](https://github.com/bitwarden/clients/blob/main/libs/common/src/vault/models/domain/bank-account.ts)、
+> [驾照](https://github.com/bitwarden/clients/blob/main/libs/common/src/vault/models/domain/drivers-license.ts)、
+> [护照](https://github.com/bitwarden/clients/blob/main/libs/common/src/vault/models/domain/passport.ts) 模型接入。
+> 这些类型的全部字段（包括日期）均为 EncString；不是新增自定义字段类型，后者仍仅 0–3。
 
 ---
 
@@ -445,7 +451,7 @@ Folder JSON：`{id, revisionDate, name(EncString), object:"folder"}` —— **�
 | `/api/reports/*` | Vaultwarden 完全不存在 → 报表一律客户端算 |
 | 服务端 TOTP / 密码生成端点 | 不存在（三处独立验证） |
 | `organizationUseTotp` | Vaultwarden 恒为 `true`，无信息量，不要据此做判断 |
-| 类型 6/7/8（BankAccount / DriversLicense / Passport） | 2026 年新增，老服务端不认识 → 收到时按"未知类型"只读展示，不提供编辑 |
+| 类型 6/7/8（BankAccount / DriversLicense / Passport） | 已按 1.37.4 原生合同接入；旧服务端可能拒绝写入，此时保留错误，不降级或伪装为安全笔记。真正未知类型仍只读 |
 
 ### 具体做法
 

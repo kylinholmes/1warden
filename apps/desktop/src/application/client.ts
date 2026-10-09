@@ -5,16 +5,17 @@ import {
 } from './types';
 
 export const APPLICATION_METHODS = [
-  'snapshot', 'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'search',
-  'getItem', 'getDraft', 'saveProfile', 'savePreferences', 'recordDevice', 'saveItem', 'toggleFavorite', 'moveToTrash', 'deletePermanently',
+  'snapshot', 'sync', 'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'search',
+  'getItem', 'getDraft', 'saveProfile', 'savePreferences', 'recordDevice', 'saveItem', 'toggleFavorite', 'moveToTrash', 'listTrash', 'restoreItem', 'deletePermanently',
   'createFolder', 'renameFolder', 'deleteFolder', 'moveToFolder', 'reveal', 'totp', 'downloadAttachment',
   'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory',
-  'securityReport', 'checkBreaches', 'parseImport', 'importData',
+  'securityReport', 'organizationReport', 'checkBreaches', 'parseImport', 'importData',
 ] as const satisfies readonly ApplicationMethod[];
 
 const MUTATIONS = new Set<ApplicationMethod>([
+  'sync',
   'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'savePreferences', 'recordDevice',
-  'toggleFavorite', 'moveToTrash', 'deletePermanently', 'createFolder', 'renameFolder',
+  'toggleFavorite', 'moveToTrash', 'restoreItem', 'deletePermanently', 'createFolder', 'renameFolder',
   'deleteFolder', 'moveToFolder', 'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory', 'importData',
 ]);
 

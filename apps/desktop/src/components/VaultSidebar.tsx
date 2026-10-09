@@ -2,7 +2,7 @@ import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { useEffect, useId, useLayoutEffect, useRef, type ReactNode } from 'react';
 import { createPortal } from 'react-dom';
 import type { UserProfile, VaultFolder } from '@1warden/vault';
-import { FloatingPanel, IconDice, IconFolder, IconImport, IconItems, IconMore, IconPencil, IconPlus, IconShield, IconStar, IconTrash, NavDrawer, TypeIcon } from '@1warden/ui';
+import { FloatingPanel, IconDice, IconFolder, IconImport, IconItems, IconMore, IconPencil, IconPlus, IconSearch, IconShield, IconStar, IconTrash, NavDrawer, TypeIcon } from '@1warden/ui';
 import { ProfileAccountMenu } from './ProfileAccountMenu';
 import type { VaultCategory as Category } from '../screens/vault-presentation';
 
@@ -85,7 +85,7 @@ function SidebarContent(props: SidebarProps) {
     if (key.startsWith('type:')) props.onSelect({ kind: 'type', type: key.slice(5) });
     else if (key.startsWith('folder:')) props.onSelect({ kind: 'folder', id: key.slice(7) });
     else if (key === 'generator') props.onOpenGenerator();
-    else props.onSelect({ kind: key as 'all' | 'favorites' | 'security' | 'import' });
+    else props.onSelect({ kind: key as 'all' | 'favorites' | 'security' | 'organization' | 'import' | 'trash' });
   }
   const menuFolder = menu && props.folders.find(folder => folder.id === menu.id);
   const deleteFolder = props.folders.find(folder => folder.id === deleting);
@@ -101,8 +101,10 @@ function SidebarContent(props: SidebarProps) {
           { key: 'all', label: '全部', icon: <IconItems size={16} />, count: props.counts.all },
           { key: 'favorites', label: '收藏', icon: <IconStar size={16} />, count: props.counts.favorites },
           { key: 'security', label: '安全报告', icon: <IconShield size={16} /> },
+          { key: 'organization', label: '整理与分析', icon: <IconSearch size={16} /> },
           { key: 'generator', label: '生成器', icon: <IconDice size={16} /> },
           { key: 'import', label: '导入', icon: <IconImport size={16} /> },
+          { key: 'trash', label: '回收站', icon: <IconTrash size={16} /> },
         ] },
         ...(props.showTypes && props.typeCounts.length ? [{
           key: 'types', title: '类别', collapsed: typesCollapsed,

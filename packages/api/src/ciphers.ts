@@ -1,6 +1,7 @@
 import type { HttpClient } from './http';
 import type {
   CipherDto, CipherLoginDto, CipherFieldDto, CipherPasswordHistoryDto, CipherSshKeyDto,
+  CipherBankAccountDto, CipherDriversLicenseDto, CipherPassportDto,
 } from './types';
 
 /**
@@ -10,8 +11,8 @@ import type {
  * 忘了某个字段都不会有人提醒，直到用户发现 passkey 或自定义字段没了。
  * 组装这一层的价值就在于它**知道**自己该产出什么形状，就该把它写出来。
  *
- * `card` / `identity` / `secureNote` / `sshKey` 仍是 `unknown`：
- * 前两者的字段集合随服务端版本变化，后两者是固定的小结构，暂不值得建模。
+ * Native type blocks with modeled contracts use concrete DTOs; unknown source
+ * properties are retained separately by the vault preservation layer.
  */
 export interface CipherWriteBody {
   /** Unknown native fields retained by the vault serializer. */
@@ -30,6 +31,9 @@ export interface CipherWriteBody {
   identity?: unknown;
   secureNote?: unknown;
   sshKey?: CipherSshKeyDto;
+  bankAccount?: CipherBankAccountDto;
+  driversLicense?: CipherDriversLicenseDto;
+  passport?: CipherPassportDto;
   fields?: CipherFieldDto[] | null;
   passwordHistory?: CipherPasswordHistoryDto[] | null;
   lastKnownRevisionDate?: string | null;

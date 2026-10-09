@@ -42,6 +42,64 @@ function deps(over: Partial<SyncDeps> = {}): SyncDeps {
 
 const K = makeUserKey();
 
+describe('SyncEngine retry data retention', () => {
+  it('discards a payload superseded during decryption before writing its cache or revision', async () => {
+    const s = session();
+    let release!: () => void; let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const paused = new Promise<void>(resolve => { release = resolve; });
+    let calls = 0;
+    const saved: string[][] = [];
+    const d = deps({
+      sync: async () => ({ profile: PROFILE, folders: [], collections: [],
+        ciphers: [{ id: ++calls === 1 ? 'stale' : 'fresh', type: 1 }] as never }),
+      decryptCipher: async dto => { if (dto.id === 'stale') { entered(); await paused; } return item(dto.id); },
+      cache: { load: async () => null, save: async (_account, raw) => { saved.push(raw.ciphers.map(dto => dto.id)); } },
+    });
+    const engine = new SyncEngine({ session: s, deps: d });
+    const sync = engine.sync({ unlockedKey: K, force: true });
+    await started;
+    s.replaceData([item('fresh')], []);
+    release(); await sync;
+    expect(saved).toEqual([['fresh']]);
+    expect(calls).toBe(2);
+    expect(s.items.map(value => value.id)).toEqual(['fresh']);
+    expect(engine.lastSyncedAt).toBe(100);
+  });
+
+  it('bounds retries under sustained local writes without caching or confirming superseded responses', async () => {
+    const s = session();
+    let calls = 0;
+    const save = vi.fn(async () => {});
+    const d = deps({
+      sync: async () => {
+        s.replaceData([item(`written-${++calls}`)], []);
+        return { profile: PROFILE, folders: [], collections: [], ciphers: [] };
+      },
+      cache: { load: async () => null, save },
+    });
+    const engine = new SyncEngine({ session: s, deps: d });
+    await expect(engine.sync({ unlockedKey: K, force: true })).rejects.toThrow(/持续变化/);
+    expect(calls).toBe(3);
+    expect(s.items.map(value => value.id)).toEqual(['written-3']);
+    expect(save).not.toHaveBeenCalled();
+    expect(engine.lastSyncedAt).toBeNull();
+  });
+
+  it('does not overwrite newer in-memory data with stale cache when a retry fails', async () => {
+    const s = session();
+    const cached = { profile: PROFILE, ciphers: [{ id: 'stale', type: 1 }], folders: [], collections: [] };
+    const d = deps({
+      cache: { load: async () => cached as never, save: async () => {} },
+      getRevisionDate: async () => { throw Error('offline'); },
+    });
+    s.replaceData([item('recently-restored')], []);
+    const engine = new SyncEngine({ deps: d, session: s });
+    await expect(engine.sync({ unlockedKey: K, force: true })).rejects.toThrow('offline');
+    expect(s.items.map(i => i.id)).toEqual(['recently-restored']);
+  });
+});
+
 describe('SyncEngine — revision-date 短路', () => {
   it('performs a full sync the first time', async () => {
     const d = deps();

@@ -84,6 +84,51 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
+  vaultwarden:
+    name: Real Vaultwarden 1.37.4 protocol smoke
+    needs: check
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    services:
+      vaultwarden:
+        image: vaultwarden/server:1.37.4
+        env:
+          DOMAIN: http://127.0.0.1:18083
+          SIGNUPS_ALLOWED: 'true'
+          SIGNUPS_VERIFY: 'false'
+          WEB_VAULT_ENABLED: 'false'
+          PUSH_ENABLED: 'false'
+          DISABLE_ICON_DOWNLOAD: 'true'
+          LOG_LEVEL: warn
+        ports:
+          - 127.0.0.1:18083:80
+        options: >-
+          --health-cmd /healthcheck.sh
+          --health-interval 2s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
+        with:
+          bun-version: ${{ env.BUN_VERSION }}
+      - run: bun install --frozen-lockfile
+      - name: Register, log in, save, update and sync through fresh clients
+        env:
+          VW_TEST_URL: http://127.0.0.1:18083
+          ONEWARDEN_CI_OUTPUT: ${{ runner.temp }}/1warden-ci-vaultwarden
+        run: bun run test:vaultwarden
+      - name: Upload credential-free protocol evidence even after failure
+        if: always()
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: test-results-vaultwarden
+          path: ${{ runner.temp }}/1warden-ci-vaultwarden/vaultwarden-report.json
+          if-no-files-found: warn
+          retention-days: 14
+
   extensions:
     name: Chromium and Firefox packages
     needs: check
@@ -298,7 +343,7 @@ jobs:
 
   release:
     name: Publish tagged packages
-    needs: [check, ui, extensions, macos, windows]
+    needs: [check, ui, vaultwarden, extensions, macos, windows]
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-24.04
     timeout-minutes: 10

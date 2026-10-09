@@ -14,7 +14,7 @@
 import type { StoredPasskey } from './passkey';
 import type { CipherDto } from '@1warden/api';
 
-export const ITEM_TYPES = ['login', 'secureNote', 'card', 'identity', 'sshKey', 'unknown'] as const;
+export const ITEM_TYPES = ['login', 'secureNote', 'card', 'identity', 'sshKey', 'bankAccount', 'driversLicense', 'passport', 'unknown'] as const;
 export type ItemType = (typeof ITEM_TYPES)[number];
 
 export interface LoginUri {
@@ -79,6 +79,52 @@ export interface SshKeyFields {
   privateKey: string | null;
   publicKey: string | null;
   fingerprint: string | null;
+}
+
+/** Native Bitwarden type 6. All fields are encrypted on the wire. */
+export interface BankAccountFields {
+  bankName: string | null;
+  nameOnAccount: string | null;
+  accountType: string | null;
+  accountNumber: string | null;
+  routingNumber: string | null;
+  branchNumber: string | null;
+  pin: string | null;
+  swiftCode: string | null;
+  iban: string | null;
+  bankContactPhone: string | null;
+}
+
+/** Native Bitwarden type 7. Dates remain strings, including legacy formats. */
+export interface DriversLicenseFields {
+  firstName: string | null;
+  middleName: string | null;
+  lastName: string | null;
+  dateOfBirth: string | null;
+  licenseNumber: string | null;
+  issuingCountry: string | null;
+  issuingState: string | null;
+  issueDate: string | null;
+  expirationDate: string | null;
+  issuingAuthority: string | null;
+  licenseClass: string | null;
+}
+
+/** Native Bitwarden type 8. No extension fields or custom type IDs. */
+export interface PassportFields {
+  surname: string | null;
+  givenName: string | null;
+  dateOfBirth: string | null;
+  sex: string | null;
+  birthPlace: string | null;
+  nationality: string | null;
+  issuingCountry: string | null;
+  passportNumber: string | null;
+  passportType: string | null;
+  nationalIdentificationNumber: string | null;
+  issuingAuthority: string | null;
+  issueDate: string | null;
+  expirationDate: string | null;
 }
 
 export interface SecureNoteFields {
@@ -161,6 +207,9 @@ export interface VaultItem {
   identity: IdentityFields | null;
   secureNote: SecureNoteFields | null;
   sshKey: SshKeyFields | null;
+  bankAccount?: BankAccountFields | null;
+  driversLicense?: DriversLicenseFields | null;
+  passport?: PassportFields | null;
 
   customFields: CustomField[];
   passwordHistory: PasswordHistoryEntry[];
@@ -177,9 +226,8 @@ export interface VaultFolder {
 /**
  * 数字的 CipherType → 领域类型。
  *
- * ⚠️ 6/7/8（BankAccount / DriversLicense / Passport）是 2026 年新增的，
- * **老服务端不认识**。按接口稳定性原则当作「未知类型」—— 只读展示，不提供编辑，
- * 因为编辑会把它们降级成别的类型，等于破坏数据。
+ * Vaultwarden 1.37.4 supports types 1–8. Future unmodeled types remain read-only;
+ * never reinterpret them as a different type during a save.
  */
 export function cipherTypeToItemType(raw: number): ItemType {
   switch (raw) {
@@ -188,6 +236,9 @@ export function cipherTypeToItemType(raw: number): ItemType {
     case 3: return 'card';
     case 4: return 'identity';
     case 5: return 'sshKey';
+    case 6: return 'bankAccount';
+    case 7: return 'driversLicense';
+    case 8: return 'passport';
     default: return 'unknown';
   }
 }
@@ -200,6 +251,31 @@ export function emptyLogin(): LoginFields {
 /** 每次都返回全新对象 —— 共享可变状态会让两条条目互相污染 */
 export function emptySshKey(): SshKeyFields {
   return { privateKey: null, publicKey: null, fingerprint: null };
+}
+
+export function emptyBankAccount(): BankAccountFields {
+  return {
+    bankName: null, nameOnAccount: null, accountType: null, accountNumber: null,
+    routingNumber: null, branchNumber: null, pin: null, swiftCode: null, iban: null,
+    bankContactPhone: null,
+  };
+}
+
+export function emptyDriversLicense(): DriversLicenseFields {
+  return {
+    firstName: null, middleName: null, lastName: null, dateOfBirth: null,
+    licenseNumber: null, issuingCountry: null, issuingState: null, issueDate: null,
+    expirationDate: null, issuingAuthority: null, licenseClass: null,
+  };
+}
+
+export function emptyPassport(): PassportFields {
+  return {
+    surname: null, givenName: null, dateOfBirth: null, sex: null, birthPlace: null,
+    nationality: null, issuingCountry: null, passportNumber: null, passportType: null,
+    nationalIdentificationNumber: null, issuingAuthority: null, issueDate: null,
+    expirationDate: null,
+  };
 }
 
 export function emptyCard(): CardFields {

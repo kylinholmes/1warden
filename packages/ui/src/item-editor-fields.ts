@@ -1,8 +1,10 @@
 import type { CustomField, ItemType, LoginUri, VaultItem } from '@1warden/vault';
+import { emptyBankAccount, emptyDriversLicense, emptyPassport } from '@1warden/vault';
+import { BANK_ACCOUNT_LABEL, DRIVERS_LICENSE_LABEL, PASSPORT_LABEL } from './destinations';
 
 export interface LinkedFieldTarget { id: number; label: string; key: string }
 // Native Bitwarden linked IDs, verified in docs/reference/bitwarden-api-notes.md §2.5.
-// There are no linked targets for secure notes or SSH keys.
+// Do not invent linked IDs for other types: those IDs are part of the upstream protocol.
 const LINKED_TARGETS: Partial<Record<ItemType, readonly LinkedFieldTarget[]>> = {
   login: [
     { id: 100, label: '用户名', key: 'username' },
@@ -83,7 +85,8 @@ export interface NativeEditorField {
   label: string;
   group: string;
   keys: readonly string[];
-  kind?: 'secret' | 'multiline' | 'expiry' | 'urls';
+  kind?: 'secret' | 'multiline' | 'expiry' | 'urls' | 'date' | 'compound';
+  labels?: readonly string[];
 }
 
 const IDENTITY_EDITOR_GROUPS = [
@@ -104,6 +107,11 @@ function field(id: string, label: string, group: string, kind?: NativeEditorFiel
   return { id, label, group, keys: [id], ...(kind ? { kind } : {}) };
 }
 
+// Semantic groups share one responsive row; each child keeps its own label/control.
+function compound(id: string, label: string, group: string, entries: readonly (readonly [string, string])[]): NativeEditorField {
+  return { id, label, group, keys: entries.map(([key]) => key), labels: entries.map(([, label]) => label), kind: 'compound' };
+}
+
 export function nativeEditorFields(type: ItemType): NativeEditorField[] {
   const fields: NativeEditorField[] = type === 'login' ? [
     field('login.username', '用户名', '登录'), field('login.password', '密码', '登录', 'secret'),
@@ -114,21 +122,34 @@ export function nativeEditorFields(type: ItemType): NativeEditorField[] {
     { id: 'card.expiry', label: '有效期', group: '卡片', keys: ['card.expMonth', 'card.expYear'], kind: 'expiry' },
     field('card.code', '安全码', '卡片', 'secret'),
   ] : type === 'identity' ? IDENTITY_EDITOR_GROUPS.flatMap(({ group, fields }) =>
-    fields.map(([key, label]) => field(`identity.${key}`, label, group)))
+    fields.flatMap(([key, label]) => {
+      if (key === 'firstName') return [compound('identity.name', '姓名', group,
+        [['identity.lastName', '姓'], ['identity.firstName', '名'], ['identity.middleName', '中间名']])];
+      if (key === 'middleName' || key === 'lastName' || key === 'state') return [];
+      if (key === 'city') return [compound('identity.region', '地区', group,
+        [['identity.state', '省 / 州'], ['identity.city', '城市']])];
+      return [field(`identity.${key}`, label, group)];
+    }))
   : type === 'sshKey' ? [
     field('sshKey.privateKey', '私钥', 'SSH 密钥', 'multiline'),
     field('sshKey.publicKey', '公钥', 'SSH 密钥', 'multiline'),
     field('sshKey.fingerprint', '指纹', 'SSH 密钥', 'secret'),
+  ] : type === 'bankAccount' ? [
+    ...Object.entries(BANK_ACCOUNT_LABEL).map(([key, label]) =>
+      field(`bankAccount.${key}`, label, '银行账户', ['accountNumber', 'pin', 'iban'].includes(key) ? 'secret' : undefined)),
+  ] : type === 'driversLicense' ? [
+    compound('driversLicense.name', '姓名', '驾照', [['driversLicense.lastName', '姓'], ['driversLicense.firstName', '名'], ['driversLicense.middleName', '中间名']]),
+    ...Object.entries(DRIVERS_LICENSE_LABEL).filter(([key]) => !['firstName', 'middleName', 'lastName'].includes(key)).map(([key, label]) =>
+      field(`driversLicense.${key}`, label, '驾照', key === 'licenseNumber' ? 'secret'
+        : ['dateOfBirth', 'issueDate', 'expirationDate'].includes(key) ? 'date' : undefined)),
+  ] : type === 'passport' ? [
+    compound('passport.name', '姓名', '护照', [['passport.surname', '姓'], ['passport.givenName', '名']]),
+    ...Object.entries(PASSPORT_LABEL).filter(([key]) => !['surname', 'givenName'].includes(key)).map(([key, label]) =>
+      field(`passport.${key}`, label, '护照', ['passportNumber', 'nationalIdentificationNumber'].includes(key) ? 'secret'
+        : ['dateOfBirth', 'issueDate', 'expirationDate'].includes(key) ? 'date' : undefined)),
   ] : [];
   return [...fields, field('notes', '备注', '备注', 'multiline')];
 }
-
-const MINIMAL_FIELDS: Partial<Record<ItemType, readonly string[]>> = {
-  login: ['login.username', 'login.password', 'login.uris'],
-  card: ['card.number', 'card.expiry', 'card.code'],
-  identity: ['identity.firstName', 'identity.lastName'],
-  secureNote: ['notes'], sshKey: ['sshKey.privateKey'],
-};
 
 export function nativeFieldValue(item: VaultItem, key: string): unknown {
   if (key === 'notes') return item.notes;
@@ -137,37 +158,16 @@ export function nativeFieldValue(item: VaultItem, key: string): unknown {
   return values && property ? (values as Record<string, unknown>)[property] : undefined;
 }
 
-function populated(value: unknown): boolean {
-  if (Array.isArray(value)) return value.some(entry => populated(entry.uri));
-  return value !== null && value !== undefined && value !== '';
-}
-
-/** Presentation only: never filters or modifies the saved draft. */
-export function initialVisibleFields(item: VaultItem, isNew: boolean): string[] {
-  return nativeEditorFields(item.type).filter(field =>
-    (isNew && MINIMAL_FIELDS[item.type]?.includes(field.id)) ||
-    field.keys.some(key => populated(nativeFieldValue(item, key))))
-    .map(field => field.id);
-}
-
-export function availableNativeFields(type: ItemType, visible: readonly string[]): NativeEditorField[] {
-  return nativeEditorFields(type).filter(field => field.kind === 'urls' || !visible.includes(field.id));
-}
-
 export function updateNativeField(item: VaultItem, key: string, value: string | null): VaultItem {
   if (key === 'notes') return { ...item, notes: value };
   const [group, property] = key.split('.');
-  const defaults = { login: blankLogin, card: blankCard, identity: blankIdentity, sshKey: blankSshKey };
+  const defaults = {
+    login: blankLogin, card: blankCard, identity: blankIdentity, sshKey: blankSshKey,
+    bankAccount: emptyBankAccount, driversLicense: emptyDriversLicense, passport: emptyPassport,
+  };
   if (!property || !(group! in defaults)) return item;
   const groupKey = group as keyof typeof defaults;
   return { ...item, [groupKey]: { ...defaults[groupKey](), ...item[groupKey], [property]: value } };
-}
-
-export function clearNativeField(item: VaultItem, id: string): VaultItem {
-  const field = nativeEditorFields(item.type).find(field => field.id === id);
-  if (!field) return item;
-  if (field.kind === 'urls') return { ...item, login: { ...blankLogin(), ...item.login, uris: [] } };
-  return field.keys.reduce((draft, key) => updateNativeField(draft, key, null), item);
 }
 
 export function createCustomField(type: CustomField['type'], itemType: ItemType): CustomField | null {
@@ -199,6 +199,7 @@ export function blankEditorItem(): VaultItem {
     notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
     login: blankLogin(), card: null, identity: null, secureNote: null, sshKey: null,
+    bankAccount: null, driversLicense: null, passport: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }

@@ -1,11 +1,9 @@
-import { invoke } from '@tauri-apps/api/core';
 import { copyWithAutoClear } from '@1warden/ui';
-import { detectOs } from './platform';
-import { tauriAvailable } from './capabilities';
+import { copyWindowsClipboard, usesWindowsNativeClipboard } from './native-clipboard';
 /** Main-window only: quick receives success/failure, never the copied value. */
 export async function copyQuickValue(value: string): Promise<void> {
-  if (tauriAvailable() && detectOs() === 'win') {
-    await invoke('clipboard_copy', { value });
+  if (usesWindowsNativeClipboard()) {
+    await copyWindowsClipboard(value);
     return;
   }
   await copyWithAutoClear(value);

@@ -23,6 +23,10 @@ it('handles Escape inside folder creation without sending it to the vault detail
   window.addEventListener('keydown', vaultShortcut);
   try {
     await act(() => root.render(createElement(ItemFolderPicker, { client, item, folders: [] })));
+    expect(host.querySelector('[data-item-folder]')).toBeNull();
+    expect([...host.querySelectorAll('button')].some(button => button.textContent === '新建文件夹')).toBe(false);
+    const manage = host.querySelector<HTMLButtonElement>('[aria-label="更改文件夹归类"]')!;
+    await act(() => manage.click());
     expect([...host.querySelectorAll('option')].some(option => option.textContent?.includes('新建文件夹'))).toBe(false);
     expect([...host.querySelectorAll('button')].filter(button => button.textContent === '新建文件夹')).toHaveLength(1);
     const create = [...host.querySelectorAll('button')].find(button => button.textContent === '新建文件夹')!;
@@ -33,6 +37,12 @@ it('handles Escape inside folder creation without sending it to the vault detail
     await act(() => input.dispatchEvent(escape));
     expect(host.querySelector('[data-item-folder-name]')).toBeNull();
     expect(escape.defaultPrevented).toBe(true);
+    expect(detailClosed).toBe(false);
+    const select = host.querySelector<HTMLSelectElement>('[data-item-folder]')!;
+    const closeEditor = new KeyboardEvent('keydown', { key: 'Escape', bubbles: true, cancelable: true });
+    await act(() => select.dispatchEvent(closeEditor));
+    expect(host.querySelector('[data-item-folder]')).toBeNull();
+    expect(document.activeElement).toBe(manage);
     expect(detailClosed).toBe(false);
   } finally {
     window.removeEventListener('keydown', vaultShortcut);

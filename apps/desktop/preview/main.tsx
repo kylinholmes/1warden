@@ -22,7 +22,7 @@ import { ToastProvider, useToast, type ToastInput } from '../src/components/Toas
 import { ItemEditor, installHost } from '@1warden/ui';
 import { initPlatform } from '../src/platform';
 import { initTheme, setThemeMode, type ThemeMode } from '../src/theme';
-import { emptyLogin, VaultClient, type VaultItem, type VaultFolder } from '@1warden/vault';
+import { emptyLogin, emptyIdentity, VaultClient, type VaultItem, type VaultFolder } from '@1warden/vault';
 import { createApplicationClient } from '../src/application/client';
 import { createVaultService, itemDetail } from '../src/application/service';
 import { makeUserKey } from '@1warden/crypto';
@@ -139,6 +139,22 @@ const params = new URLSearchParams(location.search);
 const which = params.get('screen') ?? params.get('state') ?? (IS_EXTENSION ? 'vault' : 'messy');
 if (which === 'clean') previewVault.getSession().replaceData(CLEAN, FOLDERS);
 if (which === 'detail') previewVault.getSession().replaceData([DETAIL], FOLDERS);
+// Built-preview regression fixtures: exercise the real list → detail → editor
+// path with partial/compound values, without a live vault or source interception.
+if (which === 'vault' && ['identity-partial', 'identity-complete', 'identity-short', 'identity-partial-two'].includes(params.get('fixture') ?? '')) {
+  const fixture = params.get('fixture');
+  const complete = fixture === 'identity-complete' || fixture === 'identity-short';
+  const short = fixture === 'identity-short' || fixture === 'identity-partial-two';
+  previewVault.getSession().replaceData([item({
+    id: 'alignment-fixture', name: '排版测试资料', type: 'identity', rawType: 4, login: null,
+    identity: { ...emptyIdentity(), firstName: short ? 'Werner' : 'Ming', city: short ? 'Anchorage' : 'SyntheticCityWithoutSpaces'.repeat(5),
+      company: 'SyntheticCompanyWithoutSpaces'.repeat(6), country: 'China',
+      ...(fixture === 'identity-partial-two' ? { lastName: 'Herzog' } : {}),
+      ...(complete ? { lastName: short ? 'Herzog' : 'Long family name', middleName: short ? 'Werner Herzog' : 'SyntheticMiddleNameWithoutSpaces'.repeat(5),
+        state: short ? 'Alaska' : 'SyntheticProvinceWithoutSpaces'.repeat(5) } : {}) },
+    customFields: [{ name: '自定义字段', value: 'SyntheticCustomValueWithoutSpaces'.repeat(6), type: 0, linkedId: null }],
+  })], FOLDERS);
+}
 
 /*
  * ⚠️ 预览也**必须装宿主**，否则「记住的账户」在预览里恒为空。

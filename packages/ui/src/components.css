@@ -16,6 +16,29 @@
  * 抽出来时如果不包，工具类就压不住它了 —— 表现是「某处的 padding 改不动」。
  */
 @layer components {
+    /* Detail controls keep their layout slot. Only fine-pointer idle actions
+       recede; keyboard focus, touch, high contrast and copy feedback stay usable.
+       Never hide the action wrapper: it may also contain a live OTP timer. */
+    @media (hover: hover) and (pointer: fine) {
+      [data-field-layout] > [data-field-actions] button:not([data-field-persistent]),
+      [data-field-layout] > button[data-field-actions]:not([data-field-persistent]) {
+        opacity: 0;
+      }
+      [data-field-layout]:is(:hover, :focus-within) > [data-field-actions] button,
+      [data-field-layout]:is(:hover, :focus-within) > button[data-field-actions],
+      [data-field-layout] > [data-field-actions] button[data-state='ok'],
+      [data-field-layout] > button[data-field-actions][data-state='ok'] {
+        opacity: 1;
+      }
+      [data-field-layout]:is(:hover, :focus-within) {
+        background-color: color-mix(in srgb, var(--surface-hover) 55%, transparent);
+      }
+    }
+    @media (forced-colors: active) {
+      [data-field-layout] > [data-field-actions] button,
+      [data-field-layout] > button[data-field-actions] { opacity: 1; }
+    }
+
     /* ── 图标块 ─────────────────────────────────────────── */
 
     /*
@@ -39,6 +62,9 @@
     .tile[data-type='identity'] { background: color-mix(in oklab, var(--teal) 14%, var(--surface-paper)); color: var(--teal); }
     .tile[data-type='secureNote'] { background: color-mix(in oklab, var(--violet) 14%, var(--surface-paper)); color: var(--violet); }
     .tile[data-type='sshKey'] { background: color-mix(in oklab, var(--favorite) 14%, var(--surface-paper)); color: var(--favorite); }
+    .tile[data-type='bankAccount'] { background: color-mix(in oklab, var(--teal) 14%, var(--surface-paper)); color: var(--teal); }
+    .tile[data-type='driversLicense'] { background: color-mix(in oklab, var(--accent) 14%, var(--surface-paper)); color: var(--accent); }
+    .tile[data-type='passport'] { background: color-mix(in oklab, var(--violet) 14%, var(--surface-paper)); color: var(--violet); }
 
     /* Navigation keeps the category color even when another row is selected. */
     .nav-icon { color: var(--accent); }
@@ -46,9 +72,11 @@
     .nav-item[data-key='type:sshKey'] .nav-icon { color: var(--favorite); }
     .nav-item[data-key='security'] .nav-icon,
     .nav-item[data-key='type:identity'] .nav-icon,
+    .nav-item[data-key='type:bankAccount'] .nav-icon,
     .nav-item[data-key^='folder:'] .nav-icon { color: var(--teal); }
     .nav-item[data-key='generator'] .nav-icon,
     .nav-item[data-key='type:secureNote'] .nav-icon { color: var(--violet); }
+    .nav-item[data-key='type:passport'] .nav-icon { color: var(--violet); }
     .nav-item[data-key='import'] .nav-icon,
     .nav-item[data-key='type:card'] .nav-icon { color: var(--rose); }
 
@@ -57,8 +85,7 @@
      *
      * 上面那套 `.tile` 是按**类型**上色的：能分清「这是登录 / 这是卡片」，
      * 但一列看下去全是同样的形状同样的颜色，**认不出是哪一条**。
-     * 现在按三层来（见 components/ItemIcon.tsx）：
-     * 站点图标 → 彩色字母徽标 → 着色的类型图标。
+     * 现在共用 ItemIcon：本地服务品牌 → 站点图标 → 彩色字母徽标 → 类型图标。
      *
      * 尺寸从 30 提到 34：行里现在是两行文字（名字 + 摘要），
      * 图标要跟这两行的高度相称。三个类各自就是那个方块，不套外层。
@@ -75,17 +102,30 @@
     .tile-img,
     .tile-avatar,
     .tile-card-brand,
+    .tile-service-brand,
     .tile-glyph {
       display: grid;
       place-items: center;
       flex: none;
       width: var(--tile-size, 34px);
       height: var(--tile-size, 34px);
-      border-radius: calc(var(--tile-size, 34px) * 0.265);
-      overflow: hidden;
     }
 
-    .tile-card-brand {
+    /* Artwork keeps its original shape/background; only its slot is normalized. */
+    .tile-img,
+    .tile-card-brand,
+    .tile-service-brand {
+      background: transparent;
+      border-radius: 0;
+      overflow: visible;
+      padding: 0;
+      box-shadow: none;
+    }
+    :root[data-icon-style='plate'] .tile-img,
+    :root[data-icon-style='plate'] .tile-card-brand,
+    :root[data-icon-style='plate'] .tile-service-brand {
+      border-radius: calc(var(--tile-size, 34px) * 0.265);
+      overflow: hidden;
       background: #fff;
       padding: 2px;
       box-shadow: inset 0 0 0 1px rgb(0 0 0 / 0.08);
@@ -97,11 +137,21 @@
       object-fit: contain;
     }
 
-    /* 站点图标：favicon 底色多半是白的，留一点内边距免得贴边裁掉边缘 */
-    .tile-img {
+    :root[data-icon-style='plate'] .tile-service-brand {
+      padding: calc(var(--tile-size, 34px) * 0.18);
+    }
+    .tile-service-brand svg,
+    .tile-service-brand img {
+      display: block;
+      width: 100%;
+      height: 100%;
       object-fit: contain;
-      background: var(--surface-paper);
-      padding: 2px;
+    }
+
+    .tile-img { object-fit: contain; }
+    .tile-service-brand .brand-monochrome { fill: var(--ink-primary); }
+    :root[data-icon-style='plate'] .tile-service-brand .brand-monochrome {
+      fill: var(--brand-ink);
     }
 
     /*
@@ -113,6 +163,8 @@
      */
     .tile-avatar,
     .tile-glyph {
+      border-radius: calc(var(--tile-size, 34px) * 0.265);
+      overflow: hidden;
       background: oklch(var(--avatar-lightness) var(--avatar-chroma) var(--h, 250));
       color: oklch(0.99 0.005 var(--h, 250));
     }
@@ -414,7 +466,9 @@
 }
 @keyframes onewarden-card-in {
   from { transform: translateX(100%); }
-  to { transform: translateX(0); }
+  /* Release the transform containing block after entering so fixed overlays
+   * (including accessible notifications inside the dialog) use the viewport. */
+  to { transform: none; }
 }
 @keyframes onewarden-card-out {
   from { transform: translateX(0); }
@@ -564,6 +618,22 @@
   }
   .field:disabled { opacity: 0.5; }
 
+  /* Native Windows/WebView menus may use a light popup even when the collapsed
+     select inherits dark-theme text. Give BOTH menu colors explicitly, including
+     selects outside .field. Keep native keyboard/selection and high-contrast UI. */
+  select { color-scheme: inherit; }
+  select option,
+  select optgroup {
+    background-color: var(--surface-overlay);
+    color: var(--ink-primary);
+  }
+  select option:disabled { color: var(--ink-tertiary); }
+  @media (forced-colors: active) {
+    select option,
+    select optgroup { background-color: Canvas; color: CanvasText; }
+    select option:disabled { color: GrayText; }
+  }
+
   /* 列表上方那个搜索框 —— 无边框，融进带子里 */
   .field-bare {
     width: 100%;
@@ -577,6 +647,23 @@
     transition: background-color var(--dur-fast) var(--ease-enter);
   }
   .field-bare::placeholder { color: var(--ink-tertiary); }
+}
+
+/* A segmented date has one shared frame, not an extra focus ring around each
+ * slot. Keep this unlayered so the app's global :focus-visible rule cannot
+ * override it; keyboard focus remains visible on the shared frame. */
+.segmented-date-field { cursor: text; }
+.segmented-date-field .date-segment,
+.segmented-date-field .date-segment:focus,
+.segmented-date-field .date-segment:focus-visible {
+  outline: none;
+  box-shadow: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+}
+@media (forced-colors: active) {
+  .segmented-date-field:focus-within { outline: 2px solid Highlight; outline-offset: 2px; }
 }
 
 /* Usable viewport width is shared by every build and useCompactLayout (layout.ts).

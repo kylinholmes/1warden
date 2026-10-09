@@ -48,6 +48,7 @@ export class VaultSession {
     // `{ onStatusChange: undefined }` 不能赋给 `{ onStatusChange?: ... }`
     this.events = {};
     if (opts.onStatusChange) this.events.onStatusChange = opts.onStatusChange;
+    if (opts.onSyncChange) this.events.onSyncChange = opts.onSyncChange;
     if (opts.onLock) this.events.onLock = opts.onLock;
     this.autoLockMs = opts.autoLockMs ?? 0;
   }

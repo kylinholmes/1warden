@@ -44,6 +44,9 @@ export function scheduleExtensionClipboardClear(value: string): Promise<void> {
 export function createExtensionApplicationClient(): ApplicationClient {
   const service: ApplicationService = {
     snapshot: () => call('snapshot'),
+    sync: () => call('sync'),
+    listTrash: () => call('listTrash'),
+    restoreItem: (...args) => call('restoreItem', ...args),
     saveProfile: (...args) => call('saveProfile', ...args),
     savePreferences: (...args) => call('savePreferences', ...args),
     recordDevice: (...args) => call('recordDevice', ...args),
@@ -64,7 +67,7 @@ export function createExtensionApplicationClient(): ApplicationClient {
     deleteAttachment: (...args) => call('deleteAttachment', ...args),
     removePasskey: (...args) => call('removePasskey', ...args),
     clearPasswordHistory: (...args) => call('clearPasswordHistory', ...args),
-    securityReport: (...args) => call('securityReport', ...args), checkBreaches: () => call('checkBreaches'),
+    securityReport: (...args) => call('securityReport', ...args), organizationReport: () => call('organizationReport'), checkBreaches: () => call('checkBreaches'),
     parseImport: (...args) => call('parseImport', ...args), importData: (...args) => call('importData', ...args),
   };
   const client = createApplicationClient(service, {

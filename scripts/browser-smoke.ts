@@ -358,13 +358,17 @@ try {
   await screenshot('detail-440');
   await click('[aria-label="隐藏"]');
   check('hide removes revealed value', !(await popup.evaluate(() => document.body.textContent)).includes(secret));
-  check('detail shows folder selection and record metadata', await popup.$('[data-item-folder]') !== null
+  const openFolderEditor = () => click('[aria-label="更改文件夹归类"]');
+  const waitForFolder = (target: string) => popup.waitForFunction((value: string) => {
+    const group = document.querySelector<HTMLElement>('[data-folder-organization]');
+    const manage = group?.querySelector<HTMLButtonElement>('[aria-label="更改文件夹归类"]');
+    return group?.dataset.folderId === value && group.getAttribute('aria-busy') !== 'true' && manage?.matches(':disabled') === false;
+  }, {}, target);
+  check('detail shows folder organization and record metadata', await popup.$('[data-folder-organization]') !== null
     && await popup.evaluate(() => ['创建时间', '更新时间', '密码更新', '记录 ID'].every(label => document.body.textContent?.includes(label))));
+  await openFolderEditor();
   await popup.select('[data-item-folder]', 'work');
-  await popup.waitForFunction(() => {
-    const picker = document.querySelector<HTMLSelectElement>('[data-item-folder]');
-    return picker?.value === 'work' && !picker.disabled;
-  });
+  await waitForFolder('work');
   const filed = await rpc('getItem', ['smoke-alpha']);
   check('detail folder choice updates the real background record and revision', filed.ok
     && filed.result.summary.folderId === 'work' && filed.result.summary.updatedAt === seed.items[0]!.updatedAt);
@@ -375,38 +379,52 @@ try {
   await click('[aria-label="加入收藏"]');
   await popup.waitForSelector('[aria-label="取消收藏"]');
   check('favoriting a filed record retains folder membership on the server', seed.items[0]!.folderId === 'work' && seed.items[0]!.favorite);
-  await click('[data-folder-organization] button::-p-text(查看)');
+  await click('[data-folder-organization] button[aria-label^="打开文件夹 "]');
   await popup.waitForFunction(() => document.querySelector('.vault-detail')?.getAttribute('data-state') === 'closed');
   check('opening the folder returns to an interactive list in a narrow window',
     await popup.$eval('.vault-list', (list: HTMLElement) => !list.inert));
   await openNavigation();
   await click('nav button::-p-text(全部)');
   await click('.vault-list li > button');
-  await popup.waitForSelector('[data-item-folder]', { visible: true });
+  await popup.waitForSelector('[aria-label="更改文件夹归类"]', { visible: true });
+  await openFolderEditor();
   rejectFolderMove = true;
   await popup.select('[data-item-folder]', '');
-  await popup.waitForSelector('.vault-detail [role="alert"]');
+  await popup.waitForSelector('[aria-label="通知"] [role="alert"]');
   check('rejected assignment leaves the saved folder selected and exposes the error',
     await popup.$eval('[data-item-folder]', (picker: HTMLSelectElement) => picker.value === 'work' && !picker.disabled)
       && (await rpc('getItem', ['smoke-alpha'])).result.summary.folderId === 'work');
+  check('one failed folder operation produces only one visible error',
+    await popup.$$eval('[role="alert"]:not([aria-hidden="true"])', (nodes: Element[]) => nodes.length === 1));
+  await click('button::-p-text(编辑)');
+  await popup.waitForSelector('#editor-title', { visible: true });
+  check('persistent error belongs to the active dialog accessibility scope',
+    await popup.$eval('[aria-label="关闭通知"]', (button: HTMLElement) => button.closest('[role="dialog"]') !== null));
   // Error notifications persist until dismissed; close this deliberate rejection before testing the editor footer.
-  await click('[aria-label="关闭通知"]');
+  if (name === 'chrome') {
+    await popup.focus('.floating-layer[data-open="true"] .panel');
+    await popup.keyboard.down('Shift');
+    await popup.keyboard.press('Tab');
+    await popup.keyboard.up('Shift');
+    check('keyboard can reach a persistent notification while the editor is open',
+      await popup.evaluate(() => document.activeElement?.getAttribute('aria-label') === '关闭通知'));
+    await popup.keyboard.press('Enter');
+    check('dismissing the notification returns keyboard focus to the editor',
+      await popup.evaluate(() => document.activeElement?.closest('[role="dialog"]') !== null));
+  } else await click('[aria-label="关闭通知"]');
+  await click('.panel-foot button::-p-text(取消)');
+  await popup.waitForSelector('#editor-title', { hidden: true });
   rejectFolderMove = false;
   await popup.select('[data-item-folder]', '');
-  await popup.waitForFunction(() => {
-    const picker = document.querySelector<HTMLSelectElement>('[data-item-folder]');
-    return picker?.value === '' && !picker.disabled;
-  });
+  await waitForFolder('');
   check('detail can remove folder membership without changing its password',
     (await rpc('getItem', ['smoke-alpha'])).result.summary.folderId === null
       && (await rpc('reveal', ['smoke-alpha', { kind: 'password' }])).result === secret);
+  await openFolderEditor();
   await click('[data-folder-organization] button::-p-text(新建文件夹)');
   await type('[data-item-folder-name]', '  Synthetic Created  ');
   await click('[data-folder-organization] button::-p-text(创建并归类)');
-  await popup.waitForFunction(() => {
-    const picker = document.querySelector<HTMLSelectElement>('[data-item-folder]');
-    return picker?.value === 'smoke-created-1' && !picker.disabled;
-  });
+  await waitForFolder('smoke-created-1');
   const createdFolderDetail = await rpc('getItem', ['smoke-alpha']);
   check('detail creates an encrypted folder and immediately assigns the selected record',
     folderCreates.length === 1 && /^2\./.test(folderCreates[0]!.name)
@@ -418,32 +436,63 @@ try {
       && !(await popup.evaluate(() => document.body.textContent)).includes(secret)
       && createdFolderDetail.result.attachments[0]?.fileName === 'smoke-attachment.txt');
   await screenshot('created-folder-detail-440');
+  await openFolderEditor();
   await popup.select('[data-item-folder]', '');
-  await popup.waitForFunction(() => {
-    const picker = document.querySelector<HTMLSelectElement>('[data-item-folder]');
-    return picker?.value === '' && !picker.disabled;
-  });
+  await waitForFolder('');
   await click('button::-p-text(编辑)');
   await popup.waitForSelector('#editor-title', { visible: true });
   check('editor loads selected record through explicit draft RPC',
     (await popup.$eval('#editor-title', (node: Element) => node.textContent)) === '编辑条目');
   await screenshot('editor-440');
-  check('saved editor omits unused native fields and retains one Add More entrance',
-    await popup.$('[aria-label="验证码"]') === null
-      && await popup.$$eval('[data-editor-add-more]', (nodes: Element[]) => nodes.length === 1));
+  const editorLayout = await popup.$$eval('[data-editor-field]', (nodes: HTMLElement[]) => nodes.map(node => {
+    const card = node.closest('.card') as HTMLElement;
+    return { field: node.dataset.editorField, height: node.getBoundingClientRect().height,
+      cardHeight: card.getBoundingClientRect().height };
+  }));
+  check('native editor fields have visible layout, not just hidden DOM',
+    editorLayout.every((row: { height: number; cardHeight: number }) => row.height > 0 && row.cardHeight > 2), JSON.stringify(editorLayout));
+  check('notes use a single section label and retain an accessible textarea',
+    await popup.$eval('[data-editor-field="notes"]', (row: HTMLElement) => row.querySelector(':scope > span') === null
+      && row.querySelector('textarea')?.getAttribute('aria-label') === '备注'));
+  check('saved editor shows all native login fields and one custom-field entrance',
+    await popup.evaluate(() => ['login.username', 'login.password', 'login.totp', 'login.uris', 'notes']
+      .every(id => document.querySelector(`[data-editor-field="${id}"]`) !== null))
+      && await popup.$('[data-editor-field] button[aria-label^="移除"]') === null
+      && await popup.$$eval('button[data-editor-add-more]', (nodes: Element[]) => nodes.length === 1
+        && nodes[0]?.textContent?.trim() === '添加自定义字段'
+        && nodes[0]?.getAttribute('aria-haspopup') === 'menu'
+        && nodes[0]?.getAttribute('aria-controls') === 'editor-add-more-menu'));
+  await click('[aria-label="用户名"]');
+  if (name === 'chrome') {
+    await popup.$eval('[aria-label="用户名"]', (input: HTMLInputElement) => input.select());
+    await popup.keyboard.press('Backspace');
+  } else await type('[aria-label="用户名"]', '');
+  check('clearing a native field keeps its control visible and editable',
+    await popup.$eval('[aria-label="用户名"]', (input: HTMLInputElement) => input.value === ''
+      && !input.disabled && input.getBoundingClientRect().height > 0));
+  await type('[aria-label="用户名"]', username);
   await click('[data-editor-add-more]');
-  check('Add More omits visible singletons and offers repeatable websites and actual custom types',
-    await popup.$('[data-add-field="login.password"]') === null && await popup.$('[data-add-field="login.uris"]') !== null
-      && await popup.$eval('#editor-add-more-menu', (menu: Element) => ['自定义 · 文本', '自定义 · 隐藏', '自定义 · 开关', '自定义 · 关联'].every(label => menu.textContent?.includes(label))));
-  await screenshot('add-more-picker-440');
-  await click('[data-add-field="login.totp"]');
+  check('custom-field menu only offers the four supported native custom types',
+    await popup.$('[role="menu"][aria-label="添加自定义字段"]') !== null
+      && await popup.$$eval('#editor-add-more-menu [role="menuitem"]', (nodes: Element[]) => nodes.length === 4
+        && nodes.every((node, index) => node.getAttribute('data-add-custom') === String(index))));
+  await screenshot('custom-field-picker-440');
+  await click('[data-editor-add-more]');
+  check('custom-field trigger toggles the picker closed', await popup.$('#editor-add-more-menu') === null);
+  await click('[data-editor-add-more]');
+  await click('[data-add-custom="1"]');
   await popup.waitForFunction(() => {
-    const input = document.querySelector<HTMLInputElement>('[aria-label="验证码"]');
+    const input = document.querySelector<HTMLInputElement>('[aria-label="字段 3 名称"]');
     return input !== null && document.activeElement === input;
   });
-  check('Add More selects and focuses the chosen native control',
-    await popup.$eval('[aria-label="验证码"]', (input: HTMLInputElement) => document.activeElement === input && input.value === ''));
-  await screenshot('optional-control-440');
+  check('custom-field selection adds a masked field and focuses its name',
+    await popup.$eval('[aria-label="字段 3 类型"]', (input: HTMLSelectElement) => input.value === '1')
+      && await popup.$eval('[aria-label="字段 3 值"]', (input: HTMLInputElement) => input.type === 'password')
+      && await popup.$('#editor-add-more-menu') === null);
+  await screenshot('custom-hidden-control-440');
+  await click('[aria-label="删除字段 3"]');
+  check('custom fields remain removable without removing native controls',
+    await popup.$('[aria-label="字段 3 名称"]') === null && await popup.$('[aria-label="验证码"]') !== null);
 
   check('editor exposes one cancel action without a duplicate header close', await popup.$('.panel-head [aria-label="关闭"]') === null);
   await click('.panel-foot button::-p-text(取消)');
@@ -458,8 +507,7 @@ try {
     && await popup.$eval('[aria-label="网址 3 匹配方式"]', (input: HTMLSelectElement) => input.value === '3'));
   await popup.$eval('[aria-label="删除网址 2"]', (button: HTMLElement) => button.scrollIntoView({ block: 'center' }));
   await click('[aria-label="删除网址 2"]');
-  await click('[data-editor-add-more]');
-  await click('[data-add-field="login.uris"]');
+  await click('[data-editor-add-url]');
   await type('[aria-label="网址 3"]', 'https://new.example.invalid');
   await click('[data-editor-url="2"] summary');
   await popup.select('[aria-label="网址 3 匹配方式"]', '5');
@@ -509,6 +557,67 @@ try {
     await openNavigation();
     await click(`nav button::-p-text(${label})`);
   }
+  const organizationWriteCounts = () => JSON.stringify({ cipherWrites: cipherWrites.length,
+    cipherCreates: cipherCreates.length, folderRequests: folderRequests.length, folderCreates: folderCreates.length });
+  const beforeOrganization = organizationWriteCounts();
+  const organization = await rpc('organizationReport');
+  const organizationText = JSON.stringify(organization);
+  check('organization RPC returns only local findings without passwords, keys or login contents', organization.ok
+    && organization.result.total === 2 && organization.result.checked === 2 && organization.result.skipped === 0
+    && organization.result.duplicates.some((group: { kind: string; itemIds: string[] }) => group.kind === 'similar'
+      && group.itemIds.includes('smoke-alpha') && group.itemIds.includes('smoke-zulu'))
+    && !organizationText.includes(secret) && !organizationText.includes('userKey')
+    && !organizationText.includes(username) && !organizationText.includes(siteUrl));
+  check('organization RPC does not write or create ciphers or folders', organizationWriteCounts() === beforeOrganization);
+  await navigation('整理与分析');
+  await popup.waitForSelector('main[aria-label="整理与分析"] select[aria-label="整理分类"]', { visible: true });
+  const organizationCategories = [
+    ['identical', '已检查内容一致'], ['similar', '疑似重复'], ['missingUrls', '未填写网址'],
+    ['missingUsernames', '未填写用户名'], ['lowInformationNames', '名称信息少'], ['unfiled', '未分类'],
+  ] as const;
+  check('organization exposes all six distinct local finding categories', await popup.$$eval(
+    'main[aria-label="整理与分析"] select option', (options: HTMLOptionElement[], expected: string[]) =>
+      options.length === expected.length && options.every((option, index) => option.value === expected[index]),
+    organizationCategories.map(([id]) => id)));
+  for (const [id, label] of organizationCategories) {
+    await popup.select('main[aria-label="整理与分析"] select', id);
+    await popup.waitForFunction((label: string) => document.querySelector('main[aria-label="整理与分析"] h2:not(.sr-only)')?.textContent === label, {}, label);
+  }
+  check('organization category filtering updates the current findings without navigation', true);
+  await popup.select('main[aria-label="整理与分析"] select', 'similar');
+  await popup.waitForSelector('main[aria-label="整理与分析"] button[aria-label="编辑「Alpha smoke login」"]', { visible: true });
+  check('organization groups show readable summaries without revealed passwords', await popup.$eval(
+    'main[aria-label="整理与分析"]', (node: HTMLElement, expected: { username: string; secret: string }) =>
+      node.textContent?.includes('Alpha smoke login') === true && node.textContent.includes('Zulu smoke login')
+      && node.textContent.includes(expected.username) && !node.textContent.includes(expected.secret), { username, secret }));
+  check('organization has one shared back button and no duplicate close action', await popup.$$eval(
+    'main[aria-label="整理与分析"] [data-page-back]', (nodes: Element[]) => nodes.length === 1)
+    && await popup.$('main[aria-label="整理与分析"] button[aria-label^="关闭"]') === null);
+  if (await popup.$('button[aria-label="关闭通知"]') !== null) {
+    await click('button[aria-label="关闭通知"]');
+    await popup.waitForFunction(() => !document.querySelector('button[aria-label="关闭通知"]'));
+  }
+  await screenshot('organization-440');
+  // The production action popup has a fixed 440x600 surface; wide layouts are
+  // covered by the desktop preview rather than resizing this privileged page.
+  await click('main[aria-label="整理与分析"] button[aria-label="编辑「Alpha smoke login」"]');
+  await popup.waitForSelector('[aria-labelledby="editor-title"]', { visible: true });
+  check('organization edit opens the existing editor above the same filtered report', await popup.$eval(
+    'main[aria-label="整理与分析"] select', (node: HTMLSelectElement) => node.value === 'similar')
+    && await popup.$$eval('main[aria-label="整理与分析"] button[aria-label^="编辑「"]',
+      (nodes: HTMLButtonElement[]) => nodes.length === 2 && nodes.every(node => node.disabled)));
+  await click('.panel-foot button::-p-text(取消)');
+  await popup.waitForFunction(() => !document.querySelector('#editor-title')
+    && (document.querySelector('main[aria-label="整理与分析"] select') as HTMLSelectElement | null)?.value === 'similar');
+  check('organization edit cancellation preserves category and restores reachable report focus', await popup.evaluate(() => {
+    const active = document.activeElement;
+    return !!active && active !== document.body && active.closest('main[aria-label="整理与分析"]') !== null
+      && !active.closest('[inert]');
+  }));
+  check('organization navigation, filtering and canceled editing remain read-only', organizationWriteCounts() === beforeOrganization);
+  await click('main[aria-label="整理与分析"] [data-page-back]');
+  await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
+  check('organization shared back returns to the vault list', await popup.$('main[aria-label="整理与分析"]') === null);
   await navigation('生成器');
   await popup.waitForSelector('[aria-labelledby="generator-title"] [data-page-back]', { visible: true });
   check('generator opens from shared navigation', true);

@@ -98,6 +98,8 @@ const strings = (count: number) => (args: unknown[]) => args.length === count &&
 const file = (v: unknown) => object(v) && string(v['name']) && string(v['dataBase64']) && string(v['format']);
 const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
   snapshot: none,
+  sync: none,
+  listTrash: none, restoreItem: strings(1),
   switchAccount: (a) => {
     if (a.length !== 1) return false;
     if (a[0] === null) return true;
@@ -128,28 +130,33 @@ const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
   reveal: (a) => {
     if (a.length !== 2 || !string(a[0]) || !object(a[1])) return false;
     const field = a[1];
-    return ['password', 'cardNumber', 'cardCode', 'privateKey'].includes(String(field['kind']))
+    return ['password', 'cardNumber', 'cardCode', 'privateKey', 'bankAccountNumber', 'bankPin', 'bankIban',
+      'licenseNumber', 'passportNumber', 'nationalIdentificationNumber'].includes(String(field['kind']))
       || (['custom', 'history'].includes(String(field['kind'])) && Number.isInteger(field['index']) && Number(field['index']) >= 0);
   },
-  totp: strings(1), downloadAttachment: strings(2), securityReport: (a) => a.length === 1 && number(a[0]),
+  totp: strings(1), downloadAttachment: strings(2), securityReport: (a) => a.length === 1 && number(a[0]), organizationReport: none,
   uploadAttachment: strings(3), deleteAttachment: strings(2), removePasskey: strings(2), clearPasswordHistory: strings(1),
   checkBreaches: none, parseImport: (a) => a.length === 1 && file(a[0]), importData: (a) => a.length === 1 && file(a[0]),
 };
 
 const mutations = new Set<ApplicationMethod>([
+  'sync',
   'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'savePreferences', 'recordDevice', 'toggleFavorite',
-  'moveToTrash', 'deletePermanently', 'createFolder', 'renameFolder', 'deleteFolder', 'moveToFolder',
+  'moveToTrash', 'restoreItem', 'deletePermanently', 'createFolder', 'renameFolder', 'deleteFolder', 'moveToFolder',
   'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory', 'importData',
 ]);
 
 /** In-memory reads must not wait for network writes or an unresponsive webpage. */
 export const LOCAL_READS = new Set<ApplicationMethod>([
-  'snapshot', 'search', 'getItem', 'getDraft', 'reveal', 'totp', 'securityReport',
+  'snapshot', 'search', 'getItem', 'getDraft', 'reveal', 'totp', 'securityReport', 'organizationReport',
 ]);
 
 function invoke(service: ApplicationService, request: ApplicationRequest): Promise<unknown> {
   // Explicit dispatch prevents inherited methods or new VaultClient methods from becoming RPCs.
   switch (request.method) {
+    case 'sync': return service.sync(...request.args);
+    case 'listTrash': return service.listTrash(...request.args);
+    case 'restoreItem': return service.restoreItem(...request.args);
     case 'saveProfile': return service.saveProfile(...request.args);
     case 'savePreferences': return service.savePreferences(...request.args);
     case 'recordDevice': return service.recordDevice(...request.args);
@@ -179,6 +186,7 @@ function invoke(service: ApplicationService, request: ApplicationRequest): Promi
     case 'removePasskey': return service.removePasskey(...request.args);
     case 'clearPasswordHistory': return service.clearPasswordHistory(...request.args);
     case 'securityReport': return service.securityReport(...request.args);
+    case 'organizationReport': return service.organizationReport(...request.args);
     case 'checkBreaches': return service.checkBreaches(...request.args);
     case 'parseImport': return service.parseImport(...request.args);
     case 'importData': return service.importData(...request.args);

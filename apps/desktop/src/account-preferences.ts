@@ -1,11 +1,11 @@
 import { DEFAULT_PROFILE_PREFERENCES, validatePreferences, type ProfilePreferences } from '@1warden/vault';
 import type { ApplicationSnapshot } from './application/types';
-import { getThemeMode, getThemePalette, setThemeMode, setThemePalette, subscribeTheme } from './theme';
+import { getThemeMode, getThemePalette, getIconStyle, setThemeMode, setThemePalette, setIconStyle, subscribeTheme } from './theme';
 import { isPalette } from './theme-palettes';
 import { getShowTypes, setShowTypes, subscribeShowTypes } from './prefs';
 
 export function localPreferences(): ProfilePreferences {
-  return { mode: getThemeMode(), palette: getThemePalette(), showTypes: getShowTypes() };
+  return { mode: getThemeMode(), palette: getThemePalette(), showTypes: getShowTypes(), iconStyle: getIconStyle() };
 }
 export const localPreferencesSignature = () => JSON.stringify(localPreferences());
 export function subscribePreferences(fn: () => void): () => void {
@@ -13,6 +13,7 @@ export function subscribePreferences(fn: () => void): () => void {
 }
 export function applyPreferences(value: ProfilePreferences): void {
   setThemeMode(value.mode); setThemePalette(isPalette(value.palette) ? value.palette : 'original'); setShowTypes(value.showTypes);
+  setIconStyle(value.iconStyle ?? 'original');
 }
 
 /** Read-only projection: receiving a sync must never echo a write back to the vault. */

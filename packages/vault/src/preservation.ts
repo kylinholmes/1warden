@@ -78,7 +78,7 @@ export function preserveCipherData(item: VaultItem, body: CipherWriteBody): Ciph
     'attachments', 'permissions', 'edit', 'viewPassword', 'organizationUseTotp', 'encryptedFor',
     'lastKnownRevisionDate']) delete source[name];
   const result = { ...source, ...body, organizationId: state.source.organizationId ?? null } as CipherWriteBody;
-  for (const name of ['login', 'card', 'identity', 'secureNote', 'sshKey'] as const) {
+  for (const name of ['login', 'card', 'identity', 'secureNote', 'sshKey', 'bankAccount', 'driversLicense', 'passport'] as const) {
     if (body[name] != null) result[name] = { ...object(source[name]), ...object(body[name]) } as never;
     else if (item.type !== state.baseline.type) delete result[name];
   }

@@ -18,6 +18,7 @@ import type {
   ImportedCard, ImportedField, ImportedIdentity, ImportedItem, ImportedType,
   ImportResult, ImportedUri, ImportedSshKey,
 } from './import';
+import { emptyBankAccount, emptyDriversLicense, emptyPassport } from './model';
 
 export interface JsonFormatGuess {
   id: string;
@@ -113,6 +114,9 @@ function bitwardenType(n: unknown): ImportedType {
     case 3: return 'card';
     case 4: return 'identity';
     case 5: return 'sshKey';
+    case 6: return 'bankAccount';
+    case 7: return 'driversLicense';
+    case 8: return 'passport';
     case 2: return 'secureNote';
     default: return 'secureNote';
   }
@@ -133,6 +137,18 @@ function sshKeyOf(raw: unknown): ImportedSshKey | null {
     publicKey: str(o['publicKey']),
     fingerprint: str(o['fingerprint']),
   };
+}
+
+/** Preserve string values exactly, including leading zeros and date formats. */
+function nativeFieldsOf<T extends { [K in keyof T]: string | null }>(raw: unknown, out: T): T {
+  const data = obj(raw);
+  if (!data) throw new Error('原生条目类型的数据缺失或格式不正确');
+  for (const field of Object.keys(out) as Array<keyof T & string>) {
+    const value = data[field];
+    if (value != null && typeof value !== 'string') throw new Error(`原生字段 ${field} 不是文本，未导入以免丢失内容`);
+    out[field] = (value ?? null) as T[typeof field];
+  }
+  return out;
 }
 
 /**
@@ -196,6 +212,16 @@ export function parseBitwardenJson(text: string): ImportResult {
       return { uri: str(uo['uri']) ?? '', match: typeof uo['match'] === 'number' ? uo['match'] : null };
     }).filter((u) => u.uri.length > 0);
 
+    let nativeFields: Pick<ImportedItem, 'bankAccount' | 'driversLicense' | 'passport'> = {};
+    try {
+      if (type === 'bankAccount') nativeFields = { bankAccount: nativeFieldsOf(o['bankAccount'], emptyBankAccount()) };
+      if (type === 'driversLicense') nativeFields = { driversLicense: nativeFieldsOf(o['driversLicense'], emptyDriversLicense()) };
+      if (type === 'passport') nativeFields = { passport: nativeFieldsOf(o['passport'], emptyPassport()) };
+    } catch (error) {
+      skipped.push({ rowNumber, reason: error instanceof Error ? error.message : '原生条目无法读取' });
+      continue;
+    }
+
     items.push({
       name,
       type,
@@ -214,6 +240,7 @@ export function parseBitwardenJson(text: string): ImportResult {
       card: type === 'card' ? cardOf(o['card']) : null,
       identity: type === 'identity' ? identityOf(o['identity']) : null,
       sshKey: type === 'sshKey' ? sshKeyOf(o['sshKey']) : null,
+      ...nativeFields,
       customFields: fieldsOf(o['fields']),
       rowNumber,
     });

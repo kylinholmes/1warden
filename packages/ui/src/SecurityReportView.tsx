@@ -321,9 +321,9 @@ function Clean({ text }: { text: string }) {
 
 function Row({ label, detail }: { label: string; detail: string }) {
   return (
-    <div className="flex items-baseline justify-between gap-4 border-b border-[var(--border-subtle)] px-4 py-2.5 last:border-b-0">
-      <span className="min-w-0 shrink-0 truncate text-md">{label}</span>
-      <span className="min-w-0 truncate text-right text-xs text-[var(--ink-tertiary)]" title={detail}>
+    <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-[var(--border-subtle)] px-4 py-2.5 last:border-b-0">
+      <span className="min-w-0 flex-[1_1_14rem] break-words text-md">{label}</span>
+      <span className="min-w-0 break-words text-xs text-[var(--ink-tertiary)]" title={detail}>
         {detail}
       </span>
     </div>

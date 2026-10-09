@@ -29,6 +29,47 @@ describe('application message authority', () => {
 });
 
 describe('application dispatcher', () => {
+  it('accepts only a no-argument organization report and treats it as a local read', async () => {
+    const run = createSerialRunner(); let release!: () => void; let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const write = run(async () => { entered(); await new Promise<void>(resolve => { release = resolve; }); });
+    await started;
+    let mutations = 0;
+    const report = { total: 0, checked: 0, skipped: 0, duplicates: [], missingUrls: [], missingUsernames: [], lowInformationNames: [], unfiled: [] };
+    const dispatch = createApplicationDispatcher({ organizationReport: async () => report } as unknown as ApplicationService,
+      { run, afterMutation: async () => { mutations++; } });
+    try {
+      await expect(dispatch({ method: 'organizationReport', args: ['unexpected'] })).rejects.toThrow('无效的操作参数');
+      await expect(Promise.race([dispatch({ method: 'organizationReport', args: [] }),
+        new Promise(resolve => setTimeout(() => resolve('blocked'), 100))])).resolves.toEqual(report);
+      expect(mutations).toBe(0);
+    } finally { release(); await write; }
+  });
+  it.each(['lock', 'switchAccount'] as const)('cancels a pending organization report on %s', async boundary => {
+    let finish!: () => void; let entered!: () => void;
+    const started = new Promise<void>(resolve => { entered = resolve; });
+    const dispatch = createApplicationDispatcher({ organizationReport: async () => {
+      entered(); await new Promise<void>(resolve => { finish = resolve; }); return { unfiled: ['old-account-id'] };
+    }, lock: async () => {}, switchAccount: async () => {} } as unknown as ApplicationService);
+    const reading = dispatch({ method: 'organizationReport', args: [] }); const rejected = expect(reading).rejects.toThrow(/取消/);
+    await started;
+    await dispatch({ method: boundary, args: boundary === 'lock' ? [] : [null] }); finish(); await rejected;
+  });
+  it('allows explicit no-argument sync and publishes a failed retry state', async () => {
+    let changed = 0;
+    const dispatch = createApplicationDispatcher({ sync: async () => { throw Error('offline'); } } as unknown as ApplicationService,
+      { onChanged: () => { changed++; } });
+    await expect(dispatch({ method: 'sync', args: ['unexpected'] })).rejects.toThrow('无效的操作参数');
+    await expect(dispatch({ method: 'sync', args: [] })).rejects.toThrow('offline');
+    expect(changed).toBe(1);
+  });
+  it('allows only the explicit bank/document secret references', async () => {
+    const dispatch = createApplicationDispatcher({ reveal: async (_id: string, field: { kind: string }) => field.kind } as unknown as ApplicationService);
+    for (const kind of ['bankAccountNumber', 'bankPin', 'bankIban', 'licenseNumber', 'passportNumber', 'nationalIdentificationNumber']) {
+      await expect(dispatch({ method: 'reveal', args: ['record', { kind }] })).resolves.toBe(kind);
+    }
+    await expect(dispatch({ method: 'reveal', args: ['record', { kind: 'bankAccount' }] })).rejects.toThrow('无效的操作参数');
+  });
   it('returns the authoritative folder ID so the caller can assign an item', async () => {
     const folder = { id: 'server-folder-id', name: 'Work', nameFailed: false, updatedAt: '2026-10-09' };
     const dispatch = createApplicationDispatcher({ createFolder: async () => folder } as unknown as ApplicationService);

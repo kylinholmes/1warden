@@ -1,0 +1,546 @@
+{
+  "version": "16.34.0",
+  "icons": {
+    "github": {
+      "title": "GitHub",
+      "slug": "github",
+      "hex": "181717",
+      "source": "https://github.com/logos",
+      "guidelines": "https://github.com/logos"
+    },
+    "gitlab": {
+      "title": "GitLab",
+      "slug": "gitlab",
+      "hex": "FC6D26",
+      "source": "https://about.gitlab.com/press/press-kit/",
+      "guidelines": "https://about.gitlab.com/handbook/marketing/corporate-marketing/brand-activation/trademark-guidelines/"
+    },
+    "gitea": {
+      "title": "Gitea",
+      "slug": "gitea",
+      "hex": "609926",
+      "source": "https://github.com/go-gitea/gitea/blob/e0c753e770a64cda5e3900aa1da3d7e1f3263c9a/assets/logo.svg"
+    },
+    "codeberg": {
+      "title": "Codeberg",
+      "slug": "codeberg",
+      "hex": "2185D0",
+      "source": "https://codeberg.org/Codeberg/Design/src/commit/ac514aa9aaa2457d4af3c3e13df3ab136d22a49a/logo/special/codeberg-logo_special_fake-transaprency.svg",
+      "guidelines": "https://codeberg.org/Codeberg/Design",
+      "license": {
+        "type": "CC0-1.0"
+      }
+    },
+    "bitbucket": {
+      "title": "Bitbucket",
+      "slug": "bitbucket",
+      "hex": "0052CC",
+      "source": "https://atlassian.design/resources/logo-library",
+      "guidelines": "https://atlassian.design/foundations/logos"
+    },
+    "google": {
+      "name": "Google",
+      "file": "google.png",
+      "url": "https://developers.google.com/static/identity/images/g-logo.png",
+      "source": "https://developers.google.com/identity/branding-guidelines",
+      "sha256": "d1ce9c2af0b10a7333abc99bc706f9a6a199e5b65bf3e3009624f076b8638e6a"
+    },
+    "gmail": {
+      "title": "Gmail",
+      "slug": "gmail",
+      "hex": "EA4335",
+      "source": "https://fonts.gstatic.com/s/i/productlogos/gmail_2020q4/v8/192px.svg"
+    },
+    "apple": {
+      "title": "Apple",
+      "slug": "apple",
+      "hex": "000000",
+      "source": "https://www.apple.com"
+    },
+    "claude": {
+      "title": "Claude",
+      "slug": "claude",
+      "hex": "D97757",
+      "source": "https://claude.ai"
+    },
+    "anthropic": {
+      "title": "Anthropic",
+      "slug": "anthropic",
+      "hex": "191919",
+      "source": "https://www.anthropic.com"
+    },
+    "deepseek": {
+      "title": "DeepSeek",
+      "slug": "deepseek",
+      "hex": "5786FE",
+      "source": "https://www.deepseek.com"
+    },
+    "bilibili": {
+      "title": "Bilibili",
+      "slug": "bilibili",
+      "hex": "00A1D6",
+      "source": "https://www.bilibili.com"
+    },
+    "qq": {
+      "title": "QQ",
+      "slug": "qq",
+      "hex": "1EBAFC",
+      "source": "https://en.wikipedia.org/wiki/File:Tencent_QQ.svg",
+      "guidelines": "https://qq.design/brand/BrandDesign/Logo"
+    },
+    "wechat": {
+      "title": "WeChat",
+      "slug": "wechat",
+      "hex": "07C160",
+      "source": "https://wechat.design/tool/brand",
+      "guidelines": "https://wechat.design/brand/main-brand"
+    },
+    "baidu": {
+      "title": "Baidu",
+      "slug": "baidu",
+      "hex": "2932E1",
+      "source": "https://www.baidu.com"
+    },
+    "zhihu": {
+      "title": "Zhihu",
+      "slug": "zhihu",
+      "hex": "0084FF",
+      "source": "https://www.zhihu.com"
+    },
+    "v2ex": {
+      "title": "V2EX",
+      "slug": "v2ex",
+      "hex": "1F1F1F",
+      "source": "https://www.v2ex.com"
+    },
+    "xiaomi": {
+      "title": "Xiaomi",
+      "slug": "xiaomi",
+      "hex": "FF6900",
+      "source": "https://www.mi.com/global"
+    },
+    "huawei": {
+      "title": "Huawei",
+      "slug": "huawei",
+      "hex": "FF0000",
+      "source": "https://e.huawei.com/ph/material/partner/0a72728b864949c48b22106454352483",
+      "guidelines": "https://e.huawei.com/ph/material/partner/0a72728b864949c48b22106454352483"
+    },
+    "steam": {
+      "title": "Steam",
+      "slug": "steam",
+      "hex": "000000",
+      "source": "https://partner.steamgames.com/doc/marketing/branding",
+      "guidelines": "https://partner.steamgames.com/doc/marketing/branding"
+    },
+    "discord": {
+      "title": "Discord",
+      "slug": "discord",
+      "hex": "5865F2",
+      "source": "https://discord.com/branding",
+      "guidelines": "https://discord.com/branding"
+    },
+    "telegram": {
+      "title": "Telegram",
+      "slug": "telegram",
+      "hex": "26A5E4",
+      "source": "https://telegram.org/tour/screenshots"
+    },
+    "signal": {
+      "title": "Signal",
+      "slug": "signal",
+      "hex": "3B45FD",
+      "source": "https://signal.org/brand",
+      "guidelines": "https://signal.org/brand"
+    },
+    "notion": {
+      "title": "Notion",
+      "slug": "notion",
+      "hex": "000000",
+      "source": "https://www.notion.so"
+    },
+    "figma": {
+      "title": "Figma",
+      "slug": "figma",
+      "hex": "F24E1E",
+      "source": "https://www.figma.com/using-the-figma-brand/",
+      "guidelines": "https://www.figma.com/using-the-figma-brand/"
+    },
+    "linear": {
+      "title": "Linear",
+      "slug": "linear",
+      "hex": "5E6AD2",
+      "source": "https://linear.app"
+    },
+    "obsidian": {
+      "title": "Obsidian",
+      "slug": "obsidian",
+      "hex": "7C3AED",
+      "source": "https://obsidian.md",
+      "guidelines": "https://obsidian.md/brand"
+    },
+    "dropbox": {
+      "title": "Dropbox",
+      "slug": "dropbox",
+      "hex": "0061FF",
+      "source": "https://www.dropbox.com/branding"
+    },
+    "proton": {
+      "title": "Proton",
+      "slug": "proton",
+      "hex": "6D4AFF",
+      "source": "https://proton.me/media/kit"
+    },
+    "protonmail": {
+      "title": "Proton Mail",
+      "slug": "protonmail",
+      "hex": "6D4AFF",
+      "source": "https://proton.me/media/kit"
+    },
+    "mega": {
+      "title": "MEGA",
+      "slug": "mega",
+      "hex": "D9272E",
+      "source": "https://mega.io/media"
+    },
+    "cloudflare": {
+      "title": "Cloudflare",
+      "slug": "cloudflare",
+      "hex": "F38020",
+      "source": "https://www.cloudflare.com/logo/",
+      "guidelines": "https://www.cloudflare.com/trademark/"
+    },
+    "vercel": {
+      "title": "Vercel",
+      "slug": "vercel",
+      "hex": "000000",
+      "source": "https://vercel.com/geist/brands",
+      "guidelines": "https://vercel.com/geist/brands"
+    },
+    "netlify": {
+      "title": "Netlify",
+      "slug": "netlify",
+      "hex": "00C7B7",
+      "source": "https://www.netlify.com/press/",
+      "guidelines": "https://www.netlify.com/press/",
+      "aliases": {
+        "dup": [
+          {
+            "title": "Netlify CMS",
+            "hex": "C9FA4B",
+            "source": "https://www.netlifycms.org"
+          }
+        ]
+      }
+    },
+    "digitalocean": {
+      "title": "DigitalOcean",
+      "slug": "digitalocean",
+      "hex": "0080FF",
+      "source": "https://www.digitalocean.com/press/",
+      "guidelines": "https://www.digitalocean.com/press/"
+    },
+    "hetzner": {
+      "title": "Hetzner",
+      "slug": "hetzner",
+      "hex": "D50C2D",
+      "source": "https://www.hetzner.com"
+    },
+    "docker": {
+      "title": "Docker",
+      "slug": "docker",
+      "hex": "2496ED",
+      "source": "https://www.docker.com/company/newsroom/media-resources"
+    },
+    "npm": {
+      "title": "npm",
+      "slug": "npm",
+      "hex": "CB3837",
+      "source": "https://www.npmjs.com",
+      "guidelines": "https://docs.npmjs.com/policies/logos-and-usage"
+    },
+    "pypi": {
+      "title": "PyPI",
+      "slug": "pypi",
+      "hex": "3775A9",
+      "source": "https://pypi.org"
+    },
+    "tailscale": {
+      "title": "Tailscale",
+      "slug": "tailscale",
+      "hex": "242424",
+      "source": "https://tailscale.com/press"
+    },
+    "reddit": {
+      "title": "Reddit",
+      "slug": "reddit",
+      "hex": "FF4500",
+      "source": "https://www.redditinc.com/brand",
+      "guidelines": "https://www.redditinc.com/brand"
+    },
+    "youtube": {
+      "title": "YouTube",
+      "slug": "youtube",
+      "hex": "FF0000",
+      "source": "https://www.youtube.com/howyoutubeworks/resources/brand-resources/#logos-icons-and-colors",
+      "guidelines": "https://www.youtube.com/howyoutubeworks/resources/brand-resources/#logos-icons-and-colors"
+    },
+    "spotify": {
+      "title": "Spotify",
+      "slug": "spotify",
+      "hex": "1ED760",
+      "source": "https://developer.spotify.com/documentation/general/design-and-branding/#using-our-logo",
+      "guidelines": "https://developer.spotify.com/documentation/general/design-and-branding/#using-our-logo"
+    },
+    "netflix": {
+      "title": "Netflix",
+      "slug": "netflix",
+      "hex": "E50914",
+      "source": "https://brand.netflix.com/en/assets/logos",
+      "guidelines": "https://brand.netflix.com/en/assets/logos"
+    },
+    "twitch": {
+      "title": "Twitch",
+      "slug": "twitch",
+      "hex": "9146FF",
+      "source": "https://brand.twitch.tv",
+      "guidelines": "https://brand.twitch.tv"
+    },
+    "x": {
+      "title": "X",
+      "slug": "x",
+      "hex": "000000",
+      "source": "https://x.com",
+      "guidelines": "https://about.x.com/en/who-we-are/brand-toolkit",
+      "aliases": {
+        "aka": [
+          "Twitter"
+        ]
+      }
+    },
+    "facebook": {
+      "title": "Facebook",
+      "slug": "facebook",
+      "hex": "0866FF",
+      "source": "https://about.meta.com/brand/resources/facebook/logo",
+      "guidelines": "https://about.meta.com/brand/resources/facebook/logo"
+    },
+    "instagram": {
+      "title": "Instagram",
+      "slug": "instagram",
+      "hex": "FF0069",
+      "source": "https://about.meta.com/brand/resources/instagram",
+      "guidelines": "https://about.meta.com/brand/resources/instagram"
+    },
+    "taobao": {
+      "name": "淘宝",
+      "file": "assets/taobao.ico",
+      "url": "https://gw.alicdn.com/imgextra/i4/O1CN01qOI6vB1zaqrBKbyFr_!!6000000006731-73-tps-64-64.ico",
+      "source": "https://www.taobao.com/favicon.ico",
+      "sha256": "705c7072059cbf59389d20029a0edf33c1dd6b54c9063025da871fc9a42cac8e"
+    },
+    "jd": {
+      "name": "京东",
+      "file": "assets/jd.ico",
+      "url": "https://storage.360buyimg.com/retail-mall/mall-common-component/favicon.ico",
+      "source": "https://global.jd.com/",
+      "sha256": "d71bcae7214e3401d42af8b8f4a288da25fdc72601e7592586e5596e45f481ba"
+    },
+    "pinduoduo": {
+      "name": "拼多多",
+      "file": "assets/pinduoduo.png",
+      "url": "https://www.pinduoduo.com/favicon.png",
+      "source": "https://www.pinduoduo.com/",
+      "sha256": "b4f29e73875ca7d6aa5d1bfcfdb2aa5893cd3602a4f3fd873c59acf1d49cbe53"
+    },
+    "alipay": {
+      "name": "支付宝",
+      "file": "assets/alipay.ico",
+      "url": "https://img.alicdn.com/tfs/TB1qEwuzrj1gK0jSZFOXXc7GpXa-32-32.ico",
+      "source": "https://www.alipay.com/",
+      "sha256": "b662de58b15b34d1bf4d2a8bc546f7062a3faaa22acd2ecbbbad70f1e7f37a39"
+    },
+    "weibo": {
+      "name": "微博",
+      "file": "assets/weibo.ico",
+      "url": "https://weibo.com/favicon.ico",
+      "source": "https://weibo.com/",
+      "sha256": "b86c00f90f8b742d1fb477034fb1916832857b8ac8a77f34a9c2904f3051194a"
+    },
+    "xiaohongshu": {
+      "name": "小红书",
+      "file": "assets/xiaohongshu.png",
+      "url": "https://picasso-static.xiaohongshu.com/fe-platform/f43dc4a8baf03678996c62d8db6ebc01a82256ff.png",
+      "source": "https://www.xiaohongshu.com/",
+      "sha256": "2912c4df1ab479d734ef132e9c45b4f17afa80b2aa3eaf4438acd54afc70b20a"
+    },
+    "douyin": {
+      "name": "抖音",
+      "file": "assets/douyin.ico",
+      "url": "https://lf1-cdn-tos.bytegoofy.com/goofy/ies/douyin_web/public/favicon.ico",
+      "source": "https://www.douyin.com/favicon.ico",
+      "sha256": "e67348e3ab54fa207e1ce4be78e8399d1b73a794d819a17d8656ea2b17a1109d"
+    },
+    "kuaishou": {
+      "name": "快手",
+      "file": "assets/kuaishou.ico",
+      "url": "https://www.kuaishou.com/favicon.ico",
+      "source": "https://www.kuaishou.com/",
+      "sha256": "b41bf5fb2d4ac584399902bb5b342f4b41e48c875053d962d3fe3d8a95abb4b3"
+    },
+    "neteasemail": {
+      "name": "网易邮箱",
+      "file": "assets/neteasemail.png",
+      "url": "https://mail.163.com/favicon.ico",
+      "source": "https://mail.163.com/",
+      "sha256": "aaa1bc04a6989c7bd8163fd163cfbdf986d9c04758b841d97d3081314a2fc50c"
+    },
+    "aliyun": {
+      "name": "阿里云",
+      "file": "assets/aliyun.png",
+      "url": "https://img.alicdn.com/tfs/TB1ugg7M9zqK1RjSZPxXXc4tVXa-32-32.png",
+      "source": "https://www.alibabacloud.com/",
+      "sha256": "8c48d7a8bea9ba2b13734166259712dbaccf4ca633223bbc03619921f2f2c405"
+    },
+    "tencentcloud": {
+      "name": "腾讯云",
+      "file": "assets/tencentcloud.ico",
+      "url": "https://cloudcache.tencent-cloud.com/qcloud/favicon.ico?t=201902181234",
+      "source": "https://cloud.tencent.com/",
+      "sha256": "5171df10b79863d76d591705e52b93b4c5295e64d874e41fca5ecac351f5f45e"
+    },
+    "gitee": {
+      "name": "Gitee 码云",
+      "file": "assets/gitee.ico",
+      "url": "https://gitee.com/favicon.ico",
+      "source": "https://gitee.com/",
+      "sha256": "2d1a42d094476e3c893e430032d5371a40af1cc2a025e089383a94bf992c671e"
+    },
+    "yuque": {
+      "name": "语雀",
+      "file": "assets/yuque.png",
+      "url": "https://mdn.alipayobjects.com/huamei_0prmtq/afts/img/A*vMxOQIh4KBMAAAAAAAAAAAAADvuFAQ/original",
+      "source": "https://www.yuque.com/",
+      "sha256": "cb1822fdf416a9893e7d35cdf4a689bbf765b71b220bfd01c586b154b76db2a4"
+    },
+    "douban": {
+      "name": "豆瓣",
+      "file": "assets/douban.ico",
+      "url": "https://www.douban.com/favicon.ico",
+      "source": "https://www.douban.com/",
+      "sha256": "14ad1b885c1103123e17d16ed68986e3e9fb911a1ca411d03a9e90f58dd0ba39"
+    },
+    "dingtalk": {
+      "name": "钉钉",
+      "file": "assets/dingtalk.png",
+      "url": "https://gw.alicdn.com/imgextra/i3/O1CN014ZbI6ZTEhdC0ttN2_!!6000000003783-2-tps-444-444.png",
+      "source": "https://www.dingtalk.com/",
+      "sha256": "b3fb0715857df5d23213b5265166fabcb7f7b4b290890d7b5682a027cf39c85d"
+    },
+    "feishu": {
+      "name": "飞书",
+      "file": "assets/feishu.png",
+      "url": "https://p1-hera.feishucdn.com/tos-cn-i-jbbdkfciu3/84a9f036fe2b44f99b899fff4beeb963~tplv-jbbdkfciu3-image:0:0.image",
+      "source": "https://www.feishu.cn/product/messenger",
+      "sha256": "cfd2b879c472a2674520492c84a0304c537a19964b8a2dcd3562c57de773268b"
+    },
+    "binance": {
+      "name": "Binance 币安",
+      "file": "assets/binance.png",
+      "url": "https://design.binance.vision/uploads/favicon-apple-binance.png",
+      "source": "https://design.binance.vision/",
+      "sha256": "182ffc81ddf46b81b18f47523a4a2952294d8bff0e9392369791b23cfed6dfa3"
+    },
+    "okx": {
+      "name": "OKX 欧易",
+      "file": "assets/okx.png",
+      "url": "https://www.okx.com/cdn/assets/imgs/291/89001A8FD7AB4038904A203EAECB68E6.png",
+      "source": "https://www.okx.com/",
+      "sha256": "bf0ab57fbb01883e8bca8d8ea4dd351b68907f730b0eae988bbf1154063d9f63"
+    },
+    "coinbase": {
+      "name": "Coinbase",
+      "file": "assets/coinbase.png",
+      "url": "https://www.coinbase.com/favicon.ico",
+      "source": "https://www.coinbase.com/",
+      "sha256": "d31e282ffb3bb5dd30928d26363a710a61d3909673cfb551f10195517c34e30b"
+    },
+    "kraken": {
+      "name": "Kraken",
+      "file": "assets/kraken.png",
+      "url": "https://www.kraken.com/_assets/icons/apple-touch-icon.png",
+      "source": "https://www.kraken.com/",
+      "sha256": "3aa58eccf2ec3a7fa82aacb34b538a23e11141d340d3d3eebc34eb1729b1c153"
+    },
+    "bitget": {
+      "name": "Bitget",
+      "file": "assets/bitget.png",
+      "url": "https://www.bitget.com/baseasset/favicon4.png",
+      "source": "https://www.bitget.com/",
+      "sha256": "96566dc4bc8606740f518de4126b24537e7d287ed7e8181eb9e641cfb80847a7"
+    },
+    "gate": {
+      "name": "Gate",
+      "file": "assets/gate.ico",
+      "url": "https://www.gate.com/favicon.ico",
+      "source": "https://www.gate.com/",
+      "sha256": "d8900cbf6d55a20ae77d5e83f224a10e051c06dc43a804960a86073c5c89d2a9"
+    },
+    "kucoin": {
+      "name": "KuCoin 库币",
+      "file": "assets/kucoin.png",
+      "url": "https://www.kucoin.com/logo.png",
+      "source": "https://www.kucoin.com/",
+      "sha256": "e3d5326f47644dcab23eb52d55286473dff9ab47a7de416f83aeb606da8c9197"
+    },
+    "htx": {
+      "name": "HTX 火币",
+      "file": "assets/htx.png",
+      "url": "https://www.htx.com/pwa/icon-pwa-180.png",
+      "source": "https://www.htx.com/",
+      "sha256": "3f7493a84a1f646bf4abc102e2b889f549f3996c463c0e1e41def91585a6ddfe"
+    },
+    "mexc": {
+      "name": "MEXC",
+      "file": "assets/mexc.webp",
+      "url": "https://static.mocortech.com/image-host/index/logo-mark-blue.be49f05b5908.webp",
+      "source": "https://www.mexc.com/en-GB/brand-guidelines",
+      "sha256": "0e4b7ae3a964d82aa4071ef1e5441efb0ded857b573500f5214af545cd8f98c0"
+    },
+    "cryptodotcom": {
+      "name": "Crypto.com",
+      "file": "assets/cryptodotcom.ico",
+      "url": "https://crypto.com/favicon.ico",
+      "source": "https://crypto.com/",
+      "sha256": "d88ab80a018afdd384bda19e2dd8823628c2f84eee26f33b51c9938c0d086614"
+    },
+    "bitfinex": {
+      "name": "Bitfinex",
+      "file": "assets/bitfinex.ico",
+      "url": "https://www.bitfinex.com/assets/favicons/bitfinex.ico",
+      "source": "https://www.bitfinex.com/",
+      "sha256": "8e1c6ffdb0f07584eaf8c117010e1f887b1781dc2ce57cdcc606d2303bfe8cd7"
+    },
+    "uniswap": {
+      "name": "Uniswap",
+      "file": "assets/uniswap.png",
+      "url": "https://cdn.app.uniswap.org/images/192x192_App_Icon.png",
+      "source": "https://app.uniswap.org/",
+      "sha256": "f2cac096ed0052736cbad1e4f4758d454ed52524ab94e42e76046b93380f738b"
+    },
+    "pancakeswap": {
+      "name": "PancakeSwap",
+      "file": "assets/pancakeswap.png",
+      "url": "https://pancakeswap.finance/logo.png",
+      "source": "https://pancakeswap.finance/",
+      "sha256": "39c08d280e7f4636908c7648d8c779fa7b01a90ba04d869a94e461d4637de199"
+    },
+    "dydx": {
+      "name": "dYdX",
+      "file": "assets/dydx.svg",
+      "url": "https://dydx.trade/favicon.svg",
+      "source": "https://dydx.trade/",
+      "sha256": "e96714c4d24e009426293820ab679079f802c681ae00d4585141d5d22c1ac314"
+    }
+  }
+}

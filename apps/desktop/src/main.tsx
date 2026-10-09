@@ -5,6 +5,7 @@ import { tauriAvailable, webAssemblyAvailable } from './capabilities';
 import { detectOs, initPlatform } from './platform';
 import { WindowsTitlebar } from './components/WindowsTitlebar';
 import { installDesktopHost } from './host-impl';
+import { installDesktopClipboard } from './native-clipboard';
 import { initNativeFeel } from './native';
 import { initTheme } from './theme';
 import { IS_DESKTOP } from '@1warden/ui';
@@ -17,6 +18,7 @@ declare const __PLATFORM__: 'desktop' | 'extension' | 'mobile' | undefined;
 
 // 宿主要**最先**装：后面所有代码都可能用到它（发请求、读存储）
 installDesktopHost();
+if (IS_DESKTOP) installDesktopClipboard();
 
 const root = document.getElementById('root');
 if (!root) throw new Error('找不到 #root 挂载点');

@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react';
+import type { BankAccountFields, DriversLicenseFields, PassportFields } from '@1warden/vault';
 import { TypeIcon } from './icons';
 
 /**
@@ -22,11 +23,14 @@ export const TYPE_LABEL: Record<string, string> = {
   card: '信用卡',
   identity: '身份信息',
   sshKey: 'SSH 密钥',
+  bankAccount: '银行账户',
+  driversLicense: '驾照',
+  passport: '护照',
   unknown: '未知类型',
 };
 
 /** 类型的展示顺序 —— **不**按字母、不按数量，按「一个人最可能先找哪个」 */
-export const TYPE_ORDER = ['login', 'card', 'identity', 'secureNote', 'sshKey'] as const;
+export const TYPE_ORDER = ['login', 'card', 'bankAccount', 'identity', 'driversLicense', 'passport', 'secureNote', 'sshKey'] as const;
 
 /**
  * 身份信息的字段名 → 人话。
@@ -44,6 +48,26 @@ export const IDENTITY_LABEL: Record<string, string> = {
   email: '邮箱', phone: '电话', ssn: '身份证号', username: '用户名',
   passportNumber: '护照号', licenseNumber: '驾照号',
 };
+
+/** Native credential/document fields; the editor and both detail views share these labels. */
+export const BANK_ACCOUNT_LABEL = {
+  bankName: '银行名称', nameOnAccount: '账户姓名', accountType: '账户类型',
+  accountNumber: '账号', routingNumber: '路由号码', branchNumber: '分行号码',
+  pin: 'PIN 码', swiftCode: 'SWIFT 代码', iban: 'IBAN', bankContactPhone: '银行联系电话',
+} as const satisfies Record<keyof BankAccountFields, string>;
+
+export const DRIVERS_LICENSE_LABEL = {
+  firstName: '名', middleName: '中间名', lastName: '姓', dateOfBirth: '出生日期',
+  licenseNumber: '驾照号码', issuingCountry: '签发国家 / 地区', issuingState: '签发省 / 州',
+  issueDate: '签发日期', expirationDate: '到期日期', issuingAuthority: '签发机关', licenseClass: '准驾车型',
+} as const satisfies Record<keyof DriversLicenseFields, string>;
+
+export const PASSPORT_LABEL = {
+  surname: '姓', givenName: '名', dateOfBirth: '出生日期', sex: '性别', birthPlace: '出生地',
+  nationality: '国籍', issuingCountry: '签发国家 / 地区', passportNumber: '护照号码',
+  passportType: '护照类型', nationalIdentificationNumber: '国民身份号码',
+  issuingAuthority: '签发机关', issueDate: '签发日期', expirationDate: '到期日期',
+} as const satisfies Record<keyof PassportFields, string>;
 
 export interface NavDestination {
   /** 稳定的键。类型用 `type:<条目类型>` 前缀，和固定项区分开 */

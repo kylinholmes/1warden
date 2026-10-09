@@ -163,6 +163,9 @@ function revive(raw: unknown): UnlockedSession | null {
     // 用户重新解锁一次即可，而作废会让他连密码都看不到
     token: reviveToken(raw['token']),
     ...(typeof raw['syncVerified'] === 'boolean' ? { syncVerified: raw['syncVerified'] } : {}),
+    ...(typeof raw['syncError'] === 'string' ? { syncError: raw['syncError'] } : {}),
+    ...(typeof raw['lastSyncedAt'] === 'number' && Number.isFinite(raw['lastSyncedAt'])
+      ? { lastSyncedAt: raw['lastSyncedAt'] } : {}),
   };
 }
 
@@ -228,6 +231,8 @@ export class SessionStore {
       // ⚠️ 必须一起存。少了它，恢复出来的客户端读得了、**写不了**
       token: session.token,
       ...(session.syncVerified === undefined ? {} : { syncVerified: session.syncVerified }),
+      ...(session.syncError === undefined ? {} : { syncError: session.syncError }),
+      ...(session.lastSyncedAt === undefined ? {} : { lastSyncedAt: session.lastSyncedAt }),
     };
     const got = await this.area.get(ACCOUNTS_KEY);
     if (generation !== this.generation) throw new Error('账户已切换，请重试');

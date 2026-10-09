@@ -36,6 +36,12 @@ function scoreOf(item: VaultItem, folderName: string | null, q: string): number 
   if (best === SCORE.nameExact) return best; // 已经是最高分，不必再查
 
   if (item.login?.username?.toLowerCase().includes(q)) best = Math.max(best, SCORE.username);
+  // Names and institutions are useful search terms; never index account numbers,
+  // PINs, identity numbers or birth dates in the ordinary search projection.
+  const nativeLabels = [item.bankAccount?.bankName, item.bankAccount?.nameOnAccount,
+    item.driversLicense?.firstName, item.driversLicense?.middleName, item.driversLicense?.lastName,
+    item.passport?.givenName, item.passport?.surname];
+  if (nativeLabels.some((value) => value?.toLowerCase().includes(q))) best = Math.max(best, SCORE.username);
   for (const u of item.login?.uris ?? []) {
     if (u.uri.toLowerCase().includes(q)) { best = Math.max(best, SCORE.uri); break; }
   }

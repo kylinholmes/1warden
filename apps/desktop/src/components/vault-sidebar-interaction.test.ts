@@ -35,6 +35,15 @@ async function mount(overrides: Partial<SidebarProps> = {}) {
 }
 
 describe('vault sidebar folder interactions', () => {
+  it('offers one organization report destination separate from security and import', async () => {
+    const onSelect = vi.fn();
+    await mount({ onSelect });
+    const entries = document.querySelectorAll('[data-key="organization"]');
+    expect(entries).toHaveLength(1);
+    expect(entries[0]!.textContent).toBe('整理与分析');
+    await click(entries[0] as HTMLElement);
+    expect(onSelect).toHaveBeenCalledWith({ kind: 'organization' });
+  });
   it('folds sections independently without changing the selection and expands folders for creation', async () => {
     let selections = 0;
     await mount({ onSelect() { selections++; } });

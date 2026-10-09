@@ -4,6 +4,7 @@ import { primaryShortcut, quickShortcut, detectOs } from '../platform';
 import type { ApplicationClient, ApplicationCapabilities } from '../application/types';
 import { BrandMark, FloatingPanel, PageHeader, isCompactLayout, useCompactLayout } from '@1warden/ui';
 import { AccountAppearance } from '../components/AccountAppearance';
+import { BUILTIN_ICON_COUNTS, BuiltinIcons } from '../components/BuiltinIcons';
 import {
   IconChevronDown, IconInfo, IconKeyboard, IconPalette, IconShield,
 } from '@1warden/ui';
@@ -72,25 +73,44 @@ export function Settings({ client, open, onClose, initialSection, capabilities =
   const compact = useCompactLayout();
   const viewStore = useLocalStore(() => {
     const page = (initialSection ?? (isCompactLayout() ? null : 'appearance')) as SectionId | null;
-    return { page };
+    return { page, detail: null as 'icons' | null };
   });
   const [page, setPage] = useStoreField(viewStore, 'page');
+  const [detail, setDetail] = useStoreField(viewStore, 'detail');
   const section = page ?? 'appearance';
   const showingDirectory = compact && page === null;
+  const showingIcons = section === 'appearance' && detail === 'icons' && !showingDirectory;
   const contentRef = useRef<HTMLDivElement>(null);
   const lastSection = useRef<SectionId>(section);
+  const wasShowingIcons = useRef(false);
   useEffect(() => {
-    if (open) setPage(initialSection ?? (isCompactLayout() ? null : 'appearance'));
+    if (open) {
+      setPage(initialSection ?? (isCompactLayout() ? null : 'appearance'));
+      setDetail(null);
+    }
   }, [open, initialSection]);
   // Remember the visible default section when expanding the directory to a wide layout.
   useEffect(() => { if (open && !compact && page === null) setPage('appearance'); }, [open, compact, page]);
   useEffect(() => {
-    if (!open || !compact) return;
-    if (page) contentRef.current?.focus({ preventScroll: true });
-    else document.getElementById(`settings-link-${lastSection.current}`)?.focus({ preventScroll: true });
-  }, [open, compact, page]);
-  function setSection(next: SectionId) { lastSection.current = next; setPage(next); }
-  function back() { setPage(null); }
+    if (!open) { wasShowingIcons.current = false; return; }
+    if (showingIcons) {
+      if (contentRef.current) contentRef.current.scrollTop = 0;
+      contentRef.current?.focus({ preventScroll: true });
+    } else if (wasShowingIcons.current && section === 'appearance' && !showingDirectory) {
+      document.getElementById('settings-builtin-icons')?.focus();
+    } else if (compact) {
+      if (page) contentRef.current?.focus({ preventScroll: true });
+      else document.getElementById(`settings-link-${lastSection.current}`)?.focus({ preventScroll: true });
+    }
+    wasShowingIcons.current = showingIcons;
+  }, [open, compact, page, showingIcons, section, showingDirectory]);
+  function setSection(next: SectionId) { lastSection.current = next; setPage(next); setDetail(null); }
+  function back() { setDetail(null); setPage(null); }
+  function goBack() {
+    if (showingIcons) setDetail(null);
+    else if (compact && page) back();
+    else onClose();
+  }
   /*
    * 主题的真相在 theme.ts、类别开关的真相在 prefs.ts（都是模块级 +
    * localStorage），组件只是它们的视图 ——
@@ -100,30 +120,31 @@ export function Settings({ client, open, onClose, initialSection, capabilities =
   return (
     <FloatingPanel
       open={open}
-      onClose={compact && page ? back : onClose}
+      onClose={goBack}
       labelledBy="settings-title"
       className="h-[min(520px,calc(100vh-32px))] max-w-[640px]"
       footer={
         <>
           {/* 底栏按分组说实话：外观那组的主题是真能用的，其余三组还没接 */}
           <span className="min-w-0 truncate">
-            {showingDirectory ? '1Warden' : section === 'appearance'
+            {showingIcons ? '只读目录 · 不会更改密码记录' : showingDirectory ? '1Warden' : section === 'appearance'
               ? '主题与类别显示立即生效并自动同步'
               : section === 'security' ? '灰色选项暂不可调整'
               : section === 'autofill' ? '在条目详情中使用自动填充'
               : '1Warden'}
           </span>
           {!compact && <span className="shrink-0">
-            <kbd className="text-2xs">esc</kbd> {compact && page ? '返回' : '关闭'}
+            <kbd className="text-2xs">esc</kbd> {showingIcons || (compact && page) ? '返回' : '关闭'}
           </span>}
         </>
       }
     >
-      <PageHeader panel title="设置" titleId="settings-title" onBack={compact && page ? back : onClose}
-        backLabel={compact && page ? '返回设置目录' : '返回上一页'} onClose={onClose}
+      <PageHeader panel title={showingIcons ? '内建图标' : '设置'} titleId="settings-title" onBack={goBack}
+        backLabel={showingIcons ? '返回外观' : compact && page ? '返回设置目录' : '返回上一页'} onClose={onClose}
         breadcrumbs={showingDirectory ? [{ label: '设置' }] : [
-          { label: '设置', ...(compact ? { onSelect: back } : {}) },
-          { label: SECTIONS.find(s => s.id === section)!.label },
+          { label: '设置', ...(compact ? { onSelect: back } : showingIcons ? { onSelect: () => setSection('appearance') } : {}) },
+          { label: SECTIONS.find(s => s.id === section)!.label, ...(showingIcons ? { onSelect: () => setDetail(null) } : {}) },
+          ...(showingIcons ? [{ label: '内建图标' }] : []),
         ]} />
 
       <div className="flex min-h-0 flex-1">
@@ -196,15 +217,28 @@ export function Settings({ client, open, onClose, initialSection, capabilities =
               <Row label="解锁后自动锁定" hint="解锁 15 分钟后自动锁定；重新打开界面不会延长期限">
                 <Select disabled value="15" options={[['5', '5 分钟'], ['15', '15 分钟'], ['60', '1 小时'], ['0', '不自动锁定']]} />
               </Row>
-              <Row label="复制后清空剪贴板" hint="只在剪贴板里还是我们写进去的值时才清">
+              <Row label="复制后清空剪贴板" hint={capabilities.native && detectOs() === 'win'
+                ? '30 秒后清除本次复制；新复制的内容不进入 Windows 剪贴板历史或云同步。已有历史需自行删除。'
+                : '只在剪贴板里还是我们写进去的值时才清'}>
                 <Select disabled value="30" options={[['10', '10 秒'], ['30', '30 秒'], ['60', '1 分钟'], ['0', '不清空']]} />
               </Row>
               <Row label="已泄露密码检查" hint="在安全报告中按需开启检查；只发送 SHA-1 哈希的前 5 个字符" />
             </Group>
           )}
 
-          {section === 'appearance' && (<div className="space-y-6">
+          {section === 'appearance' && (showingIcons ? <BuiltinIcons /> : <div className="space-y-6">
             <AccountAppearance {...(client ? { client } : {})} />
+            <section>
+              <h3 className="text-md font-medium">条目图标</h3>
+              <button id="settings-builtin-icons" type="button" onClick={() => setDetail('icons')}
+                className="card mt-3 flex min-h-14 w-full items-center gap-3 p-4 text-left hover:bg-[var(--surface-hover)] focus-visible:bg-[var(--surface-hover)]">
+                <div className="min-w-0 flex-1">
+                  <p className="text-md">内建图标</p>
+                  <p className="mt-1 text-xs text-[var(--ink-tertiary)]">{BUILTIN_ICON_COUNTS.total} 种图标 · 浏览网站、服务与卡组织标识</p>
+                </div>
+                <IconChevronDown size={16} className="shrink-0 -rotate-90 text-[var(--ink-tertiary)]" />
+              </button>
+            </section>
             {DesktopQuickSearchSettings && capabilities.native && <Suspense fallback={null}><DesktopQuickSearchSettings /></Suspense>}
           </div>)}
 

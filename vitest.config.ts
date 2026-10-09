@@ -12,14 +12,14 @@ export default defineConfig({
      *  `星号斜杠` 把块注释提前闭合了 —— 和 host-impl.ts 里那次一模一样。）
      */
     include: [
-      'packages/*/src/**/*.test.ts',
-      'apps/*/src/**/*.test.ts',
-      'apps/*/extension/**/*.test.ts',
-      'scripts/**/*.test.ts',
+      'packages/*/src/**/*.test.{ts,tsx}',
+      'apps/*/src/**/*.test.{ts,tsx}',
+      'apps/*/extension/**/*.test.{ts,tsx}',
+      'scripts/**/*.test.{ts,tsx}',
     ],
     // 契约测试需要运行中的服务器，故意排除在单元测试之外 ——
     // `bun run test` 必须永远不需要网络。
-    exclude: ['**/node_modules/**', '**/dist/**', '**/*.contract.test.ts'],
+    exclude: ['**/node_modules/**', '**/dist/**', '**/*.contract.test.{ts,tsx}'],
     environment: 'node',
     /*
      * 让测试能读到 **CSS 源码**。

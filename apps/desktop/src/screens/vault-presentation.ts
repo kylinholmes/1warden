@@ -8,7 +8,9 @@ export type VaultCategory =
   | { kind: 'folder'; id: string }
   | { kind: 'type'; type: string }
   | { kind: 'security' }
+  | { kind: 'organization' }
   | { kind: 'profile' }
+  | { kind: 'trash' }
   | { kind: 'import' };
 
 /** Apply navigation to the current search results, keeping the session array intact. */

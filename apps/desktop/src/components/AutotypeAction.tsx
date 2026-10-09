@@ -33,12 +33,16 @@ export function AutotypeAction({ username, getPassword }: {
     const permission = (null) as PermissionState | null;
     const count = (null) as number | null;
     const result = (null) as { ok: boolean; message: string } | null;
-    return { permission, count, result };
+    return { permission, count, result, running: false, sending: false };
   });
   const [permission, setPermission] = useStoreField(viewStore, 'permission');
   const [count, setCount] = useStoreField(viewStore, 'count');
   const [result, setResult] = useStoreField(viewStore, 'result');
+  const [running, setRunning] = useStoreField(viewStore, 'running');
+  const [sending, setSending] = useStoreField(viewStore, 'sending');
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
+  const operation = useRef(0);
+  const cancelButton = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
     autotypeStatus()
@@ -46,9 +50,30 @@ export function AutotypeAction({ username, getPassword }: {
       .catch(() => setPermission('denied'));
   }, []);
 
-  useEffect(() => () => { if (timer.current) clearInterval(timer.current); }, []);
+  useEffect(() => () => { operation.current++; if (timer.current) clearInterval(timer.current); }, []);
+
+  function cancel() {
+    if (viewStore.getState().sending) return;
+    operation.current++;
+    if (timer.current) clearInterval(timer.current);
+    timer.current = null;
+    setCount(null); setRunning(false); setResult({ ok: true, message: '已取消，未发送按键。' });
+  }
+  useEffect(() => {
+    if (!running || sending) return;
+    cancelButton.current?.focus({ preventScroll: true });
+    function key(event: KeyboardEvent) {
+      if (event.key !== 'Escape') return;
+      event.preventDefault(); event.stopImmediatePropagation(); cancel();
+    }
+    window.addEventListener('keydown', key, true);
+    return () => window.removeEventListener('keydown', key, true);
+  }, [running, sending]);
 
   function start() {
+    if (viewStore.getState().running || permission !== 'granted') return;
+    const current = ++operation.current;
+    setRunning(true);
     setResult(null);
     setCount(COUNTDOWN_SECONDS);
 
@@ -60,14 +85,15 @@ export function AutotypeAction({ username, getPassword }: {
         // 归零：停表、让出焦点、发按键
         if (timer.current) clearInterval(timer.current);
         timer.current = null;
-        void fire();
+        void fire(current);
         return null;
       });
     }, 1000);
   }
 
-  async function fire() {
+  async function fire(current: number) {
     try {
+      if (operation.current !== current) return;
       // 先最小化自己。用户此刻应该已经切到目标窗口了，但万一没有，
       // 这一步能把焦点还给上一个应用 —— 否则按键会敲进我们自己的界面。
       //
@@ -78,11 +104,16 @@ export function AutotypeAction({ username, getPassword }: {
       // 给窗口管理器一点时间完成焦点切换
       await new Promise((r) => setTimeout(r, 350));
 
+      if (operation.current !== current) return;
       const password = await getPassword();
+      if (operation.current !== current) return;
+      setSending(true);
       await autotypeType({ username, password, submit: false });
-      setResult({ ok: true, message: AUTOTYPE_SUCCESS_NOTE });
+      if (operation.current === current) setResult({ ok: true, message: AUTOTYPE_SUCCESS_NOTE });
     } catch (e) {
-      setResult({ ok: false, message: e instanceof Error ? e.message : '发送按键失败' });
+      if (operation.current === current) setResult({ ok: false, message: e instanceof Error ? e.message : '发送按键失败' });
+    } finally {
+      if (operation.current === current) { setRunning(false); setSending(false); }
     }
   }
 
@@ -116,7 +147,7 @@ export function AutotypeAction({ username, getPassword }: {
 
   return (
     <div>
-      {count === null ? (
+      {!running ? (
         <button onClick={start} disabled={permission === null} className="btn btn-quiet gap-1.5">
           <IconKeyboard size={13} />
           输入到其他应用…
@@ -126,11 +157,12 @@ export function AutotypeAction({ username, getPassword }: {
           倒计时用大一号的字 + 强调色：这几秒里用户要完成的动作是
           「切到目标窗口」，提示必须显眼到他不会错过。
         */
-        <p className="flex items-center gap-2 text-sm text-[var(--accent)]" role="status">
+        <div className="flex flex-wrap items-center gap-2 text-sm text-[var(--accent)]">
           <IconKeyboard size={15} className="shrink-0" />
-          <span className="tabular-nums font-medium">{count}</span>
-          秒后发送，请切换到目标窗口…
-        </p>
+          <span role="status">{sending ? '正在发送按键…' : count === null ? '正在准备发送…' : `${count} 秒后发送，请切换到目标窗口…`}</span>
+          {!sending && <><button ref={cancelButton} type="button" className="btn btn-quiet" onClick={cancel}>取消发送</button>
+            <span className="text-xs text-[var(--ink-tertiary)]">Esc 取消</span></>}
+        </div>
       )}
 
       {result && (

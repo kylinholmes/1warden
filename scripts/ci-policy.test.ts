@@ -39,6 +39,20 @@ describe('CI workflow and synthetic smoke contract', () => {
     expect(smokePlan('native').map(step => step.name)).toEqual(['build-native-companion-extension', 'native-quick', 'native-account-details']);
     expect(smokePlan('all').every(step => step.timeoutMs > 0 && step.timeoutMs <= 300_000)).toBe(true);
   });
+  it('rejects floating real-server versions, public ports, retained data, and bypassed integration checks', () => {
+    const value = copy();
+    value.jobs.vaultwarden.services.vaultwarden.image = 'vaultwarden/server:latest';
+    value.jobs.vaultwarden.services.vaultwarden.ports = ['18083:80'];
+    value.jobs.vaultwarden.services.vaultwarden.volumes = ['user-vault:/data'];
+    value.jobs.vaultwarden.steps = [];
+    value.jobs.release.needs = value.jobs.release.needs.filter((name: string) => name !== 'vaultwarden');
+    const failures = validateWorkflow(value).join('\n');
+    expect(failures).toMatch(/pin 1.37.4/);
+    expect(failures).toMatch(/loopback test port/);
+    expect(failures).toMatch(/retained data/);
+    expect(failures).toMatch(/protocol smoke must run/);
+    expect(failures).toMatch(/wait for real Vaultwarden/);
+  });
   it('blocks inherited real-vault/clipboard switches and WebView profile reuse', () => {
     const actual = smokeEnvironment({ ONEWARDEN_PROFILE_REAL_URL: 'http://127.0.0.1:8080', ONEWARDEN_TEST_CLIPBOARD: '1',
       ONEWARDEN_SMOKE_CLIPBOARD: '1', ONEWARDEN_QUICK_CASE: 'clipboard-only', WEBVIEW2_USER_DATA_FOLDER: 'real-profile', WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: 'reused-port' });

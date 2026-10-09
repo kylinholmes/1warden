@@ -16,10 +16,28 @@
 export const CLIPBOARD_CLEAR_MS = 30_000;
 
 let scheduler: ((value: string) => void | Promise<void>) | null = null;
+let nativeCopy: ((value: string) => Promise<void>) | null = null;
 
-/** The browser background outlives the popup; native windows use the local timer. */
+/** The browser background outlives the popup; unmanaged web views use a timer. */
 export function installClipboardScheduler(handler: typeof scheduler): void {
   scheduler = handler;
+}
+
+/** Installed once by the native entry before rendering. A successful handler
+ * must BOTH write and schedule conditional expiry. Never fall back to the web
+ * clipboard on failure: doing so would restore permission prompts and change
+ * the ownership guarantees. Extensions retain their background scheduler.
+ */
+export function installNativeClipboardCopy(handler: typeof nativeCopy): void {
+  nativeCopy = handler;
+}
+
+/** Shared write boundary for buttons and non-button actions. Native copies
+ * own their cleanup even if the caller has no onCopied callback.
+ */
+export async function writeClipboardText(value: string): Promise<void> {
+  if (nativeCopy) { await nativeCopy(value); return; }
+  await navigator.clipboard.writeText(value);
 }
 
 /**
@@ -29,6 +47,8 @@ export function installClipboardScheduler(handler: typeof scheduler): void {
  * 宁可不清理，也不要误删用户后来复制的东西。
  */
 export async function clearIfUnchanged(value: string): Promise<void> {
+  // Native expiry uses its private ownership marker, never browser text reads.
+  if (nativeCopy) return;
   try {
     if (await navigator.clipboard.readText() === value) await navigator.clipboard.writeText('');
   } catch { /* 见上 */ }
@@ -41,6 +61,9 @@ export async function clearIfUnchanged(value: string): Promise<void> {
  * 就把「30 秒」和「只清自己写的那个值」两条规则钉在了同一个地方。
  */
 export async function scheduleClipboardClear(value: string): Promise<void> {
+  // The native write already scheduled expiry. Do not create a second timer
+  // retaining plaintext or requesting WebView clipboard-read permission.
+  if (nativeCopy) return;
   if (scheduler) { await scheduler(value); return; }
   setTimeout(() => { void clearIfUnchanged(value); }, CLIPBOARD_CLEAR_MS);
 }
@@ -52,6 +75,6 @@ export async function scheduleClipboardClear(value: string): Promise<void> {
  * 那条路上没有可以点的地方）。
  */
 export async function copyWithAutoClear(value: string): Promise<void> {
-  await navigator.clipboard.writeText(value);
+  await writeClipboardText(value);
   await scheduleClipboardClear(value);
 }

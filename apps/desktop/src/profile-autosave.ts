@@ -8,6 +8,8 @@ export interface SaveField<T> { value: T; status: SaveStatus; error: string | nu
 interface Draft<T> extends SaveField<T> { base: T | null; dirty: boolean }
 interface Entry { profile: Draft<UserProfile>; preferences: Draft<ProfilePreferences> }
 export interface AutosaveSnapshot { profile: SaveField<UserProfile>; preferences: SaveField<ProfilePreferences> }
+export interface FlushResult { saved: boolean; pending: (keyof Entry)[] }
+export const UNSAVED_PROFILE_MESSAGE = '个人资料或外观偏好尚未保存，暂未退出或切换账户。请回到用户详情或设置中的外观页面重试保存，或明确放弃修改后再试。';
 const emptyProfile = (): UserProfile => ({ displayName: '', avatarDataUrl: null });
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const identity = (s: ApplicationSnapshot) => s.account ? accountKey(s.account) : null;
@@ -90,11 +92,15 @@ export function createProfileAutosave(client: ApplicationClient) {
       if (identity(client.getSnapshot()) !== key) break;
     }
   }
-  function flush(): Promise<void> {
+  async function flush(): Promise<FlushResult> {
+    // Capture this account's entry before awaiting. A lock/account change must
+    // never make its parked draft look like a successful flush of the new one.
+    const value = entry();
     cancelTimer();
-    if (running) return running;
-    running = drain().finally(() => { running = null; schedule(); });
-    return running;
+    if (!running) running = drain().finally(() => { running = null; schedule(); });
+    await running;
+    const pending = (['profile', 'preferences'] as const).filter(kind => value[kind].dirty);
+    return { saved: pending.length === 0, pending };
   }
   // Initialize once so Zustand selectors always receive a cached snapshot.
   emit();
@@ -109,7 +115,11 @@ export function createProfileAutosave(client: ApplicationClient) {
     flush,
     retry: (kind: keyof Entry) => { const field = entry()[kind]; field.error = null; field.status = 'pending'; emit(); return flush(); },
     discard: (kind: keyof Entry) => { const field = entry()[kind]; if (field.status === 'saving') return; field.dirty = false; field.error = null; field.status = 'idle'; observe(); },
-    forget: (key = identity(client.getSnapshot())) => { if (key) entries.delete(key); emit(); },
+    forget: (key = identity(client.getSnapshot())) => {
+      const value = key ? entries.get(key) : undefined;
+      if (value && (value.profile.dirty || value.preferences.dirty)) throw new Error(UNSAVED_PROFILE_MESSAGE);
+      if (key) entries.delete(key); emit();
+    },
   };
 }
 export type ProfileAutosave = ReturnType<typeof createProfileAutosave>;

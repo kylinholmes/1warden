@@ -1,0 +1,77 @@
+/** Official full-color artwork takes precedence over monochrome library paths.
+ * These URLs are for the explicit asset-update command and attribution only;
+ * rendering uses the bundled file, never an external request.
+ */
+export interface OfficialArtwork {
+  name: string;
+  file: string;
+  url: string;
+  /** The official page that publishes or references this artwork. */
+  source: string;
+}
+
+export const OFFICIAL_ARTWORK: Readonly<Partial<Record<string, OfficialArtwork>>> = {
+  google: { name: 'Google', file: 'google.png',
+    url: 'https://developers.google.com/static/identity/images/g-logo.png',
+    source: 'https://developers.google.com/identity/branding-guidelines' },
+  taobao: { name: '淘宝', file: 'assets/taobao.ico',
+    url: 'https://gw.alicdn.com/imgextra/i4/O1CN01qOI6vB1zaqrBKbyFr_!!6000000006731-73-tps-64-64.ico', source: 'https://www.taobao.com/favicon.ico' },
+  jd: { name: '京东', file: 'assets/jd.ico',
+    url: 'https://storage.360buyimg.com/retail-mall/mall-common-component/favicon.ico', source: 'https://global.jd.com/' },
+  pinduoduo: { name: '拼多多', file: 'assets/pinduoduo.png',
+    url: 'https://www.pinduoduo.com/favicon.png', source: 'https://www.pinduoduo.com/' },
+  alipay: { name: '支付宝', file: 'assets/alipay.ico',
+    url: 'https://img.alicdn.com/tfs/TB1qEwuzrj1gK0jSZFOXXc7GpXa-32-32.ico', source: 'https://www.alipay.com/' },
+  weibo: { name: '微博', file: 'assets/weibo.ico',
+    url: 'https://weibo.com/favicon.ico', source: 'https://weibo.com/' },
+  xiaohongshu: { name: '小红书', file: 'assets/xiaohongshu.png',
+    url: 'https://picasso-static.xiaohongshu.com/fe-platform/f43dc4a8baf03678996c62d8db6ebc01a82256ff.png', source: 'https://www.xiaohongshu.com/' },
+  douyin: { name: '抖音', file: 'assets/douyin.ico',
+    url: 'https://lf1-cdn-tos.bytegoofy.com/goofy/ies/douyin_web/public/favicon.ico', source: 'https://www.douyin.com/favicon.ico' },
+  kuaishou: { name: '快手', file: 'assets/kuaishou.ico',
+    url: 'https://www.kuaishou.com/favicon.ico', source: 'https://www.kuaishou.com/' },
+  neteasemail: { name: '网易邮箱', file: 'assets/neteasemail.png',
+    url: 'https://mail.163.com/favicon.ico', source: 'https://mail.163.com/' },
+  aliyun: { name: '阿里云', file: 'assets/aliyun.png',
+    url: 'https://img.alicdn.com/tfs/TB1ugg7M9zqK1RjSZPxXXc4tVXa-32-32.png', source: 'https://www.alibabacloud.com/' },
+  tencentcloud: { name: '腾讯云', file: 'assets/tencentcloud.ico',
+    url: 'https://cloudcache.tencent-cloud.com/qcloud/favicon.ico?t=201902181234', source: 'https://cloud.tencent.com/' },
+  gitee: { name: 'Gitee 码云', file: 'assets/gitee.ico',
+    url: 'https://gitee.com/favicon.ico', source: 'https://gitee.com/' },
+  yuque: { name: '语雀', file: 'assets/yuque.png',
+    url: 'https://mdn.alipayobjects.com/huamei_0prmtq/afts/img/A*vMxOQIh4KBMAAAAAAAAAAAAADvuFAQ/original', source: 'https://www.yuque.com/' },
+  douban: { name: '豆瓣', file: 'assets/douban.ico',
+    url: 'https://www.douban.com/favicon.ico', source: 'https://www.douban.com/' },
+  dingtalk: { name: '钉钉', file: 'assets/dingtalk.png',
+    url: 'https://gw.alicdn.com/imgextra/i3/O1CN014ZbI6ZTEhdC0ttN2_!!6000000003783-2-tps-444-444.png', source: 'https://www.dingtalk.com/' },
+  feishu: { name: '飞书', file: 'assets/feishu.png',
+    url: 'https://p1-hera.feishucdn.com/tos-cn-i-jbbdkfciu3/84a9f036fe2b44f99b899fff4beeb963~tplv-jbbdkfciu3-image:0:0.image', source: 'https://www.feishu.cn/product/messenger' },
+  binance: { name: 'Binance 币安', file: 'assets/binance.png',
+    url: 'https://design.binance.vision/uploads/favicon-apple-binance.png', source: 'https://design.binance.vision/' },
+  okx: { name: 'OKX 欧易', file: 'assets/okx.png',
+    url: 'https://www.okx.com/cdn/assets/imgs/291/89001A8FD7AB4038904A203EAECB68E6.png', source: 'https://www.okx.com/' },
+  coinbase: { name: 'Coinbase', file: 'assets/coinbase.png',
+    url: 'https://www.coinbase.com/favicon.ico', source: 'https://www.coinbase.com/' },
+  kraken: { name: 'Kraken', file: 'assets/kraken.png',
+    url: 'https://www.kraken.com/_assets/icons/apple-touch-icon.png', source: 'https://www.kraken.com/' },
+  bitget: { name: 'Bitget', file: 'assets/bitget.png',
+    url: 'https://www.bitget.com/baseasset/favicon4.png', source: 'https://www.bitget.com/' },
+  gate: { name: 'Gate', file: 'assets/gate.ico',
+    url: 'https://www.gate.com/favicon.ico', source: 'https://www.gate.com/' },
+  kucoin: { name: 'KuCoin 库币', file: 'assets/kucoin.png',
+    url: 'https://www.kucoin.com/logo.png', source: 'https://www.kucoin.com/' },
+  htx: { name: 'HTX 火币', file: 'assets/htx.png',
+    url: 'https://www.htx.com/pwa/icon-pwa-180.png', source: 'https://www.htx.com/' },
+  mexc: { name: 'MEXC', file: 'assets/mexc.webp',
+    url: 'https://static.mocortech.com/image-host/index/logo-mark-blue.be49f05b5908.webp', source: 'https://www.mexc.com/en-GB/brand-guidelines' },
+  cryptodotcom: { name: 'Crypto.com', file: 'assets/cryptodotcom.ico',
+    url: 'https://crypto.com/favicon.ico', source: 'https://crypto.com/' },
+  bitfinex: { name: 'Bitfinex', file: 'assets/bitfinex.ico',
+    url: 'https://www.bitfinex.com/assets/favicons/bitfinex.ico', source: 'https://www.bitfinex.com/' },
+  uniswap: { name: 'Uniswap', file: 'assets/uniswap.png',
+    url: 'https://cdn.app.uniswap.org/images/192x192_App_Icon.png', source: 'https://app.uniswap.org/' },
+  pancakeswap: { name: 'PancakeSwap', file: 'assets/pancakeswap.png',
+    url: 'https://pancakeswap.finance/logo.png', source: 'https://pancakeswap.finance/' },
+  dydx: { name: 'dYdX', file: 'assets/dydx.svg',
+    url: 'https://dydx.trade/favicon.svg', source: 'https://dydx.trade/' },
+};

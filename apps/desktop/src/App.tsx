@@ -12,6 +12,7 @@ import { ProfileAutosaveProvider, useProfileAutosave } from './components/Profil
 import { Home } from './screens/Home';
 import { accountKey, type AccountTarget } from './application/account-target';
 import { createStore } from '@1warden/state';
+import { UNSAVED_PROFILE_MESSAGE } from './profile-autosave';
 
 /** One application tree; each entry supplies its own runtime. */
 export function App({ client }: { client: ApplicationClient }) {
@@ -66,20 +67,33 @@ function AppContent({ client }: { client: ApplicationClient }) {
   }
   async function switchAccount(account: AccountTarget | null) {
     if (navigation.current) return;
-    navigation.current = true; setNavigating(true); setError(null);
+    navigation.current = true; setError(null);
     try {
-      await autosave?.flush();
       const active = client.getSnapshot();
-      if (!account || !active.account || accountKey(active.account) !== accountKey(account)) await client.switchAccount(account);
+      if (!account || !active.account || accountKey(active.account) !== accountKey(account)) {
+        await saveBeforeLeaving();
+        setNavigating(true);
+        await client.switchAccount(account);
+      }
       setRoute('work');
     } catch (e) { setError(e instanceof Error ? e.message : '切换账户失败'); throw e; }
     finally { navigation.current = false; setNavigating(false); }
   }
+  async function saveBeforeLeaving() {
+    const result = await autosave?.flush();
+    if (result && !result.saved) throw new Error(UNSAVED_PROFILE_MESSAGE);
+  }
   async function logout() {
-    const account = client.getSnapshot().account;
-    await autosave?.flush();
-    await client.logout();
-    if (account) autosave?.forget(accountKey(account)); setRoute('home');
+    if (navigation.current) return;
+    navigation.current = true; setError(null);
+    try {
+      const account = client.getSnapshot().account;
+      await saveBeforeLeaving();
+      setNavigating(true);
+      await client.logout();
+      if (account) autosave?.forget(accountKey(account)); setRoute('home');
+    } catch (e) { setError(e instanceof Error ? e.message : '退出账户失败'); throw e; }
+    finally { navigation.current = false; setNavigating(false); }
   }
 
   return (

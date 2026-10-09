@@ -24,11 +24,19 @@ function item(over: Partial<VaultItem> = {}): VaultItem {
 }
 
 describe('iconDomainOf —— 这条该用哪个站点的图标', () => {
-  it('takes the registrable domain from the first stored URI', () => {
+  it('takes the hostname without the www prefix from the first stored URI', () => {
     const it0 = item({ login: { ...emptyLogin(), uris: [{ uri: 'https://www.bilibili.com/login?x=1', match: null }] } });
-    // 要的是 bilibili.com，不是 www.bilibili.com —— 图标在基础域名上
+    // 常见 www 前缀不影响品牌；服务子域名则必须保留（见下）。
     expect(iconDomainOf(it0)).toBe('bilibili.com');
   });
+
+  it.each(['cloud.tencent.com', 'mail.163.com', 'mail.google.com', 'weixin.qq.com'])(
+    'preserves the service hostname %s for builtin icons', host => {
+      const it0 = item({ login: { ...emptyLogin(), uris: [{ uri: `https://${host}/login`, match: null }] } });
+      expect(iconDomainOf(it0)).toBe(host);
+      expect(iconDomainOf(item({ name: host }))).toBe(host);
+    },
+  );
 
   it('honours URI order and skips the ones that are not web URLs', () => {
     const it0 = item({

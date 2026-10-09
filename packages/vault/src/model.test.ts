@@ -1,21 +1,17 @@
 import { describe, it, expect } from 'vitest';
-import { cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity, ITEM_TYPES } from './model';
+import { cipherTypeToItemType, emptyLogin, emptyCard, emptyIdentity, emptyBankAccount,
+  emptyDriversLicense, emptyPassport, ITEM_TYPES } from './model';
 
 describe('cipherTypeToItemType', () => {
-  it('maps the five types we handle natively', () => {
+  it('maps the eight native cipher types', () => {
     expect(cipherTypeToItemType(1)).toBe('login');
     expect(cipherTypeToItemType(2)).toBe('secureNote');
     expect(cipherTypeToItemType(3)).toBe('card');
     expect(cipherTypeToItemType(4)).toBe('identity');
     expect(cipherTypeToItemType(5)).toBe('sshKey');
-  });
-
-  // ⚠️ 6/7/8 是 2026 年新增的，老服务端不认识。
-  // 按接口稳定性原则：收到时按「未知类型」只读展示，不提供编辑。
-  it('treats the newer types 6-8 as unknown rather than crashing', () => {
-    expect(cipherTypeToItemType(6)).toBe('unknown');
-    expect(cipherTypeToItemType(7)).toBe('unknown');
-    expect(cipherTypeToItemType(8)).toBe('unknown');
+    expect(cipherTypeToItemType(6)).toBe('bankAccount');
+    expect(cipherTypeToItemType(7)).toBe('driversLicense');
+    expect(cipherTypeToItemType(8)).toBe('passport');
   });
 
   it('treats any out-of-range type as unknown', () => {
@@ -33,6 +29,9 @@ describe('emptyLogin / emptyCard / emptyIdentity', () => {
     expect(emptyCard().number).toBeNull();
     expect(emptyIdentity().ssn).toBeNull();
     expect(Object.values(emptyIdentity()).every((v) => v === null)).toBe(true);
+    expect(Object.values(emptyBankAccount()).every((v) => v === null)).toBe(true);
+    expect(Object.values(emptyDriversLicense()).every((v) => v === null)).toBe(true);
+    expect(Object.values(emptyPassport()).every((v) => v === null)).toBe(true);
   });
 
   // 共享可变状态会让两条条目互相污染 —— 每次都返回新对象

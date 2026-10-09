@@ -1,7 +1,7 @@
 import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
 import { useLayoutEffect, useId, useRef, type CSSProperties } from 'react';
-import { IconCheck, IconChevronDown } from '@1warden/ui';
-import { getResolvedTheme, getThemeMode, getThemePalette, setThemeMode, setThemePalette, subscribeTheme, type ThemeMode } from '../theme';
+import { IconCheck, IconChevronDown, Segmented } from '@1warden/ui';
+import { getResolvedTheme, getThemeMode, getThemePalette, getIconStyle, setThemeMode, setThemePalette, setIconStyle, subscribeTheme, type ThemeMode, type IconStyle } from '../theme';
 import { getPalette, PALETTES, type ThemePalette } from '../theme-palettes';
 
 const MODES: { value: ThemeMode; label: string }[] = [
@@ -12,6 +12,7 @@ export function AppearancePicker({ onChange }: { onChange?: () => void } = {}) {
   const mode = useStoreSnapshot(subscribeTheme, getThemeMode);
   const palette = useStoreSnapshot(subscribeTheme, getThemePalette);
   const resolved = useStoreSnapshot(subscribeTheme, getResolvedTheme);
+  const iconStyle = useStoreSnapshot(subscribeTheme, getIconStyle);
   const viewStore = useLocalStore(() => {
     const open = false;
     return { open };
@@ -105,6 +106,14 @@ export function AppearancePicker({ onChange }: { onChange?: () => void } = {}) {
         {[["强调色", colors[5]], ["背景", colors[3]], ["前景", colors[4]]].map(([label, color]) =>
           <div key={label}><span>{label}</span><span className="palette-color"><i style={{ '--swatch': color } as CSSProperties} />{color!.toUpperCase()}</span></div>)}
       </div>
+    </div>
+    <div className="card mt-3 flex flex-wrap items-center gap-3 p-4">
+      <div className="min-w-[120px] flex-1">
+        <p className="text-md">图标样式</p>
+        <p className="mt-1 text-xs leading-relaxed text-[var(--ink-tertiary)]">原貌保留素材自带背景；统一底板添加圆角背景。深色单色矢量随主题显示，彩色原图保持原色。</p>
+      </div>
+      <Segmented<IconStyle> label="图标样式" value={iconStyle} onChange={value => { setIconStyle(value); onChange?.(); }}
+        options={[{ value: 'original', label: '原貌' }, { value: 'plate', label: '统一底板' }]} />
     </div>
   </section>;
 }

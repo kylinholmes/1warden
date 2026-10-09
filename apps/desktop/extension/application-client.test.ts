@@ -6,6 +6,18 @@ import { twoFactorChallenge } from '../src/screens/auth-error';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+it('sends the organization report as a no-argument read without refreshing or mutating', async () => {
+  vi.resetModules();
+  const report = { total: 1, checked: 1, skipped: 0, duplicates: [], missingUrls: ['fixture-id'], missingUsernames: [], lowInformationNames: [], unfiled: [] };
+  const send = vi.fn(async (request: { method: string; args: unknown[] }) => ({ ok: true, result: request.method === 'organizationReport' ? report : EMPTY_SNAPSHOT }));
+  vi.stubGlobal('chrome', { storage: { session: {} }, runtime: { sendMessage: send } });
+  const { createExtensionApplicationClient } = await import('./application-client');
+  const client = createExtensionApplicationClient();
+  await expect(client.organizationReport()).resolves.toEqual(report);
+  expect(send).toHaveBeenCalledExactlyOnceWith({ type: '1warden:application', method: 'organizationReport', args: [] });
+  client.dispose();
+});
+
 it('preserves the folder ID returned by the background for create and assign', async () => {
   vi.resetModules();
   const folder = { id: 'server-folder-id', name: 'Work', nameFailed: false, updatedAt: '2026-10-09' };

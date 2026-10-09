@@ -12,6 +12,7 @@ export * from './item-display';
 export * from './icons';
 export * from './form-fields';
 export * from './health';
+export * from './organization-report';
 export * from './csv';
 export * from './import';
 export * from './import-csv';

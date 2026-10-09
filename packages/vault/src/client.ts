@@ -28,10 +28,12 @@ import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
 import { emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
 import { retainItemMetadata } from './preservation';
+import { isProfileItem } from './profile';
 
 /** 导入的类型名 → Bitwarden 的数字类型 */
 const RAW_TYPE: Record<ImportedItem['type'], number> = {
   login: 1, secureNote: 2, card: 3, identity: 4, sshKey: 5,
+  bankAccount: 6, driversLicense: 7, passport: 8,
 };
 
 /** 导入用的空白条目骨架 */
@@ -44,6 +46,7 @@ function blankImportItem(): VaultItem {
     card: emptyCard(),
     identity: emptyIdentity(),
     secureNote: null, sshKey: null,
+    bankAccount: null, driversLicense: null, passport: null,
     customFields: [], passwordHistory: [], attachments: [],
   };
 }
@@ -57,6 +60,7 @@ function editableState(item: VaultItem): string {
   }
   return JSON.stringify({ type: item.type, name: item.name, notes: item.notes, reprompt: item.reprompt,
     login, card: item.card, identity: item.identity, secureNote: item.secureNote, sshKey: item.sshKey,
+    bankAccount: item.bankAccount ?? null, driversLicense: item.driversLicense ?? null, passport: item.passport ?? null,
     customFields: item.customFields }, (key, value) => key === 'sourceId' ? undefined : value);
 }
 
@@ -73,12 +77,23 @@ export interface VaultClientState extends StoredSession {
   token: TokenResponse | null;
   /** Missing on legacy sessions: absence never proves a completed server sync. */
   syncVerified?: boolean;
+  /** Safe presentation metadata persisted only with the in-memory unlocked session. */
+  syncError?: string | null;
+  lastSyncedAt?: number | null;
 }
 
 export interface ConnectParams {
   serverUrl: string;
   email: string;
   masterPassword: string;
+}
+
+/** A failed record remains visible without presenting raw crypto errors or ciphertext. */
+export interface TrashRecord {
+  id: string;
+  rawType: number;
+  item: VaultItem | null;
+  restoreError: string | null;
 }
 
 /** 两步验证要求 —— UI 需要拿到候选方式让用户选 */
@@ -105,6 +120,9 @@ export class VaultClient {
   private authenticationGeneration = 0;
   private pendingAuthentication: PendingAuthentication | null = null;
   private syncVerified = false;
+  private _syncError: string | null = null;
+  private _lastSyncedAt: number | null = null;
+  private syncRequest: { key: SymmetricKey; promise: Promise<void> } | null = null;
   private readonly itemWrites = new Map<string, Promise<void>>();
 
   /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
@@ -186,6 +204,8 @@ export class VaultClient {
 
   /** Cached or partially decrypted data cannot prove that a record is absent. */
   hasVerifiedSync(): boolean { return this.session.isUnlocked() && this.syncVerified; }
+  get syncError(): string | null { return this.session.isUnlocked() ? this._syncError : null; }
+  get lastSyncedAt(): number | null { return this.session.isUnlocked() ? this._lastSyncedAt : null; }
 
   /** 设备标识只读一次，之后缓存 —— 它要落存储，不该每次请求都读一遍 */
   private deviceIdentity(): Promise<string> {
@@ -252,6 +272,10 @@ export class VaultClient {
     this.authenticationGeneration++;
     this.itemWrites.clear();
     this.syncVerified = false;
+    this._syncError = null;
+    this._lastSyncedAt = null;
+    this.syncRequest = null;
+    this.syncEngine = null;
     this.clearPendingAuthentication();
   }
 
@@ -393,6 +417,8 @@ export class VaultClient {
      *
      * 慢的那一段是网络（`/api/sync` 一次返回整个库的密文），不是解密。
      */
+    // Publish an unlocked-but-loading state, never a transient confirmed-empty vault.
+    this.session.setSyncing(true);
     this.session.completeUnlock(userKey);
     this.clearPendingAuthentication();
 
@@ -434,14 +460,13 @@ export class VaultClient {
 
 
   /**
-   * 后台同步：先吃缓存，再问服务端。**不阻塞调用方。**
+   * 登录后的同步：先吃缓存，再问服务端，保持已解锁界面可用。
    *
    * ⚠️ 这里吞掉异常是**故意**的：调用方已经拿到一个可用的、已解锁的客户端了，
    * 同步失败不该把它变成失败 —— 表现应当是「列表还停在缓存那一版」。
-   * 错误由日志上报。
+   * 错误留在同步状态中供 UI 展示；认证成功不会被改写成登录失败。
    */
   private async hydrateThenSync(key: SymmetricKey): Promise<void> {
-    this.session.setSyncing(true);
     try {
       await this.doSync(key);
     } catch (e) {
@@ -454,8 +479,6 @@ export class VaultClient {
        */
       const why = e instanceof Error ? `${e.name}: ${e.message}` : String(e);
       console.warn(`[sync] 后台同步失败，界面停在已有数据上 —— ${why}`);
-    } finally {
-      if (this.session.getKey() === key) this.session.setSyncing(false);
     }
   }
 
@@ -497,6 +520,8 @@ export class VaultClient {
       folders: this.session.folders.slice(),
       token: this.token,
       syncVerified: this.hasVerifiedSync(),
+      syncError: this.syncError,
+      lastSyncedAt: this.lastSyncedAt,
     };
   }
 
@@ -510,6 +535,8 @@ export class VaultClient {
   restore(state: VaultClientState): void {
     this.invalidateAuthentication();
     this.syncVerified = state.syncVerified === true;
+    this._syncError = state.syncError ?? null;
+    this._lastSyncedAt = state.lastSyncedAt ?? null;
     restoreSession(this.session, state);
     if (state.token === null) return;
     this.token = state.token;
@@ -710,6 +737,7 @@ export class VaultClient {
     const http = this.http;
     const engine = new SyncEngine({
       session: this.session,
+      hydrateCache: !this.syncVerified && this._lastSyncedAt === null,
       deps: {
         getRevisionDate: () => getRevisionDateVia(http),
         sync: () => syncVia(http),
@@ -722,15 +750,34 @@ export class VaultClient {
     return engine;
   }
 
-  private async doSync(unlockedKey: SymmetricKey): Promise<void> {
-    this.syncVerified = false;
+  private doSync(unlockedKey: SymmetricKey): Promise<void> {
+    if (this.syncRequest?.key === unlockedKey) return this.syncRequest.promise;
+    const generation = this.authenticationGeneration;
+    const current = () => generation === this.authenticationGeneration
+      && this.session.getKey() === unlockedKey && this.session.isUnlocked();
     this.syncEngine ??= this.makeSyncEngine();
-    // 同步会把解密结果直接写进会话。`unlocking` 态也允许写入 ——
-    // 首次解锁正是「先同步、后 completeUnlock」，数据必须在解锁完成前就位。
-    const outcome = await this.syncEngine.sync({ unlockedKey, force: true });
-    if (this.session.getKey() === unlockedKey && this.session.isUnlocked()) {
+    this.syncVerified = false;
+    this.session.setSyncing(true);
+    const request = { key: unlockedKey, promise: Promise.resolve() };
+    request.promise = this.syncEngine.sync({ unlockedKey, force: true }).then(outcome => {
+      if (!current()) return;
       this.syncVerified = !outcome.skipped && outcome.failedCount === 0;
-    }
+      if (outcome.failedCount > 0) {
+        this._syncError = '部分记录无法解密，同步尚未完成。请重试；若问题持续，请检查服务器数据。';
+      } else if (!outcome.skipped) {
+        this._syncError = null;
+        this._lastSyncedAt = Date.now();
+      }
+    }).catch(error => {
+      if (!current()) throw new Error('同步已取消，保险库已锁定或账户已变更');
+      this._syncError = '同步失败，请检查网络或服务器后重试。';
+      throw new Error(this._syncError, { cause: error });
+    }).finally(() => {
+      if (this.syncRequest === request) this.syncRequest = null;
+      if (current()) this.session.setSyncing(false);
+    });
+    this.syncRequest = request;
+    return request.promise;
   }
 
   getUserId(): string | null { return this.session.account?.userId ?? null; }
@@ -871,6 +918,47 @@ export class VaultClient {
       await softDeleteCipher(this.http, id);
       assertCurrent();
       this.removeLocally(id);
+    });
+  }
+
+  /** Deleted data is fetched explicitly and never mixed into the active session. */
+  async listTrash(): Promise<TrashRecord[]> {
+    const assertCurrent = this.currentSessionGuard();
+    const raw = await syncVia(this.http);
+    assertCurrent();
+    const { trashed } = partitionCiphers(raw.ciphers);
+    const items = await this.withWriteKey(key => Promise.all(trashed.map(async (dto): Promise<TrashRecord> => {
+      try {
+        const item = await decryptCipher(dto, key);
+        const restoreError = item.nameFailed || item.notesFailed || item.preservation?.failures.length
+          ? '这条记录无法完整读取，请先用兼容客户端检查后再恢复'
+          : item.preservation?.source.edit === false ? '你没有恢复这条记录的权限' : null;
+        return { id: dto.id, rawType: dto.type, item, restoreError };
+      } catch {
+        return { id: dto.id, rawType: dto.type, item: null,
+          restoreError: '这条记录无法读取，请先用兼容客户端检查后再恢复' };
+      }
+    })));
+    assertCurrent();
+    return items.filter(record => !record.item || !isProfileItem(record.item));
+  }
+
+  async restoreItem(id: string): Promise<void> {
+    return this.queueItemWrite(id, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      const record = (await this.listTrash()).find(candidate => candidate.id === id);
+      assertCurrent();
+      if (!record) throw new Error('回收站中找不到这条记录，可能已被恢复或删除');
+      if (record.restoreError || !record.item) throw new Error(record.restoreError ?? '这条记录无法读取，暂不能恢复');
+      const item = record.item;
+      // The native operation retains keys, attachments, passkeys and unknown metadata.
+      await restoreCipher(this.http, id);
+      assertCurrent();
+      if (!item.archivedAt) this.applyLocally({ ...item, deletedAt: null }, !this.session.items.some(existing => existing.id === id));
+      // Restoration already succeeded. A subsequent offline refresh must not be
+      // reported as a failed mutation; its failure remains visible in syncError.
+      await this.hydrateThenSync(this.requireKey());
+      assertCurrent();
     });
   }
 
@@ -1131,6 +1219,9 @@ export class VaultClient {
           card: src.card ?? null,
           identity: src.identity ?? null,
           sshKey: src.sshKey ?? null,
+          bankAccount: src.bankAccount ?? null,
+          driversLicense: src.driversLicense ?? null,
+          passport: src.passport ?? null,
           customFields: src.customFields.map((f) => ({
             name: f.name, value: f.value, type: f.type, linkedId: null,
           })),
@@ -1232,7 +1323,7 @@ async function getDeviceIdentifier(store: DeviceIdStore): Promise<string> {
 import {
   sync as apiSync, getRevisionDate as apiRevisionDate,
   createCipher, getCipher, updateCipher, softDeleteCipher, hardDeleteCipher, moveCiphers,
-  setArchived as setArchivedApi, updateCipherPartial,
+  setArchived as setArchivedApi, updateCipherPartial, restoreCipher, partitionCiphers,
   createFolder as createFolderApi, updateFolder as updateFolderApi,
   deleteFolder as deleteFolderApi,
 } from '@1warden/api';

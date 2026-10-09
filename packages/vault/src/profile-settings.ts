@@ -1,7 +1,12 @@
 import type { VaultItem } from './model';
 import { buildProfileItem, parseProfile } from './profile';
 
-export interface ProfilePreferences { mode: 'system' | 'light' | 'dark'; palette: string; showTypes: boolean }
+export type IconStyle = 'original' | 'plate';
+export interface ProfilePreferences {
+  mode: 'system' | 'light' | 'dark'; palette: string; showTypes: boolean;
+  /** Optional on the wire so legacy clients do not overwrite newer preferences. */
+  iconStyle?: IconStyle;
+}
 export interface ProfileDeviceInput {
   id: string;
   name: string;
@@ -10,17 +15,22 @@ export interface ProfileDeviceInput {
 }
 export interface ProfileDevice extends ProfileDeviceInput { firstSeen: number; lastSeen: number }
 export interface ProfileSettings { preferences: ProfilePreferences | null; devices: ProfileDevice[] }
-export const DEFAULT_PROFILE_PREFERENCES: ProfilePreferences = { mode: 'system', palette: 'original', showTypes: true };
+export const DEFAULT_PROFILE_PREFERENCES: ProfilePreferences = { mode: 'system', palette: 'original', showTypes: true, iconStyle: 'original' };
 export const MAX_PROFILE_DEVICES = 10;
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (): never => { throw new Error('同步设置或设备记录格式无效，请更新 1Warden 或检查个人资料记录'); };
+export const isIconStyle = (value: unknown): value is IconStyle => value === 'original' || value === 'plate';
 
 /** Allow-list only. Never let arbitrary note fields enter a presentation cache. */
 export function validatePreferences(value: unknown): ProfilePreferences {
   if (!object(value) || typeof value['mode'] !== 'string' || !['system', 'light', 'dark'].includes(value['mode'])
     || typeof value['palette'] !== 'string' || !/^[a-z][a-z0-9-]{0,39}$/.test(value['palette'])
     || typeof value['showTypes'] !== 'boolean') return fail();
-  return { mode: value['mode'] as ProfilePreferences['mode'], palette: value['palette'], showTypes: value['showTypes'] };
+  if (value['iconStyle'] !== undefined && typeof value['iconStyle'] !== 'string') return fail();
+  // Missing/future enum values use the default in presentation. Keep them out
+  // of the safe cache; buildPreferencesItem retains the original encrypted value.
+  return { mode: value['mode'] as ProfilePreferences['mode'], palette: value['palette'], showTypes: value['showTypes'],
+    ...(isIconStyle(value['iconStyle']) ? { iconStyle: value['iconStyle'] } : {}) };
 }
 export function validateDevice(value: unknown): ProfileDeviceInput {
   if (!object(value) || typeof value['id'] !== 'string' || !/^[a-zA-Z0-9-]{1,64}$/.test(value['id'])
@@ -56,7 +66,14 @@ export function buildPreferencesItem(value: ProfilePreferences, old?: VaultItem)
   const existing = old ? parseProfileSettings(old) : null;
   const { item, doc, settings } = document(old);
   const previous = object(settings['preferences']) ? settings['preferences'] : {};
-  const updated: Record<string, unknown> = { ...settings, preferences: { ...previous, ...validatePreferences(value) } };
+  const validated = validatePreferences(value);
+  const preferences: Record<string, unknown> = { ...previous, ...validated };
+  // Editing another setting after reading an unknown future style must not
+  // silently replace it with this version's display fallback.
+  if (typeof previous['iconStyle'] === 'string' && !isIconStyle(previous['iconStyle']) && validated.iconStyle === 'original') {
+    preferences['iconStyle'] = previous['iconStyle'];
+  }
+  const updated: Record<string, unknown> = { ...settings, preferences };
   if (existing?.devices.length) {
     updated['devices'] = existing.devices.map(d => (settings['devices'] as Record<string, unknown>[]).find(raw => raw['id'] === d.id)!);
   }

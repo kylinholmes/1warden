@@ -46,12 +46,14 @@ export function QuickAccess({ items, icons, locked, busy, notice, pinned = false
   const [index, setIndex] = useStoreField(viewStore, 'index');
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
+  const selectedRef = useRef<HTMLButtonElement>(null);
   const seq = useRef(0);
 
   useEffect(() => { if (locked) panelRef.current?.focus(); else inputRef.current?.focus(); }, [locked]);
 
   // 结果变了就把选中项收回到第一条 —— 否则光标会停在一个已经不存在的下标上
   useEffect(() => { setIndex(0); }, [items]);
+  useEffect(() => { selectedRef.current?.scrollIntoView({ block: 'nearest' }); }, [index, items]);
 
   function update(value: string) {
     setQuery(value);
@@ -83,7 +85,7 @@ export function QuickAccess({ items, icons, locked, busy, notice, pinned = false
     <div ref={panelRef} tabIndex={-1} className="panel quick-panel flex h-full flex-col overflow-hidden outline-none" onKeyDown={onKeyDown}>
       {/* 搜索就是这一屏的主角 —— 给它 --text-lg，比列表里的条目名还大一号，
           因为用户打开面板时脑子里想的是「我要找的那个东西叫什么」 */}
-      <div className="panel-head gap-3 px-4 py-3.5">
+      <div className="panel-head quick-search-head gap-3 px-4 py-3.5">
         {locked
           ? <IconLock size={18} className="shrink-0 text-[var(--ink-tertiary)]" />
           : <IconSearch size={18} className="shrink-0 text-[var(--ink-tertiary)]" />}
@@ -94,7 +96,7 @@ export function QuickAccess({ items, icons, locked, busy, notice, pinned = false
           placeholder={locked ? '保险库已锁定' : '搜索保险库…'}
           aria-label="搜索保险库"
           disabled={locked}
-          className="min-w-0 flex-1 bg-transparent text-lg outline-none placeholder:text-[var(--ink-tertiary)] disabled:cursor-not-allowed"
+          className="quick-search-input min-w-0 flex-1 bg-transparent text-lg placeholder:text-[var(--ink-tertiary)] disabled:cursor-not-allowed"
         />
         {busy && <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">…</span>}
         {onTogglePin && <button type="button" className="btn btn-ghost h-8 w-8 p-1.5" aria-label={pinned ? '取消固定快速搜索' : '固定快速搜索'}
@@ -131,6 +133,8 @@ export function QuickAccess({ items, icons, locked, busy, notice, pinned = false
           ) : items.map((it, i) => (
             <li key={it.id}>
               <button
+                ref={i === index ? selectedRef : undefined}
+                aria-current={i === index ? true : undefined}
                 type="button"
                 disabled={busy || !it.hasPassword}
                 onMouseEnter={() => setIndex(i)}

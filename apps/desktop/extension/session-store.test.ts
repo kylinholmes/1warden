@@ -92,10 +92,14 @@ describe('SessionStore —— 往返', () => {
   });
 
   it.each([true, false])('preserves sync readiness across worker restart (%s)', async (syncVerified) => {
-    await store.start({ account, userKey: makeUserKey(), items: [], folders: [], token: null, syncVerified });
+    const syncError = syncVerified ? null : '同步失败';
+    const lastSyncedAt = 1_791_516_000_000;
+    await store.start({ account, userKey: makeUserKey(), items: [], folders: [], token: null, syncVerified, syncError, lastSyncedAt });
     const restarted = new SessionStore(area);
     const loaded = await restarted.load();
     expect(loaded?.syncVerified).toBe(syncVerified);
+    expect(loaded?.syncError ?? null).toBe(syncError);
+    expect(loaded?.lastSyncedAt).toBe(lastSyncedAt);
     await restarted.save(loaded!);
     expect((await new SessionStore(area).load())?.syncVerified).toBe(syncVerified);
   });

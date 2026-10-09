@@ -4,7 +4,24 @@ use windows_sys::Win32::{Foundation::{GlobalFree, HGLOBAL, HWND}, System::{DataE
 const UNICODE_TEXT: u32 = 13;
 const CLEAR_AFTER: Duration = Duration::from_secs(30);
 static COPY_ID: AtomicU64 = AtomicU64::new(1);
-static MARKER_FORMAT: OnceLock<u32> = OnceLock::new();
+static FORMATS: OnceLock<Formats> = OnceLock::new();
+struct Formats { marker: u32, exclude_monitoring: u32, allow_history: u32, allow_cloud: u32 }
+fn registered_formats() -> Result<&'static Formats, String> {
+    fn register(name: &str) -> u32 {
+        let name: Vec<u16> = name.encode_utf16().chain(Some(0)).collect();
+        unsafe { RegisterClipboardFormatW(name.as_ptr()) }
+    }
+    let formats = FORMATS.get_or_init(|| Formats {
+        marker: register("1Warden.ClipboardExpiry"),
+        exclude_monitoring: register("ExcludeClipboardContentFromMonitorProcessing"),
+        allow_history: register("CanIncludeInClipboardHistory"),
+        allow_cloud: register("CanUploadToCloudClipboard"),
+    });
+    if [formats.marker, formats.exclude_monitoring, formats.allow_history, formats.allow_cloud].contains(&0) {
+        return Err("无法启用剪贴板隐私保护，未复制".into());
+    }
+    Ok(formats)
+}
 fn authorize(label: &str) -> Result<(), String> {
     if label == "main" { Ok(()) } else { Err("只能由主窗口复制保险库内容".into()) }
 }
@@ -26,6 +43,29 @@ impl Clipboard {
 impl Drop for Clipboard { fn drop(&mut self) { unsafe { CloseClipboard(); } } }
 struct Allocation(HGLOBAL);
 impl Drop for Allocation { fn drop(&mut self) { if !self.0.is_null() { unsafe { GlobalFree(self.0); } } } }
+impl Allocation {
+    fn from_bytes(bytes: &[u8]) -> Result<Self, String> {
+        let memory = Self(unsafe { GlobalAlloc(GMEM_MOVEABLE, bytes.len()) });
+        if memory.0.is_null() { return Err("无法分配剪贴板内存".into()); }
+        let destination = unsafe { GlobalLock(memory.0) };
+        if destination.is_null() { return Err("无法写入剪贴板内存".into()); }
+        unsafe {
+            std::ptr::copy_nonoverlapping(bytes.as_ptr(), destination.cast::<u8>(), bytes.len());
+            GlobalUnlock(memory.0);
+        }
+        Ok(memory)
+    }
+    // The caller holds the open clipboard for the complete write transaction.
+    fn publish(&mut self, format: u32) -> Result<(), String> {
+        if unsafe { SetClipboardData(format, self.0) }.is_null() {
+            // Never leave partial content (or a secret without its protections).
+            unsafe { EmptyClipboard(); }
+            return Err("无法完成受保护的剪贴板复制，请重试".into());
+        }
+        self.0 = std::ptr::null_mut(); // Windows now owns the allocation.
+        Ok(())
+    }
+}
 fn unchanged(expected: u64, current: u64) -> bool { expected != 0 && expected == current }
 fn clear_if_unchanged(owner: usize, format: u32, token: u64) {
     // Windows may increment its sequence when CloseClipboard synthesizes formats.
@@ -45,17 +85,17 @@ fn clear_if_unchanged(owner: usize, format: u32, token: u64) {
     }
 }
 fn write(owner: HWND, value: &str) -> Result<(u32, u64), String> {
-    let format = *MARKER_FORMAT.get_or_init(|| {
-        let name: Vec<u16> = "1Warden.ClipboardExpiry".encode_utf16().chain(Some(0)).collect();
-        unsafe { RegisterClipboardFormatW(name.as_ptr()) }
-    });
-    if format == 0 { return Err("无法设置剪贴板清理标记".into()); }
+    let formats = registered_formats()?;
     let token = COPY_ID.fetch_add(1, Ordering::SeqCst);
-    let mut marker = Allocation(unsafe { GlobalAlloc(GMEM_MOVEABLE, std::mem::size_of::<u64>()) });
-    if marker.0.is_null() { return Err("无法分配剪贴板内存".into()); }
-    let marker_data = unsafe { GlobalLock(marker.0) };
-    if marker_data.is_null() { return Err("无法写入剪贴板标记".into()); }
-    unsafe { std::ptr::write_unaligned(marker_data.cast::<u64>(), token); GlobalUnlock(marker.0); }
+    let mut marker = Allocation::from_bytes(&token.to_ne_bytes())?;
+    // EmptyClipboard only clears the current value; it cannot remove Win+V
+    // history or cloud copies. Opt out when writing, before exposing any text.
+    // https://learn.microsoft.com/windows/win32/dataxchg/clipboard-formats#cloud-clipboard-and-clipboard-history-formats
+    // Exclusion takes any non-NULL data; the other two formats require DWORD 0.
+    // All handles contain actual data, not NULL (which means delayed rendering).
+    let mut exclude_monitoring = Allocation::from_bytes(&1u32.to_ne_bytes())?;
+    let mut allow_history = Allocation::from_bytes(&0u32.to_ne_bytes())?;
+    let mut allow_cloud = Allocation::from_bytes(&0u32.to_ne_bytes())?;
     let mut units = encode(value)?;
     let bytes = units.len() * std::mem::size_of::<u16>();
     // SAFETY: allocation fits the complete UTF-16 string and NUL terminator.
@@ -70,14 +110,18 @@ fn write(owner: HWND, value: &str) -> Result<(u32, u64), String> {
     units.fill(0);
     let _clipboard = Clipboard::open(owner)?;
     if unsafe { EmptyClipboard() } == 0 { return Err("无法更新剪贴板".into()); }
-    if unsafe { SetClipboardData(UNICODE_TEXT, memory.0) }.is_null() { return Err("复制失败，请重试".into()); }
-    memory.0 = std::ptr::null_mut(); // Windows owns the memory after SetClipboardData.
-    if unsafe { SetClipboardData(format, marker.0) }.is_null() {
-        unsafe { EmptyClipboard(); } // Never leave a secret without its cleanup marker.
-        return Err("无法安排剪贴板清理，已取消复制".into());
+    exclude_monitoring.publish(formats.exclude_monitoring)?;
+    allow_history.publish(formats.allow_history)?;
+    allow_cloud.publish(formats.allow_cloud)?;
+    marker.publish(formats.marker)?;
+    memory.publish(UNICODE_TEXT)?;
+    // Validate publication without reading back any clipboard text. Keep the
+    // lock until this check completes, so another writer cannot race it.
+    if unsafe { GetClipboardOwner() != owner || IsClipboardFormatAvailable(UNICODE_TEXT) == 0 } {
+        unsafe { EmptyClipboard(); }
+        return Err("剪贴板未能提供可粘贴的文本，请重试".into());
     }
-    marker.0 = std::ptr::null_mut();
-    Ok((format, token))
+    Ok((formats.marker, token))
 }
 #[tauri::command]
 pub async fn clipboard_copy(window: tauri::WebviewWindow, value: String) -> Result<(), String> {

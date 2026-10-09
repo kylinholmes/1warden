@@ -20,6 +20,7 @@ const BRANDS = {
   rupay: { name: 'RuPay', src: rupay },
 } as const;
 type Brand = keyof typeof BRANDS;
+export const BUILTIN_CARD_ICONS = (Object.keys(BRANDS) as Brand[]).map(id => ({ id, ...BRANDS[id] }));
 const ALIASES: Record<string, Brand> = {
   visa: 'visa', mastercard: 'mastercard', mc: 'mastercard', 万事达: 'mastercard',
   amex: 'amex', americanexpress: 'amex', 美国运通: 'amex', 运通: 'amex',

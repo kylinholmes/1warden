@@ -33,7 +33,8 @@ export function ProfileEditor({ client }: { client: ApplicationClient }) {
     } catch (e) { if (epoch === generation.current) setError(e instanceof Error ? e.message : '头像处理失败'); }
     finally { if (epoch === generation.current) setProcessing(false); }
   }
-  const disabled = processing || snapshot.status !== 'unlocked' || !snapshot.profileReady || !!snapshot.profileError;
+  const unavailable = snapshot.status !== 'unlocked' || !snapshot.profileReady || !!snapshot.profileError || !!snapshot.profileSettingsError;
+  const disabled = processing || unavailable;
   return <section className="mb-6" aria-labelledby="profile-heading">
     <h2 id="profile-heading" className="sr-only">个人资料编辑</h2>
     <div className="card p-3">
@@ -44,10 +45,10 @@ export function ProfileEditor({ client }: { client: ApplicationClient }) {
           {draft.avatarDataUrl && <button type="button" className="btn btn-ghost ml-1" disabled={disabled} onClick={() => update({ avatarDataUrl: null })}>移除</button>}
           <p className="text-xs text-[var(--ink-tertiary)]">JPG、PNG 或 WebP，可拖动和缩放裁剪</p>
         </div>
-        <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" aria-label="选择头像图片" className="sr-only" tabIndex={-1}
+        <input ref={fileInput} type="file" accept="image/jpeg,image/png,image/webp" aria-label="选择头像图片" className="sr-only" tabIndex={-1} disabled={disabled}
           onChange={(e) => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void choose(file); }} />
       </div>
-      {cropImage && <AvatarCropper key={cropImage.src} image={cropImage} onCancel={() => {
+      {cropImage && !unavailable && <AvatarCropper key={cropImage.src} image={cropImage} onCancel={() => {
         setCropImage(null); chooseButton.current?.focus({ preventScroll: true });
       }} onConfirm={avatarDataUrl => {
         update({ avatarDataUrl }); void store.flush(); setCropImage(null); chooseButton.current?.focus({ preventScroll: true });
@@ -57,7 +58,7 @@ export function ProfileEditor({ client }: { client: ApplicationClient }) {
         onChange={(e) => update({ displayName: e.target.value })} onBlur={() => { void store.flush(); }} />
       <p className="mt-2 text-xs text-[var(--ink-tertiary)]">头像和名称随保险库加密同步，并缓存在本机供锁定时显示。</p>
       {!snapshot.profileReady && <p role="status" className="mt-2 text-xs text-[var(--ink-secondary)]">{snapshot.syncing ? '正在同步个人资料…' : '个人资料尚未完成同步，请重新解锁后再编辑。'}</p>}
-      {(error || snapshot.profileError) && <p role="alert" className="mt-2 text-xs text-[var(--risk)]">{error || snapshot.profileError}</p>}
+      {(error || snapshot.profileError || snapshot.profileSettingsError) && <p role="alert" className="mt-2 text-xs text-[var(--risk)]">{error || snapshot.profileError || snapshot.profileSettingsError}</p>}
       <AutosaveStatus field={field} retry={() => { void store.retry('profile'); }} discard={() => store.discard('profile')} />
     </div>
   </section>;

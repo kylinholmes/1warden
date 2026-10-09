@@ -20,8 +20,9 @@
  *    用户不会发现少了什么，直到某天要登录某个网站。
  */
 import { parseGenericCsv } from './import-csv';
+import type { BankAccountFields, DriversLicenseFields, PassportFields } from './model';
 
-export type ImportedType = 'login' | 'secureNote' | 'card' | 'identity' | 'sshKey';
+export type ImportedType = 'login' | 'secureNote' | 'card' | 'identity' | 'sshKey' | 'bankAccount' | 'driversLicense' | 'passport';
 
 export interface ImportedField {
   name: string;
@@ -106,6 +107,9 @@ export interface ImportedItem {
   card?: ImportedCard | null;
   identity?: ImportedIdentity | null;
   sshKey?: ImportedSshKey | null;
+  bankAccount?: BankAccountFields | null;
+  driversLicense?: DriversLicenseFields | null;
+  passport?: PassportFields | null;
   customFields: ImportedField[];
   /** 在源文件里的行号（表头是第 1 行）—— 报告问题时要能指出来 */
   rowNumber: number;

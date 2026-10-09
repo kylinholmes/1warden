@@ -1,6 +1,7 @@
 import { useRef } from 'react';
 import { IMPORT_FORMATS, type ImportFormatId } from '@1warden/vault';
 import { IconAlert, IconCheck, IconImport } from './icons';
+import { TYPE_LABEL } from './destinations';
 
 /**
  * 从别处导入 —— **两端共用这一份**。
@@ -53,10 +54,6 @@ export interface ImportOutcome {
   created: number;
   failed: { name: string; reason: string }[];
 }
-
-const TYPE_LABEL: Record<string, string> = {
-  login: '登录', secureNote: '笔记', card: '卡片', identity: '身份', sshKey: 'SSH 密钥',
-};
 
 export function ImportView({
   preview,
@@ -279,12 +276,15 @@ function Preview({ preview, disabled, onRun, onCancel }: {
                 第 <span className="tabular-nums">{s.rowNumber}</span> 行 —— {s.reason}
               </li>
             ))}
-            {preview.skipped.length > 8 && (
-              <li className="text-xs text-[var(--ink-tertiary)]">
-                …还有 {preview.skipped.length - 8} 行
-              </li>
-            )}
           </ul>
+          {preview.skipped.length > 8 && <details className="mt-2 text-xs text-[var(--ink-secondary)]">
+            <summary className="cursor-pointer text-[var(--accent)]">查看其余 {preview.skipped.length - 8} 行</summary>
+            <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
+              {preview.skipped.slice(8).map(s => <li key={s.rowNumber}>
+                第 <span className="tabular-nums">{s.rowNumber}</span> 行 —— {s.reason}
+              </li>)}
+            </ul>
+          </details>}
         </div>
       )}
 

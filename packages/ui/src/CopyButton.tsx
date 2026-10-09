@@ -1,7 +1,7 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { useEffect, useRef } from 'react';
 import { IconCheck, IconCopy } from './icons';
-import { CLIPBOARD_CLEAR_MS } from './clipboard';
+import { CLIPBOARD_CLEAR_MS, writeClipboardText } from './clipboard';
 
 /**
  * 复制到剪贴板 —— **桌面端和浏览器插件共用**。
@@ -44,7 +44,8 @@ export interface CopyButtonProps {
   getValue: () => Promise<string>;
   /**
    * 值已写进剪贴板之后。共享页面传 `scheduleClipboardClear`，由入口
-   * 安装的平台实现选择本地定时器或扩展后台，写入失败时不安排清理。
+   * 安装的平台实现选择本地定时器或扩展后台；Windows 原生写入已经安排清理，
+   * 此时无需重复安排。写入失败时不调用回调。
    */
   onCopied?: (value: string) => void | Promise<void>;
   /** 失败时。**不传就静默** —— 但调用方通常应该传，不然用户不知道没复制上 */
@@ -84,7 +85,7 @@ export function CopyButton({
   async function copy(): Promise<void> {
     try {
       const value = await getValue();
-      await navigator.clipboard.writeText(value);
+      await writeClipboardText(value);
       await onCopied?.(value);
       setCopied(true);
       if (timer.current) clearTimeout(timer.current);

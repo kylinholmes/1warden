@@ -9,19 +9,16 @@
  */
 import { execFileSync } from 'node:child_process';
 import { writeFile } from 'node:fs/promises';
-import {
-  deriveMasterKey, hashMasterPassword, stretchMasterKey, makeUserKey,
-  encryptBytes, KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID,
-} from '../packages/crypto/src/index';
-import { toBase64, concatBytes } from '../packages/crypto/src/bytes';
+import { KDF_TYPE_PBKDF2, KDF_TYPE_ARGON2ID } from '../packages/crypto/src/index';
 import { BW_BIN, assertBwVersion, prepareBwEnv } from './bw-cli';
+import { localVaultwardenUrl, registerLocalVaultwardenAccount, RegistrationRejected } from './vaultwarden-registration';
 
 // 必须在任何 fetch 之前备好环境（跳过自签证书校验 + CLI 状态目录）。
 // 官方 CLI 拒绝明文 HTTP，所以本地服务也走 HTTPS —— 详见 scripts/dev-env.sh。
 prepareBwEnv();
 
 // 默认与 scripts/dev-env.sh 保持一致（HTTPS + 自签证书：官方 CLI 拒绝明文 HTTP）
-const BASE = process.env.VW_URL ?? 'https://localhost:8443';
+const BASE = localVaultwardenUrl(process.env.VW_URL ?? 'https://localhost:8443');
 const EMAIL = process.env.ONEWARDEN_TEST_EMAIL ?? 'onewarden-test@example.com';
 const PASSWORD = process.env.ONEWARDEN_TEST_PASSWORD ?? 'Test-Master-Password-123!';
 const ITERATIONS = 600_000;
@@ -46,61 +43,17 @@ async function main() {
 
   console.log(`→ KDF:     ${KDF_KIND}${KDF_KIND === 'argon2' ? ` ${JSON.stringify(ARGON2)}` : ` ${ITERATIONS} 轮`}`);
 
-  // 1. 派生密钥
-  const masterKey = await deriveMasterKey(PASSWORD, EMAIL, kdfConfig);
-  const masterPasswordHash = await hashMasterPassword(masterKey, PASSWORD);
-  const stretched = await stretchMasterKey(masterKey);
-  console.log('✓ 密钥派生完成（masterKey → masterPasswordHash + 拉伸主密钥）');
-
-  // 2. 生成用户对称密钥（64 字节 = 32 enc + 32 mac），用拉伸主密钥包起来
-  const userKey = makeUserKey();
-  const protectedKey = await encryptBytes(concatBytes(userKey.encKey, userKey.macKey), stretched);
-  console.log('✓ 用户对称密钥已生成并包装');
-
-  // 3. 生成 RSA-2048 密钥对，私钥用用户密钥包起来
-  const kp = await crypto.subtle.generateKey(
-    {
-      name: 'RSA-OAEP', modulusLength: 2048,
-      publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-1',
-    },
-    true, ['encrypt', 'decrypt'],
-  ) as CryptoKeyPair;
-  const privateKeyDer = new Uint8Array(await crypto.subtle.exportKey('pkcs8', kp.privateKey));
-  const publicKeyDer = new Uint8Array(await crypto.subtle.exportKey('spki', kp.publicKey));
-  const encryptedPrivateKey = await encryptBytes(privateKeyDer, userKey);
-  console.log('✓ RSA-2048 密钥对已生成并包装');
-
-  // 4. 注册
-  const res = await fetch(`${BASE}/identity/accounts/register`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      email: EMAIL,
-      name: '1Warden Interop',
-      masterPasswordHash,
-      masterPasswordHint: null,
-      key: protectedKey,
-      keys: { publicKey: toBase64(publicKeyDer), encryptedPrivateKey },
-      kdfType: kdfConfig.kdf,
-      kdfIterations: kdfConfig.iterations,
-      kdfMemory: KDF_KIND === 'argon2' ? ARGON2.memory : null,
-      kdfParallelism: KDF_KIND === 'argon2' ? ARGON2.parallelism : null,
-      emailVerificationToken: null,
-      organizationUserId: null,
-      orgInviteToken: null,
-      acceptEmergencyAccessId: null,
-      acceptEmergencyAccessInviteToken: null,
-    }),
-  });
-
-  const text = await res.text();
-  if (res.ok) {
+  // New Vaultwarden registration requires a verification token even without SMTP.
+  try {
+    await registerLocalVaultwardenAccount({ serverUrl: BASE, email: EMAIL, password: PASSWORD,
+      name: '1Warden Interop', kdf: kdfConfig });
     console.log('✓ 注册成功');
-  } else if (res.status === 400 && /already exists/i.test(text)) {
-    console.log('· 账户已存在，跳过注册（若要重来：./scripts/dev-server.sh reset）');
-  } else {
-    console.error(`✗ 注册失败 ${res.status}: ${text}`);
-    process.exit(1);
+  } catch (error) {
+    // The server deliberately conflates duplicate accounts and disabled signups.
+    // Do not call this success: the mandatory CLI login/unlock below must prove
+    // that the configured test identity already exists with these credentials.
+    if (!(error instanceof RegistrationRejected) || error.status !== 400 || error.phase !== 'finish') throw error;
+    console.warn('· 服务器拒绝完成注册；可能账户已存在。接下来必须通过官方 CLI 登录并解锁验证，失败则退出。');
   }
 
   // 5. 让官方 CLI 登录 —— 这是第一道互操作证明

@@ -17,6 +17,29 @@ function setup() {
 }
 afterEach(() => vi.useRealTimers());
 describe('profile autosave', () => {
+  it('reports pending failed edits on every flush until retry saves them', async () => {
+    const { store, saveProfile } = setup();
+    saveProfile.mockRejectedValueOnce(new Error('offline'));
+    store.editProfile({ displayName: 'Keep on logout' });
+    expect(await store.flush()).toEqual({ saved: false, pending: ['profile'] });
+    expect(await store.flush()).toEqual({ saved: false, pending: ['profile'] });
+    expect(saveProfile).toHaveBeenCalledTimes(1);
+    expect(store.getSnapshot().profile.value.displayName).toBe('Keep on logout');
+    expect(await store.retry('profile')).toEqual({ saved: true, pending: [] });
+    expect(await store.flush()).toEqual({ saved: true, pending: [] }); store.stop();
+  });
+  it('reports parked dirty edits when the account locks instead of reporting a successful flush', async () => {
+    const { store, update, saveProfile } = setup();
+    store.editProfile({ displayName: 'Pending' }); update({ status: 'locked' });
+    expect(await store.flush()).toEqual({ saved: false, pending: ['profile'] });
+    expect(saveProfile).not.toHaveBeenCalled(); store.stop();
+  });
+  it('does not erase unsaved drafts through forget before an explicit discard', async () => {
+    const { store } = setup(); store.editProfile({ displayName: 'Retained' });
+    expect(() => store.forget()).toThrow('尚未保存');
+    expect(store.getSnapshot().profile.value.displayName).toBe('Retained');
+    store.discard('profile'); expect(() => store.forget()).not.toThrow(); store.stop();
+  });
   it('coalesces typing and saves without a button', async () => {
     vi.useFakeTimers(); const { store, saveProfile } = setup();
     store.editProfile({ displayName: 'N' }); store.editProfile({ displayName: 'New' });

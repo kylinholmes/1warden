@@ -27,12 +27,15 @@
 
 import { isPalette, paletteTokens, type ThemePalette } from './theme-palettes';
 import { createStore } from '@1warden/state';
+import { isIconStyle, type IconStyle } from '@1warden/vault';
+export type { IconStyle } from '@1warden/vault';
 export type ThemeMode = 'system' | 'light' | 'dark';
 
 export const THEME_MODES: readonly ThemeMode[] = ['system', 'light', 'dark'];
 
 const KEY = '1warden.theme';
 const PALETTE_KEY = '1warden.palette';
+const ICON_STYLE_KEY = '1warden.iconStyle';
 
 function isMode(v: unknown): v is ThemeMode {
   return v === 'system' || v === 'light' || v === 'dark';
@@ -58,18 +61,23 @@ function readPalette(): ThemePalette {
   try { const raw = localStorage.getItem(PALETTE_KEY); return isPalette(raw) ? raw : 'original'; }
   catch { return 'original'; }
 }
+function readIconStyle(): IconStyle {
+  try { const value = localStorage.getItem(ICON_STYLE_KEY); return isIconStyle(value) ? value : 'original'; }
+  catch { return 'original'; }
+}
 let media: MediaQueryList | undefined;
 let initialized = false;
 let appliedTokens: string[] = [];
 const resolveMode = (mode: ThemeMode): 'light' | 'dark' => mode === 'system' ? (media?.matches ? 'dark' : 'light') : mode;
 export const themeStore = createStore(() => {
-  const mode = readStored(); return { mode, palette: readPalette(), resolved: resolveMode(mode) };
+  const mode = readStored(); return { mode, palette: readPalette(), iconStyle: readIconStyle(), resolved: resolveMode(mode) };
 });
 
 export function getThemeMode(): ThemeMode {
   return themeStore.getState().mode;
 }
 export function getThemePalette(): ThemePalette { return themeStore.getState().palette; }
+export function getIconStyle(): IconStyle { return themeStore.getState().iconStyle; }
 export function getResolvedTheme(): 'light' | 'dark' {
   return themeStore.getState().resolved;
 }
@@ -80,11 +88,12 @@ export function subscribeTheme(fn: () => void): () => void {
 
 /** 把当前选择写到根元素上 —— 属性在 = 显式选择；不在 = 跟随系统 */
 function apply(): void {
-  const { mode: current, palette } = themeStore.getState();
+  const { mode: current, palette, iconStyle } = themeStore.getState();
   const root = document.documentElement;
   if (current === 'system') delete root.dataset['theme'];
   else root.dataset['theme'] = current;
   root.dataset['palette'] = palette;
+  root.dataset['iconStyle'] = iconStyle;
   for (const key of appliedTokens) root.style.removeProperty(key);
   const tokens = paletteTokens(palette, getResolvedTheme());
   for (const [key, value] of Object.entries(tokens)) root.style.setProperty(key, value);
@@ -95,6 +104,12 @@ export function setThemePalette(value: ThemePalette): void {
   if (!isPalette(value) || getThemePalette() === value) return;
   themeStore.setState({ palette: value });
   try { localStorage.setItem(PALETTE_KEY, value); } catch { /* Session-only when storage is blocked. */ }
+  apply();
+}
+export function setIconStyle(value: IconStyle): void {
+  if (!isIconStyle(value) || getIconStyle() === value) return;
+  themeStore.setState({ iconStyle: value });
+  try { localStorage.setItem(ICON_STYLE_KEY, value); } catch { /* Session-only. */ }
   apply();
 }
 
@@ -122,8 +137,8 @@ export function initTheme(): void {
       });
     }
     window.addEventListener('storage', (event) => {
-      if (event.storageArea !== localStorage || (event.key !== null && event.key !== KEY && event.key !== PALETTE_KEY)) return;
-      const mode = readStored(); themeStore.setState({ mode, palette: readPalette(), resolved: resolveMode(mode) }); apply();
+      if (event.storageArea !== localStorage || (event.key !== null && event.key !== KEY && event.key !== PALETTE_KEY && event.key !== ICON_STYLE_KEY)) return;
+      const mode = readStored(); themeStore.setState({ mode, palette: readPalette(), iconStyle: readIconStyle(), resolved: resolveMode(mode) }); apply();
     });
   }
   const resolved = resolveMode(getThemeMode());

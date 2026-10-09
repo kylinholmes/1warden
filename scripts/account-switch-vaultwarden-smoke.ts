@@ -3,9 +3,7 @@
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
-import {
-  concatBytes, deriveMasterKey, encryptBytes, hashMasterPassword, makeUserKey, stretchMasterKey, toBase64,
-} from '../packages/crypto/src/index';
+import { registerLocalVaultwardenAccount } from './vaultwarden-registration';
 import { buildProfileItem, VaultClient, type UserProfile } from '../packages/vault/src/index';
 import { createAccountSessions } from '../apps/desktop/src/application/account-sessions';
 import { createApplicationClient } from '../apps/desktop/src/application/client';
@@ -69,24 +67,7 @@ const app = createApplicationClient(sessions.service, {
 let processHandle: ReturnType<typeof Bun.spawn> | undefined;
 
 async function register(email: string, password: string): Promise<void> {
-  const kdf = { kdf: 0 as const, iterations: 600_000 };
-  const masterKey = await deriveMasterKey(password, email, kdf);
-  const userKey = makeUserKey();
-  const pair = await crypto.subtle.generateKey({ name: 'RSA-OAEP', modulusLength: 2048,
-    publicExponent: new Uint8Array([1, 0, 1]), hash: 'SHA-1' }, true, ['encrypt', 'decrypt']) as CryptoKeyPair;
-  const response = await fetch(`${isolatedUrl}/identity/accounts/register`, {
-    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({
-      email, name: 'Disposable switching test', masterPasswordHash: await hashMasterPassword(masterKey, password),
-      masterPasswordHint: null,
-      key: await encryptBytes(concatBytes(userKey.encKey, userKey.macKey), await stretchMasterKey(masterKey)),
-      keys: { publicKey: toBase64(new Uint8Array(await crypto.subtle.exportKey('spki', pair.publicKey))),
-        encryptedPrivateKey: await encryptBytes(new Uint8Array(await crypto.subtle.exportKey('pkcs8', pair.privateKey)), userKey) },
-      kdfType: kdf.kdf, kdfIterations: kdf.iterations, kdfMemory: null, kdfParallelism: null,
-      emailVerificationToken: null, organizationUserId: null, orgInviteToken: null,
-      acceptEmergencyAccessId: null, acceptEmergencyAccessInviteToken: null,
-    }),
-  });
-  if (!response.ok) throw Error(`Disposable account registration failed: ${response.status} ${await response.text()}`);
+  await registerLocalVaultwardenAccount({ serverUrl: isolatedUrl, email, password, name: 'Disposable switching test' });
 }
 
 async function select(target: typeof targetA, expectedProfile: UserProfile | null, label: string, unlocked = false) {

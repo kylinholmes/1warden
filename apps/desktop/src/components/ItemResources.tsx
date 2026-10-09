@@ -1,19 +1,23 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useId, useRef, type ReactNode } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { toBase64 } from '@1warden/crypto';
-import { IconMore, IconPlus, IconSpinner, IconTrash, SecretField, Section } from '@1warden/ui';
+import { FIELD_LABEL_CLASS, FIELD_ROW_CLASS, IconChevronDown, IconPlus, IconSpinner, IconTrash, SecretField, Section } from '@1warden/ui';
 import type { ApplicationClient, ApplicationSnapshot, ItemDetailData } from '../application/types';
 import { openWebsite } from '../open-website';
 
-export interface ItemResourcesProps {
+interface ItemResourceOptions {
   item: ItemDetailData;
   client: ApplicationClient;
-  onError: (message: string) => void;
+  onError?: ((message: string) => void) | undefined;
   onBusyChange?: ((busy: boolean) => void) | undefined;
   disabled?: boolean;
 }
 
 type Confirmation = { kind: 'attachment'; id: string } | { kind: 'passkey'; id: string } | { kind: 'history' } | null;
+
+// SecretField forwards both reveal and copy failures. A read reports at its own
+// account boundary, then marks the rejection so the field does not report it again.
+class HandledHistoryReadError extends Error {}
 
 function accountIdentity(snapshot: ApplicationSnapshot): string {
   return JSON.stringify([snapshot.account?.serverUrl, snapshot.account?.email, snapshot.account?.userId]);
@@ -40,17 +44,19 @@ function siteUrl(item: ItemDetailData): string | null {
   } catch { return null; }
 }
 
-/** Resource operations deliberately stay outside the normal editable draft. */
-export function ItemResources({ item, client, onError, onBusyChange, disabled = false }: ItemResourcesProps) {
+/** One operation boundary for credentials and management, regardless of visual position. */
+export function useItemResources({ item, client, onError, onBusyChange, disabled = false }: ItemResourceOptions) {
   const store = useLocalStore(() => ({ resources: item, busy: false, pending: null as Confirmation,
-    error: null as string | null, notes: {} as Record<string, string> }));
+    error: null as string | null, notes: {} as Record<string, string>, historyOpen: false }));
   const [resources, setResources] = useStoreField(store, 'resources');
   const [busy, setBusy] = useStoreField(store, 'busy');
   const [pending, setPending] = useStoreField(store, 'pending');
   const [error, setError] = useStoreField(store, 'error');
   const [notes, setNotes] = useStoreField(store, 'notes');
+  const [historyOpen, setHistoryOpen] = useStoreField(store, 'historyOpen');
+  const historyId = useId();
+  const historyToggle = useRef<HTMLButtonElement>(null);
   const selectingFile = useRef<HTMLInputElement>(null);
-  const moreActions = useRef<HTMLDetailsElement>(null);
   const active = useRef(false);
   const blocked = useRef(disabled);
   blocked.current = disabled;
@@ -61,19 +67,11 @@ export function ItemResources({ item, client, onError, onBusyChange, disabled = 
   itemId.current = item.summary.id;
   const callbacks = useRef({ onError, onBusyChange });
   callbacks.current = { onError, onBusyChange };
-  const editable = resources.rawType >= 1 && resources.rawType <= 5;
+  const editable = resources.rawType >= 1 && resources.rawType <= 8 && resources.summary.type !== 'unknown';
   const controlsDisabled = busy || disabled;
   const website = siteUrl(resources);
 
   useEffect(() => { setResources(item); }, [item]);
-  useEffect(() => {
-    const closeOutside = (event: PointerEvent) => {
-      if (moreActions.current && !moreActions.current.contains(event.target as Node)) moreActions.current.open = false;
-    };
-    document.addEventListener('pointerdown', closeOutside);
-    return () => document.removeEventListener('pointerdown', closeOutside);
-  }, []);
-  useEffect(() => { if (controlsDisabled && moreActions.current) moreActions.current.open = false; }, [controlsDisabled]);
   useEffect(() => {
     alive.current = true;
     let boundary = `${client.getSnapshot().status}:${accountIdentity(client.getSnapshot())}`;
@@ -84,6 +82,7 @@ export function ItemResources({ item, client, onError, onBusyChange, disabled = 
         boundary = next;
         epoch.current++;
         setPending(null);
+        setHistoryOpen(false);
       }
     });
     return () => {
@@ -109,11 +108,15 @@ export function ItemResources({ item, client, onError, onBusyChange, disabled = 
     };
   }
 
-  function report(message: string) {
+  function report(cause: unknown) {
+    if (cause instanceof HandledHistoryReadError) return;
     const snapshot = client.getSnapshot();
     if (!alive.current || snapshot.status !== 'unlocked' || accountIdentity(snapshot) !== displayedAccount.current) return;
-    setError(message);
-    callbacks.current.onError(message);
+    const message = typeof cause === 'string' ? cause : cause instanceof Error ? cause.message : '无法读取历史密码';
+    // The notification owner survives detail revisions and navigation. Standalone
+    // views without that owner retain one inline fallback instead.
+    if (callbacks.current.onError) callbacks.current.onError(message);
+    else setError(message);
   }
 
   async function run(operation: (context: ReturnType<typeof operationContext>) => Promise<void>, fallback: string) {
@@ -134,9 +137,8 @@ export function ItemResources({ item, client, onError, onBusyChange, disabled = 
     } catch (cause) {
       if (boundaryValid && context.sameAccount()) {
         const message = cause instanceof Error ? cause.message : fallback;
-        if (context.valid()) setError(message);
-        // The parent toast outlives the detail view; local state updates do not.
-        callbacks.current.onError(message);
+        if (callbacks.current.onError) callbacks.current.onError(message);
+        else if (context.valid()) setError(message);
       }
     } finally {
       unsubscribeOperation();
@@ -207,37 +209,59 @@ export function ItemResources({ item, client, onError, onBusyChange, disabled = 
     if (blocked.current || active.current) throw new Error('请等待当前操作完成');
     const context = operationContext();
     if (!context.valid()) throw new Error('当前账户已变化，请重新打开条目');
-    const value = await client.reveal(context.id, { kind: 'history', index });
-    if (!context.valid()) throw new Error('当前账户已变化，请重新打开条目');
-    return value;
+    let boundaryValid = true;
+    const unsubscribeOperation = client.subscribe(() => {
+      if (!context.sameAccount()) boundaryValid = false;
+    });
+    try {
+      const value = await client.reveal(context.id, { kind: 'history', index });
+      // A departed view must never reveal or copy a secret that arrives late.
+      if (!context.valid()) throw new HandledHistoryReadError('当前账户已变化，请重新打开条目');
+      return value;
+    } catch (cause) {
+      if (cause instanceof HandledHistoryReadError) throw cause;
+      const message = cause instanceof Error ? cause.message : '无法读取历史密码';
+      if (boundaryValid && context.sameAccount()) {
+        if (callbacks.current.onError) callbacks.current.onError(message);
+        else if (context.valid()) setError(message);
+      }
+      throw new HandledHistoryReadError(message, { cause });
+    } finally {
+      unsubscribeOperation();
+    }
   }
 
-  return <fieldset data-item-resources aria-busy={busy} disabled={controlsDisabled} className="m-0 min-w-0 border-0 p-0">
-    {error && <p role="alert" className="mb-3 text-sm text-[var(--risk)]">{error}</p>}
-    {busy && <p role="status" className="mb-3 flex items-center gap-1.5 text-xs text-[var(--ink-secondary)]"><IconSpinner size={13} />处理中…</p>}
-    {resources.attachments.length > 0 && <Section title="附件">
-      {resources.attachments.map(attachment => <div key={attachment.id}>
-        <div className="flex flex-wrap items-center gap-2 border-b border-[var(--border-subtle)] py-2.5">
-          <div className="min-w-0 flex-1 basis-32">
-            <p className="truncate text-sm" title={attachment.fileName}>{attachment.fileName || '（没有文件名）'}</p>
-            <p className="mt-0.5 text-xs text-[var(--ink-tertiary)]">{attachment.sizeName}</p>
-            {attachment.failed && <p className="mt-1 text-xs text-[var(--risk)]">附件信息无法解密</p>}
-            {notes[attachment.id] && <p role="status" className="mt-1 break-all text-xs text-[var(--safe)]">{notes[attachment.id]}</p>}
-          </div>
-          <button type="button" disabled={controlsDisabled || attachment.failed || !client.capabilities.saveAttachments}
-            className="btn btn-quiet" onClick={() => { void download(attachment); }}>取回</button>
-          {editable && <button type="button" disabled={controlsDisabled} className="btn btn-ghost gap-1 text-xs hover:text-[var(--risk)]"
-            aria-label={`删除附件 ${attachment.fileName || attachment.id}`} onClick={() => setPending({ kind: 'attachment', id: attachment.id })}>
-            <IconTrash size={13} />删除
-          </button>}
-        </div>
-        {confirmation('attachment', attachment.id)}
-      </div>)}
-    </Section>}
+  return {
+    resources, busy, controlsDisabled, editable, error, notes, pending, setPending,
+    historyOpen, setHistoryOpen, historyId, historyToggle, selectingFile,
+    upload, download, confirmation, revealHistory, report,
+    canSaveAttachments: client.capabilities.saveAttachments, website,
+    addPasskey: () => { if (editable && website) void run(async () => { await openWebsite(website); }, '无法打开网站'); },
+  };
+}
 
-    {(resources.login?.passkeys?.length ?? 0) > 0 && <Section title="通行密钥">
-      {(resources.login?.passkeys ?? []).map(passkey => <div key={passkey.credentialId}>
-        <div className="flex flex-wrap items-start gap-2 border-b border-[var(--border-subtle)] py-3">
+type ResourceControls = ReturnType<typeof useItemResources>;
+
+/** Passkeys are login credentials, alongside passwords and OTPs, not item metadata. */
+export function ItemPasskeys({ controls }: { controls: ResourceControls }) {
+  const { resources, controlsDisabled, editable, busy, setPending, confirmation, website, addPasskey } = controls;
+  if (!resources.login) return null;
+  const passkeys = resources.login.passkeys ?? [];
+  return <fieldset data-login-passkeys disabled={controlsDisabled} aria-busy={busy} aria-label="通行密钥"
+    className="m-0 min-w-0 border-0 px-0 py-2">
+    <div data-field-layout="passkeys" className="flex min-w-0 items-center gap-3">
+      <div data-field-content className={`${FIELD_ROW_CLASS} flex-1`}>
+        <span data-field-label className={FIELD_LABEL_CLASS}>通行密钥</span>
+        <span data-field-value className="min-w-0 flex-1 text-sm text-[var(--ink-secondary)]">{passkeys.length > 0 ? `已保存 ${passkeys.length} 个` : '未保存'}</span>
+      </div>
+        {editable && <button data-field-actions data-field-persistent type="button" disabled={controlsDisabled || website === null}
+          className="btn btn-ghost shrink-0 gap-1 text-xs" aria-label="前往网站添加通行密钥"
+          title={website ? '前往支持通行密钥的网站，在安全设置中创建并通过 1Warden 扩展保存' : '请先为登录条目添加网站地址'}
+          onClick={addPasskey}><IconPlus size={13} />添加</button>}
+    </div>
+    {passkeys.length > 0 && <div className="mt-2 divide-y divide-[var(--border-subtle)]">
+      {passkeys.map(passkey => <div key={passkey.credentialId}>
+        <div className="flex flex-wrap items-center gap-2 py-2">
           <div className="min-w-0 flex-1 basis-36">
             <p className="break-words text-sm">{passkey.rpName || passkey.rpId || '通行密钥'}</p>
             {passkey.rpName && passkey.rpId && <p className="mt-0.5 break-all text-xs text-[var(--ink-tertiary)]">{passkey.rpId}</p>}
@@ -246,59 +270,99 @@ export function ItemResources({ item, client, onError, onBusyChange, disabled = 
             </p>}
             <p className="mt-1 text-xs text-[var(--ink-tertiary)]">创建 · {formattedDate(passkey.creationDate)}</p>
           </div>
-          {editable && <button type="button" disabled={controlsDisabled} className="btn btn-ghost gap-1 text-xs hover:text-[var(--risk)]"
+          {editable && <button data-field-actions data-field-persistent type="button" disabled={controlsDisabled} className="btn btn-ghost gap-1 text-xs hover:text-[var(--risk)]"
             aria-label={`删除通行密钥 ${passkey.rpName || passkey.rpId}`} onClick={() => setPending({ kind: 'passkey', id: passkey.credentialId })}>
             <IconTrash size={13} />删除
           </button>}
         </div>
         {confirmation('passkey', passkey.credentialId)}
       </div>)}
-    </Section>}
+    </div>}
+  </fieldset>;
+}
 
-    {resources.passwordHistory.length > 0 && <Section title="历史密码">
-      {resources.passwordHistory.map((history, index) => <SecretField
-        key={`${resources.summary.id}:${history.lastUsedDate}:${index}`} label={formattedDate(history.lastUsedDate)} value="••••••••" masked
-        getValue={() => revealHistory(index)} revealValue={() => revealHistory(index)}
-        onCopyError={cause => report(cause instanceof Error ? cause.message : '无法读取历史密码')} />)}
-      {editable && <div className="py-3">
-        <button type="button" disabled={controlsDisabled} className="btn btn-ghost gap-1.5 text-xs hover:text-[var(--risk)]" onClick={() => setPending({ kind: 'history' })}>
-          <IconTrash size={13} />清空历史密码
-        </button>
-      </div>}
-      {confirmation('history')}
-    </Section>}
-    {editable && <>
-      <input ref={selectingFile} type="file" className="hidden" aria-label="上传附件文件" disabled={controlsDisabled}
-        onChange={event => {
-          const file = event.currentTarget.files?.[0];
-          event.currentTarget.value = '';
-          if (file) { void upload(file); }
-        }} />
-      <details ref={moreActions} className="mb-3 mt-4" data-resource-actions
-        onKeyDown={event => {
-          if (event.key === 'Escape' && moreActions.current?.open) {
-            event.preventDefault(); event.stopPropagation(); moreActions.current.open = false;
-            moreActions.current.querySelector('summary')?.focus();
-          }
-        }}>
-        <summary aria-disabled={controlsDisabled} className="btn btn-ghost inline-flex cursor-pointer list-none gap-1.5 text-xs text-[var(--ink-secondary)] [&::-webkit-details-marker]:hidden"
-          onClick={event => { if (controlsDisabled) event.preventDefault(); }}>
-          <IconMore size={15} />更多操作
-        </summary>
-        <div className="card mt-2 space-y-3 p-3">
-          <button type="button" disabled={controlsDisabled} className="btn btn-quiet gap-1.5" onClick={() => {
-            if (moreActions.current) moreActions.current.open = false;
-            selectingFile.current?.click();
-          }}><IconPlus size={13} />上传附件</button>
-          {resources.login && <div>
-            <button type="button" disabled={controlsDisabled || website === null} className="btn btn-quiet"
-              onClick={() => { if (website) { void run(async () => { await openWebsite(website); }, '无法打开网站'); } }}>前往网站添加通行密钥</button>
-            <p className="mt-1.5 text-xs text-[var(--ink-tertiary)]">{website
-              ? '启用 1Warden 浏览器扩展后，在网站的账户安全设置中创建通行密钥，并选择保存到 1Warden。'
-              : '先为此登录条目添加网站地址，再启用 1Warden 浏览器扩展。'}</p>
+/** Attachment/history/folder management stays below the item's content. */
+export function ItemResources({ controls, children }: { controls: ResourceControls; children?: ReactNode }) {
+  const { resources, busy, controlsDisabled, editable, error, notes, pending, setPending,
+    historyOpen, setHistoryOpen, historyId, historyToggle, selectingFile,
+    upload, download, confirmation, revealHistory, report, canSaveAttachments } = controls;
+  return <fieldset data-item-resources aria-busy={busy} disabled={controlsDisabled} className="m-0 min-w-0 border-0 p-0">
+    {error && <p role="alert" className="mb-3 text-sm text-[var(--risk)]">{error}</p>}
+    {busy && <p role="status" className="mb-3 flex items-center gap-1.5 text-xs text-[var(--ink-secondary)]"><IconSpinner size={13} />处理中…</p>}
+    {editable && <input ref={selectingFile} type="file" className="hidden" aria-label="上传附件文件" disabled={controlsDisabled}
+      onChange={event => {
+        const file = event.currentTarget.files?.[0];
+        event.currentTarget.value = '';
+        if (file) { void upload(file); }
+      }} />}
+    {(editable || resources.attachments.length > 0 || resources.passwordHistory.length > 0 || children) && <Section title="条目管理">
+      <div data-resource-actions className="divide-y divide-[var(--border-subtle)]">
+        {(editable || resources.attachments.length > 0) && <div className="py-3">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-sm">
+              <span>附件</span>
+              <span className="text-xs text-[var(--ink-tertiary)]">{resources.attachments.length > 0 ? `${resources.attachments.length} 个` : '暂无附件'}</span>
+            </div>
+            {editable && <button type="button" disabled={controlsDisabled} className="btn btn-ghost gap-1.5 text-xs"
+              onClick={() => selectingFile.current?.click()}><IconPlus size={13} />上传附件</button>}
+          </div>
+          {resources.attachments.length > 0 && <div className="mt-2 divide-y divide-[var(--border-subtle)]">
+            {resources.attachments.map(attachment => <div key={attachment.id}>
+              <div className="flex flex-wrap items-center gap-2 py-2.5">
+                <div className="min-w-0 flex-1 basis-32">
+                  <p className="break-words text-sm">{attachment.fileName || '（没有文件名）'}</p>
+                  <p className="mt-0.5 text-xs text-[var(--ink-tertiary)]">{attachment.sizeName}</p>
+                  {attachment.failed && <p className="mt-1 text-xs text-[var(--risk)]">附件信息无法解密</p>}
+                  {notes[attachment.id] && <p role="status" className="mt-1 break-all text-xs text-[var(--safe)]">{notes[attachment.id]}</p>}
+                </div>
+                <button type="button" disabled={controlsDisabled || attachment.failed || !canSaveAttachments}
+                  className="btn btn-quiet" onClick={() => { void download(attachment); }}>取回</button>
+                {editable && <button type="button" disabled={controlsDisabled} className="btn btn-ghost gap-1 text-xs hover:text-[var(--risk)]"
+                  aria-label={`删除附件 ${attachment.fileName || attachment.id}`} onClick={() => setPending({ kind: 'attachment', id: attachment.id })}>
+                  <IconTrash size={13} />删除
+                </button>}
+              </div>
+              {confirmation('attachment', attachment.id)}
+            </div>)}
           </div>}
-        </div>
-      </details>
-    </>}
+        </div>}
+
+        {resources.passwordHistory.length > 0 && <div data-password-history className="py-1"
+          onKeyDown={event => {
+            if (event.key === 'Escape' && historyOpen && !controlsDisabled) {
+              event.preventDefault(); event.stopPropagation(); setHistoryOpen(false);
+              if (pending?.kind === 'history') setPending(null);
+              historyToggle.current?.focus();
+            }
+          }}>
+          <button ref={historyToggle} type="button" disabled={controlsDisabled} aria-expanded={historyOpen} aria-controls={historyId}
+            className="flex min-h-11 w-full items-center gap-2 rounded-[var(--radius-sm)] py-2 text-left text-sm hover:bg-[var(--surface-hover)]"
+            onClick={() => { setHistoryOpen(!historyOpen); if (pending?.kind === 'history') setPending(null); }}>
+            <span>历史密码</span><span className="text-xs text-[var(--ink-tertiary)]">{resources.passwordHistory.length} 条</span>
+            <IconChevronDown size={14} className={`ml-auto text-[var(--ink-tertiary)] ${historyOpen ? 'rotate-180' : ''}`} />
+          </button>
+          <div id={historyId} hidden={!historyOpen}>
+            {/* Unmount secrets on collapse so reopening never retains a revealed password. */}
+            {historyOpen && <>
+              <div className="divide-y divide-[var(--border-subtle)]">
+                {resources.passwordHistory.map((history, index) => <div className="py-2" key={`${resources.summary.id}:${history.lastUsedDate}:${index}`}>
+                  <p className="text-xs leading-relaxed text-[var(--ink-tertiary)]">最后使用 · {formattedDate(history.lastUsedDate)}</p>
+                  <SecretField label="密码" value="••••••••" masked
+                    getValue={() => revealHistory(index)} revealValue={() => revealHistory(index)}
+                    onCopyError={report} />
+                </div>)}
+              </div>
+              {editable && <div className="flex justify-end py-2">
+                <button type="button" disabled={controlsDisabled} className="btn btn-ghost gap-1.5 text-xs hover:text-[var(--risk)]"
+                  onClick={() => setPending({ kind: 'history' })}><IconTrash size={13} />清空历史密码</button>
+              </div>}
+              {confirmation('history')}
+            </>}
+          </div>
+        </div>}
+
+        {children}
+      </div>
+    </Section>}
   </fieldset>;
 }

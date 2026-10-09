@@ -99,7 +99,7 @@ export function FloatingPanel({
       const panel = panelRef.current;
       if (!panel) return;
       const items = Array.from(panel.querySelectorAll<HTMLElement>(FOCUSABLE))
-        .filter((el) => el.offsetParent !== null || el === panel);
+        .filter((el) => !el.matches(':disabled') && !el.closest('[inert]') && (el.offsetParent !== null || el === panel));
       if (items.length === 0) { e.preventDefault(); panel.focus(); return; }
       const first = items[0]!;
       const last = items[items.length - 1]!;

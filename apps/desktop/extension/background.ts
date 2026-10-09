@@ -130,14 +130,10 @@ function newClient(): VaultClient {
     deviceStore,
     // Browser alarms own the absolute deadline; an in-memory timer would reset on every worker restore.
     autoLockMs: 0,
-    onSync: (syncing) => {
-      if (!syncing && c === client) void runSerialized(async () => {
-        if (c !== client) return;
-        await persistState();
-        if (c !== client) return;
-        notifyChanged();
-      }).catch(reportFailure);
-    },
+    // The owning authentication/mutation already persists on completion. A
+    // second queued write here could race an expiry check and renew stale data.
+    // State notifications remain immediate while the network request is pending.
+    onSync: () => { if (c === client) notifyChanged(); },
     /*
      * 上次同步的密文缓存 —— 解锁后先拿它把界面填上，再去问服务端。
      * 桌面端早就有，扩展端一直缺（每次解锁都要等一整轮网络）。

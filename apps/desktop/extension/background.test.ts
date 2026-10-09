@@ -46,6 +46,30 @@ beforeEach(async () => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('background application boundary', () => {
+  it('persists explicit sync failure across worker restart and clears it after a successful retry', async () => {
+    (data['1warden.session'] as Record<string, unknown>)['token'] = { accessToken: 'test-token', expiresIn: 3600, kdf: 0 };
+    let fail = true;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL) => {
+      const path = new URL(String(input)).pathname;
+      if (path === '/api/accounts/revision-date') return Response.json(42);
+      if (path === '/api/sync') return fail ? Response.json({ message: 'private-server-detail' }, { status: 503 })
+        : Response.json({ profile: { id: 'u1', email: account.email }, folders: [], ciphers: [], collections: [] });
+      throw Error(`Unexpected test endpoint ${path}`);
+    });
+    expect(await send({ type: '1warden:application', method: 'sync', args: [] })).toMatchObject({
+      ok: false, error: { message: expect.stringMatching(/同步失败/) },
+    });
+    expect(data['1warden.session']).toMatchObject({ syncError: expect.stringMatching(/同步失败/), lastSyncedAt: null });
+    vi.resetModules(); await import('./background');
+    expect(await send({ type: '1warden:application', method: 'snapshot', args: [] })).toMatchObject({
+      ok: true, result: { status: 'unlocked', syncError: expect.stringMatching(/同步失败/), lastSyncedAt: null },
+    });
+    fail = false;
+    expect(await send({ type: '1warden:application', method: 'sync', args: [] })).toMatchObject({ ok: true });
+    expect(await send({ type: '1warden:application', method: 'snapshot', args: [] })).toMatchObject({
+      ok: true, result: { syncError: null, lastSyncedAt: expect.any(Number) },
+    });
+  });
   it('account switching finishes even when a sleeping tab never answers the badge query', async () => {
     vi.useFakeTimers();
     const query = vi.spyOn(chrome.tabs, 'query').mockImplementation(async () => [{ id: 7 }] as chrome.tabs.Tab[]);

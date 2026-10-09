@@ -92,8 +92,8 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
 
   return (
     /* 整块背景可拖 —— 和连接屏同理，这一屏没有顶部带子（见 Connect.tsx） */
-    <div className="below-titlebar flex h-full items-center justify-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
-      <div className="screen-in w-full max-w-[380px]">
+    <div className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
+      <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
         <BackButton label="返回首页" showLabel className="mb-6" onBack={() => { operation.current++; setPassword(''); onDisconnect(); }} />
         <div className="flex flex-col items-center text-center">
           <ProfileAvatar profile={profile} fallback={account?.email ?? ''} className={`mb-4 h-16 w-16 text-xl ${busy ? 'breathe' : ''}`} />

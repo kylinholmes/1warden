@@ -2,6 +2,7 @@ import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { IconEye } from './icons';
 import { CopyButton } from './CopyButton';
 import { scheduleClipboardClear } from './clipboard';
+import { FIELD_LABEL_CLASS, FIELD_ROW_CLASS } from './CompoundFieldRow';
 
 /**
  * 一个可复制、可揭示的字段 —— **桌面端和浏览器插件共用**。
@@ -9,17 +10,8 @@ import { scheduleClipboardClear } from './clipboard';
  * ⚠️ **永不默认明文展示** —— 这是 spec 里明确的安全不变量。
  * 遮蔽的字段要用户主动点「显示」才展开。
  *
- * ── 排版
- *
- * 上一版是「标签靠左、值靠右」两端对齐。对短值没问题，
- * 但网址一长就变成右边一坨被截断的省略号，而左边空着一大片。
- *
- * 改成两列网格：标签占固定宽度的一列，值从同一条竖线开始、向左排满。
- * 于是所有值**左边缘对齐**，扫一眼就能上下比较；长网址也能从头读起。
- * 这处偏离 1Password 是有意的 —— 它也是两端对齐，代价同样是长网址难读。
- *
- * ⚠️ 那个 `76px` 是**跨组件对齐**的：`ItemEditor` 的编辑态也用同一列宽，
- * 只读态和编辑态因此不会左右跳。改它要两处一起改。
+ * 标签在上、内容在下，与编辑态共用阅读起点；不再为每个字段
+ * 预留固定标签列。姓名/地址用正文，只有凭据或显式技术字段用等宽。
  */
 export interface SecretFieldProps {
   label: string;
@@ -27,6 +19,12 @@ export interface SecretFieldProps {
   value: string;
   /** 是否给「显示/隐藏」开关。只有 `value` 就是真值时才该给 */
   masked?: boolean;
+  /** Names and addresses should remain readable without hover or horizontal scrolling. */
+  wrap?: boolean;
+  /** Technical values can opt in; masked credentials use monospace by default. */
+  monospace?: boolean;
+  /** Grouped native fields share their container's spacing and divider. */
+  layout?: 'row' | 'inline';
   /**
    * 复制时取的值。**不传就用 `value`。**
    *
@@ -56,7 +54,7 @@ export interface SecretFieldProps {
 }
 
 export function SecretField({
-  label, value, masked = false, getValue, revealValue, onCopied, onCopyError,
+  label, value, masked = false, wrap = true, monospace = masked, layout = 'row', getValue, revealValue, onCopied, onCopyError,
 }: SecretFieldProps) {
   /**
    * 揭示出来的值。`null` = 遮着。
@@ -103,26 +101,21 @@ export function SecretField({
   }
 
   return (
-    <div className="group flex items-center gap-3 border-b border-[var(--border-subtle)] py-2.5 last:border-b-0">
-      <span className="w-[76px] shrink-0 truncate text-sm text-[var(--violet)]" title={label}>
-        {label}
-      </span>
+    <div data-field-layout={layout} className={`group flex min-w-0 items-center gap-3${layout === 'inline' ? '' : ' border-b border-[var(--border-subtle)] py-2 last:border-b-0'}`}>
+      <div data-field-content className={`${FIELD_ROW_CLASS} flex-1 self-stretch`}>
+        <span data-field-label className={FIELD_LABEL_CLASS}>
+          {label}
+        </span>
+        <span data-field-value
+          className={`${monospace ? 'secret ' : ''}min-w-0 text-md leading-normal ${wrap && !hidden ? 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]' : 'truncate'} ${hidden ? 'tracking-[0.2em] text-[var(--ink-secondary)]' : ''}`}
+        >
+          {shown}
+        </span>
+      </div>
 
-      <span
-        className={`secret min-w-0 flex-1 truncate text-md ${hidden ? 'tracking-[0.2em] text-[var(--ink-secondary)]' : ''}`}
-        title={hidden ? undefined : value}
-      >
-        {shown}
-      </span>
-
-      {/*
-        ⚠️ 按钮**始终可见**，只是画得很轻（tertiary 灰）。
-        上一版是悬停才出现（opacity-0 → group-hover），看着很干净，
-        但对普通用户是实打实的发现问题：界面上一眼看不出「这里能复制」，
-        而复制恰恰是密码管理器里最高频的动作。
-        保持低调的办法是不给它颜色和边框，而不是把它藏起来。
-      */}
-      <span className="flex shrink-0 items-center gap-0.5">
+      {/* Fine-pointer hover and keyboard focus reveal actions without moving text.
+          Touch/forced-colors modes and successful-copy feedback stay visible. */}
+      <span data-field-actions className="flex shrink-0 items-center gap-0.5">
         {masked && (
           <button
             type="button"
@@ -141,7 +134,7 @@ export function SecretField({
           {...(onCopyError === undefined ? {} : { onError: onCopyError })}
           iconOnly
           iconSize={14}
-          className="rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]"
+          className="rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)] disabled:opacity-50"
         />
       </span>
     </div>
@@ -156,7 +149,7 @@ export function SecretField({
  */
 export function Section({ title, children }: { title?: string; children: React.ReactNode }) {
   return (
-    <section className="mb-7">
+    <section className="mb-6">
       {title && (
         <h3 className="mb-2 text-xs font-medium text-[var(--ink-tertiary)]">{title}</h3>
       )}

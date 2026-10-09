@@ -1,7 +1,7 @@
 import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
 import { Sidebar } from '../components/VaultSidebar';
 import { primaryShortcut } from '../platform';
-import { useEffect, useMemo, useRef, useCallback } from 'react';
+import { useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
 import { SORT_BY, SORT_LABEL, type SortBy, type VaultItem, type VaultFolder } from '@1warden/vault';
 import type { IconStore } from '@1warden/vault';
 import type { ApplicationClient, ItemDetailData, SiteContext, SecretRef } from '../application/types';
@@ -13,10 +13,13 @@ import { useShowTypes } from '../prefs';
 import { ItemIcon } from '@1warden/ui';
 import { AutotypeAction } from '../components/AutotypeAction';
 import { ItemFolderPicker, ItemRecordInfo } from '../components/ItemMetadata';
-import { ItemResources } from '../components/ItemResources';
+import { ItemPasskeys, ItemResources, useItemResources } from '../components/ItemResources';
 import { SecurityReportView } from './SecurityReport';
+import { Organization } from './Organization';
 import { ImportScreen } from './Import';
 import { ProfilePage } from './ProfilePage';
+import { TrashView } from './TrashView';
+import { SyncNotice } from '../components/SyncNotice';
 import { visibleVaultItems, type VaultCategory as Category } from './vault-presentation';
 
 import { Settings } from './Settings';
@@ -27,8 +30,9 @@ import { useToast } from '../components/Toast';
 import {
   BackButton, IconAlert, IconKeyboard, IconPencil, IconPlus,
   CopyButton, IconChevronDown, IconSearch, IconSpinner, IconStar, IconTrash,
-  IDENTITY_LABEL, ItemEditor, ItemRow, NavDrawerProvider, NavTrigger, SecretField, Section,
-  TYPE_LABEL, countByType,
+  CompoundFieldRow, FIELD_LABEL_CLASS, FIELD_ROW_CLASS, nativeEditorFields,
+  ItemEditor, ItemRow, NavDrawerProvider, NavTrigger, SecretField, Section,
+  TYPE_LABEL, countByType, formatCardExpiry, formatRecordDate,
   scheduleClipboardClear, typeDestinations, type ItemSummary,
 } from '@1warden/ui';
 
@@ -76,6 +80,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
   const [settingsOpen, setSettingsOpen] = useStoreField(viewStore, 'settingsOpen');
   const [generatorOpen, setGeneratorOpen] = useStoreField(viewStore, 'generatorOpen');
   const searchRef = useRef<HTMLInputElement>(null);
+  const focusSearchAfterNavigation = useRef(false);
   const [folderError, setFolderError] = useStoreField(viewStore, 'folderError');
 
   /*
@@ -218,7 +223,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
   const detailPresence = useRetainedPresence(selected);
   const detailRef = useRef<HTMLDivElement>(null);
   const narrow = useCompactLayout();
-  const fullWidth = category.kind === 'security' || category.kind === 'import' || category.kind === 'profile';
+  const fullWidth = category.kind === 'security' || category.kind === 'organization' || category.kind === 'import' || category.kind === 'profile' || category.kind === 'trash';
   const shownSelected = selected ?? (narrow ? detailPresence.value : null);
   const detailOpen = narrow && selected !== null;
   useEffect(() => {
@@ -229,6 +234,12 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
       if (opener?.isConnected && !opener.closest('[inert]')) opener.focus({ preventScroll: true });
     };
   }, [detailOpen]);
+  useEffect(() => {
+    if (focusSearchAfterNavigation.current && !detailOpen && !fullWidth) {
+      focusSearchAfterNavigation.current = false;
+      searchRef.current?.focus();
+    }
+  }, [detailOpen, fullWidth]);
 
   /**
    * 有没有浮层压在上面。
@@ -271,14 +282,21 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
       // 而 ⌘F 会把焦点抢到背后的搜索框上 —— 那就是焦点跑到模态外面去了
       if (overlayOpen) return;
       if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key === 'f') { e.preventDefault(); searchRef.current?.focus(); }
+      if (e.key.toLowerCase() === 'f') {
+        e.preventDefault();
+        if (detailOpen || fullWidth) {
+          focusSearchAfterNavigation.current = true;
+          setSelectedId(null);
+          if (fullWidth) setCategory({ kind: 'all' });
+        } else searchRef.current?.focus();
+      }
       if (e.key === 'l') { e.preventDefault(); onLock(); }
       if (e.key === 'n') { e.preventDefault(); setMode({ kind: 'new' }); }
       if (e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onLock, overlayOpen]);
+  }, [onLock, overlayOpen, detailOpen, fullWidth]);
 
   const sidebar = (
     <Sidebar
@@ -322,7 +340,11 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
 
       {fullWidth ? (
         <div className="below-titlebar flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
-          {category.kind === 'profile' ? <ProfilePage client={client} onBack={() => setCategory({ kind: 'all' })} /> : category.kind === 'security' ? (
+          <SyncNotice session={session} client={client} />
+          {category.kind === 'trash' ? <TrashView client={client} onBack={() => setCategory({ kind: 'all' })} />
+          : category.kind === 'organization' ? <Organization client={client} onBack={() => setCategory({ kind: 'all' })}
+            onEditItem={edit} editing={mode.kind !== 'browse'} />
+          : category.kind === 'profile' ? <ProfilePage client={client} onBack={() => setCategory({ kind: 'all' })} /> : category.kind === 'security' ? (
             <SecurityReportView client={client} onBack={() => setCategory({ kind: 'all' })} />
           ) : (
             <ImportScreen client={client} onImported={() => {}} onBack={() => setCategory({ kind: 'all' })} />
@@ -404,6 +426,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
 </button>
             </div>
 
+            <SyncNotice session={session} client={client} />
             {client.browser && <BrowserContext client={client} site={site} error={siteError}
               onRefresh={() => setContextAttempt((n) => n + 1)}
               onSelectSite={() => { setCategory({ kind: 'site' }); setSelectedId(null); }} />}
@@ -419,7 +442,17 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
               </div>
             )}
 
-            <ul className="flex-1 overflow-y-auto px-2 py-2">
+            <ul className="flex-1 overflow-y-auto px-2 py-2" onKeyDown={event => {
+              if (!['ArrowDown', 'ArrowUp', 'Home', 'End'].includes(event.key)) return;
+              const rows = [...event.currentTarget.querySelectorAll<HTMLButtonElement>(':scope > li > button')];
+              const current = rows.indexOf((event.target as HTMLElement).closest('button')!);
+              if (current < 0) return;
+              event.preventDefault();
+              const next = event.key === 'Home' ? 0 : event.key === 'End' ? rows.length - 1
+                : Math.max(0, Math.min(rows.length - 1, current + (event.key === 'ArrowDown' ? 1 : -1)));
+              rows[next]?.focus({ preventScroll: true });
+              rows[next]?.scrollIntoView({ block: 'nearest' });
+            }}>
               {filtered.map((item, index) => (
                 <li key={item.id}>
                   {matchedCount > 0 && (index === 0 || index === matchedCount) && (
@@ -440,7 +473,8 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
               ))}
               {filtered.length === 0 && (
                 <li className="px-4 py-10 text-center">
-                  {searching ? <p role="status" className="text-sm text-[var(--ink-tertiary)]">正在搜索…</p> : searchError ? null : query ? (
+                  {session.syncError && items.length === 0 ? <p className="text-sm text-[var(--ink-secondary)]">保险库尚未载入，不能确认是否有匹配条目。</p>
+                  : searching ? <p role="status" className="text-sm text-[var(--ink-tertiary)]">正在搜索…</p> : searchError ? null : query ? (
                     <p className="text-sm text-[var(--ink-tertiary)]">
                       没有匹配「{query}」的条目
                     </p>
@@ -584,6 +618,18 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
         onDone={(saved) => {
           closeEditor();
           if (saved) {
+            if (category.kind === 'organization') {
+              // Keep the report/filter context; its revision subscription reruns
+              // the read-only analysis after the user's explicit edit is saved.
+              setSelectedId(null);
+              toast.show({ tone: 'success', message: `已保存「${saved.name}」，正在更新整理建议` });
+              return;
+            }
+            // A successful save must remain discoverable, even if its new values
+            // no longer match the folder, favorites or search used to open it.
+            setQuery('');
+            const committed = client.getSnapshot().items.find(item => item.id === saved.id);
+            if (!committed || !visibleVaultItems([committed], category, sortBy, site?.matchedIds).length) setCategory({ kind: 'all' });
             setSelectedId(saved.id);
             // 编辑器一关，界面上就没有「存了没有」的位置了 —— 提示条的典型场景
             toast.show({ tone: 'success', message: `已保存「${saved.name}」` });
@@ -838,6 +884,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
   const [secretError, setSecretError] = useStoreField(viewStore, 'secretError');
   const [organizing, setOrganizing] = useStoreField(viewStore, 'organizing');
   const [resourcesBusy, setResourcesBusy] = useStoreField(viewStore, 'resourcesBusy');
+  const resourceControls = useItemResources({ client, item, onBusyChange: setResourcesBusy, disabled: organizing, onError });
   useEffect(() => {
     if (!item.login?.hasTotp) return;
     let alive = true;
@@ -866,11 +913,47 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
   const uris = (item.login?.uris ?? []).filter(uri => uri.uri !== '');
   const customFields = item.customFields.map((field, index) => ({ field, index })).filter(({ field }) =>
     field.type === 3 || (field.type === 1 ? field.hasValue !== false : field.value !== null && field.value !== ''));
-  const hasLoginFields = item.login && (Boolean(item.login.username) || item.login.hasPassword || totp || totpError);
+  const hasLoginFields = item.login && (Boolean(item.login.username) || item.login.hasPassword || item.login.hasTotp
+    || uris.length > 0 || (resourceControls.resources.login?.passkeys?.length ?? 0) > 0);
   const hasCardFields = item.card && (item.card.cardholderName || item.card.brand || item.card.hasNumber
     || item.card.expMonth || item.card.expYear || item.card.hasCode);
-  const hasIdentityFields = item.identity && Object.values(item.identity).some(value => value !== null && value !== '');
   const hasSshFields = item.sshKey && (item.sshKey.publicKey || item.sshKey.fingerprint || item.sshKey.hasPrivateKey);
+  function nativeSections(type: 'identity' | 'bankAccount' | 'driversLicense' | 'passport', fields: object,
+    secrets: Record<string, { present: boolean; ref: SecretRef }> = {}) {
+    const groups = new Map<string, ReactNode[]>();
+    const valueOf = (path: string) => (fields as Record<string, unknown>)[path.split('.')[1]!];
+    // Share order and stacked field grouping with the editor; the safe detail
+    // projection still keeps secrets behind explicit reveal/copy actions.
+    for (const field of nativeEditorFields(type)) {
+      if (field.id === 'notes') continue;
+      let row: ReactNode = null;
+      if (field.kind === 'compound') {
+        const cells = field.keys.flatMap((key, index) => {
+          const value = valueOf(key);
+          return typeof value === 'string' && value.trim() !== ''
+            ? [<SecretField key={key} label={field.labels?.[index] ?? key} value={value} wrap layout="inline" />] : [];
+        });
+        if (cells.length) row = <CompoundFieldRow key={field.id} fieldId={field.id}
+          label={field.label}>{cells}</CompoundFieldRow>;
+      } else {
+        const key = field.keys[0]!.split('.')[1]!;
+        const masked = secrets[key];
+        if (masked) {
+          if (masked.present) row = secret(field.label, masked.ref);
+        } else {
+          const value = valueOf(field.id);
+          if (typeof value === 'string' && value !== '') row = <SecretField key={field.id} label={field.label}
+            value={field.kind === 'date' ? formatRecordDate(value) : value} wrap />;
+        }
+      }
+      if (row !== null) {
+        const rows = groups.get(field.group) ?? [];
+        rows.push(row);
+        groups.set(field.group, rows);
+      }
+    }
+    return Array.from(groups, ([group, rows]) => <Section key={group} title={group}>{rows}</Section>);
+  }
 
   return (
     <article className="fade-in mx-auto w-full px-8 pb-12" style={{ maxWidth: 'calc(var(--detail-w) + 64px)' }}>
@@ -893,7 +976,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
           </h2>
           <p className="mt-0.5 text-xs text-[var(--ink-tertiary)]">
             {TYPE_LABEL[summary.type] ?? '未知类型'}
-            {item.rawType > 5 && '（此类型较新，暂只支持查看）'}
+            {summary.type === 'unknown' && '（此类型暂只支持查看）'}
           </p>
         </div>
 
@@ -906,7 +989,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
             <IconStar size={16} filled={summary.favorite} />
           </button>
           {/* 未知类型不提供编辑 —— 保存会把它降级成别的类型，等于破坏数据 */}
-          {item.rawType >= 1 && item.rawType <= 5 && (
+          {summary.type !== 'unknown' && item.rawType >= 1 && item.rawType <= 8 && (
             <button disabled={organizing || resourcesBusy} onClick={onEdit} className="btn btn-quiet gap-1.5">
               <IconPencil size={13} />
               编辑
@@ -929,6 +1012,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
             {item.login.hasPassword && secret('密码', { kind: 'password' })}
             {totp && <TotpRow code={totp.code} remaining={totp.remaining} period={totp.period} />}
             {totpError && <p role="alert" className="py-2 text-xs text-[var(--risk)]">{totpError}</p>}
+            <ItemPasskeys controls={resourceControls} />
             {/*
               原生窗口自动输入（spec §7.4）。放在登录字段这一组的末尾 ——
               它是「把凭据送出去」的动作，紧跟在被送出去的东西后面最合理。
@@ -959,20 +1043,12 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
             {item.card.cardholderName && <SecretField label="持卡人" value={item.card.cardholderName} />}
             {item.card.brand && <SecretField label="卡组织" value={item.card.brand} />}
             {item.card.hasNumber && secret('卡号', { kind: 'cardNumber' })}
-            {(item.card.expMonth || item.card.expYear) && <SecretField label="有效期" value={`${item.card.expMonth || '—'}/${item.card.expYear || '—'}`} />}
+            {(item.card.expMonth || item.card.expYear) && <SecretField label="有效期" value={formatCardExpiry(item.card.expMonth, item.card.expYear)} />}
             {item.card.hasCode && secret('安全码', { kind: 'cardCode' })}
           </Section>
         )}
 
-        {item.identity && hasIdentityFields && (
-          <Section title="身份信息">
-            {Object.entries(item.identity)
-              .filter(([, v]) => v !== null && v !== '')
-              .map(([k, v]) => (
-                <SecretField key={k} label={IDENTITY_LABEL[k] ?? k} value={v as string} />
-              ))}
-          </Section>
-        )}
+        {item.identity && nativeSections('identity', item.identity)}
 
         {/*
           ⚠️ SSH 密钥此前**一个字段都没渲染** —— 类型列表里有它、列表图标有 🔧、
@@ -984,11 +1060,26 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
         */}
         {item.sshKey && hasSshFields && (
           <Section title="SSH 密钥">
-            {item.sshKey.publicKey && <SecretField label="公钥" value={item.sshKey.publicKey} />}
-            {item.sshKey.fingerprint && <SecretField label="指纹" value={item.sshKey.fingerprint} />}
+            {item.sshKey.publicKey && <SecretField label="公钥" value={item.sshKey.publicKey} monospace />}
+            {item.sshKey.fingerprint && <SecretField label="指纹" value={item.sshKey.fingerprint} monospace />}
             {item.sshKey.hasPrivateKey && secret('私钥', { kind: 'privateKey' })}
           </Section>
         )}
+
+        {item.bankAccount && nativeSections('bankAccount', item.bankAccount, {
+          accountNumber: { present: item.bankAccount.hasAccountNumber, ref: { kind: 'bankAccountNumber' } },
+          iban: { present: item.bankAccount.hasIban, ref: { kind: 'bankIban' } },
+          pin: { present: item.bankAccount.hasPin, ref: { kind: 'bankPin' } },
+        })}
+
+        {item.driversLicense && nativeSections('driversLicense', item.driversLicense, {
+          licenseNumber: { present: item.driversLicense.hasLicenseNumber, ref: { kind: 'licenseNumber' } },
+        })}
+
+        {item.passport && nativeSections('passport', item.passport, {
+          passportNumber: { present: item.passport.hasPassportNumber, ref: { kind: 'passportNumber' } },
+          nationalIdentificationNumber: { present: item.passport.hasNationalIdentificationNumber, ref: { kind: 'nationalIdentificationNumber' } },
+        })}
 
         {customFields.length > 0 && (
           <Section title="自定义字段">
@@ -1009,9 +1100,9 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
           </Section>
         )}
 
-        <ItemResources client={client} item={item} onBusyChange={setResourcesBusy} disabled={organizing}
-          onError={message => { setSecretError(message); onError?.(message); }} />
-        <ItemFolderPicker client={client} item={item} folders={folders} onOpenFolder={onOpenFolder} onError={onError} onBusyChange={setOrganizing} disabled={resourcesBusy} />
+        <ItemResources controls={resourceControls}>
+          <ItemFolderPicker client={client} item={item} folders={folders} onOpenFolder={onOpenFolder} onError={onError} onBusyChange={setOrganizing} disabled={resourcesBusy} />
+        </ItemResources>
         <ItemRecordInfo item={item} />
       </div>
     </article>
@@ -1038,44 +1129,41 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
   const C = 2 * Math.PI * R;
 
   return (
-    <div className="flex items-center gap-3 border-t border-[var(--border-subtle)] py-2.5">
-      <span className="w-[84px] shrink-0 text-sm text-[var(--ink-secondary)]">验证码</span>
-
-      {/* key 让每次换码都重放一遍淡入 —— 这就是「它变了」的信号 */}
-      <span key={code} className="code-turn min-w-0 flex-1">
-        <span className="secret text-xl font-medium tracking-[0.12em]" style={{ color: tone }}>
-          {code.length > 3 ? `${code.slice(0, 3)} ${code.slice(3)}` : code}
-        </span>
-      </span>
-
-      <span className="flex shrink-0 items-center gap-2.5">
-        {/*
-          环里写秒数 —— 用户不用去数弧长。数字用中性色、环用彩色：
-          两个都上色的话（试过）数字会糊在环里读不清，
-          而颜色要传达的信息本来就只有环在承担。
-        */}
-        <span
-          className="relative grid h-[30px] w-[30px] place-items-center"
-          title={`${remaining} 秒后失效`}
-          role="timer"
-          aria-label={`验证码剩余 ${remaining} 秒`}
-        >
-          <svg viewBox="0 0 30 30" className="absolute inset-0 h-[30px] w-[30px] -rotate-90">
-            <circle cx="15" cy="15" r={R} fill="none" stroke="var(--border-subtle)" strokeWidth="2" />
-            <circle
-              cx="15" cy="15" r={R} fill="none"
-              stroke={tone} strokeWidth="2" strokeLinecap="round"
-              strokeDasharray={C}
-              strokeDashoffset={C * (1 - pct)}
-              style={{ transition: 'stroke-dashoffset 1s linear, stroke 300ms linear' }}
-            />
-          </svg>
-          <span className="text-[10px] font-medium tabular-nums leading-none text-[var(--ink-secondary)]">
-            {remaining}
+    <div data-field-layout="totp" className="flex min-w-0 items-center gap-3 border-b border-[var(--border-subtle)] py-2 last:border-b-0">
+      <div data-field-content className={`${FIELD_ROW_CLASS} flex-1`}>
+        <span data-field-label className={FIELD_LABEL_CLASS}>验证码</span>
+        {/* key 让每次换码都重放一遍淡入 —— 这就是「它变了」的信号 */}
+        <span key={code} data-field-value className="code-turn min-w-0 flex-1">
+          <span className="secret text-xl font-medium tracking-[0.12em]" style={{ color: tone }}>
+            {code.length > 3 ? `${code.slice(0, 3)} ${code.slice(3)}` : code}
           </span>
         </span>
-        <CopyButton getValue={async () => code} onCopied={scheduleClipboardClear} />
-      </span>
+
+      </div>
+        <span data-field-actions className="flex shrink-0 items-center gap-2.5">
+          {/* Keep the digits neutral; the ring alone communicates urgency. */}
+          <span data-field-persistent
+            className="relative grid h-[30px] w-[30px] place-items-center"
+            title={`${remaining} 秒后失效`}
+            role="timer"
+            aria-label={`验证码剩余 ${remaining} 秒`}
+          >
+            <svg viewBox="0 0 30 30" className="absolute inset-0 h-[30px] w-[30px] -rotate-90">
+              <circle cx="15" cy="15" r={R} fill="none" stroke="var(--border-subtle)" strokeWidth="2" />
+              <circle
+                cx="15" cy="15" r={R} fill="none"
+                stroke={tone} strokeWidth="2" strokeLinecap="round"
+                strokeDasharray={C}
+                strokeDashoffset={C * (1 - pct)}
+                style={{ transition: 'stroke-dashoffset 1s linear, stroke 300ms linear' }}
+              />
+            </svg>
+            <span className="text-[10px] font-medium tabular-nums leading-none text-[var(--ink-secondary)]">
+              {remaining}
+            </span>
+          </span>
+          <CopyButton getValue={async () => code} onCopied={scheduleClipboardClear} />
+        </span>
     </div>
   );
 }

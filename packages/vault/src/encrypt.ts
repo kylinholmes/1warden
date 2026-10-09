@@ -3,6 +3,7 @@ import type { SymmetricKey } from '@1warden/crypto';
 import type { CipherWriteBody, CipherFido2CredentialDto } from '@1warden/api';
 import type { StoredPasskey } from './passkey';
 import type { VaultItem, ItemType } from './model';
+import { emptyBankAccount, emptyDriversLicense, emptyPassport } from './model';
 import { preserveCipherData } from './preservation';
 
 export interface EncryptOptions {
@@ -21,13 +22,26 @@ export interface EncryptOptions {
 
 /** 领域类型 → 数字的 CipherType。unknown 用 -1 表示「不可保存」 */
 const TYPE_TO_NUMBER: Record<ItemType, number> = {
-  login: 1, secureNote: 2, card: 3, identity: 4, sshKey: 5, unknown: -1,
+  login: 1, secureNote: 2, card: 3, identity: 4, sshKey: 5,
+  bankAccount: 6, driversLicense: 7, passport: 8, unknown: -1,
 };
 
 /** 只在值非 null 时加密 —— 保持「缺失」与「空串」的区别 */
 async function enc(v: string | null | undefined, key: SymmetricKey): Promise<string | null> {
   if (v === null || v === undefined) return null;
   return encryptString(v, key);
+}
+
+async function encryptNativeFields<T extends { [K in keyof T]: string | null }>(
+  fields: T | null | undefined, shape: T, key: SymmetricKey,
+): Promise<T> {
+  if (!fields) throw new Error('条目缺少对应类型的数据，已阻止保存以保护原数据');
+  const out = { ...shape };
+  // Explicit known-key allowlist: never send plaintext unknown draft properties.
+  for (const name of Object.keys(shape) as Array<keyof T>) {
+    out[name] = await enc(fields[name], key) as T[typeof name];
+  }
+  return out;
 }
 
 /** Native Bitwarden encrypts credential metadata as well as keyValue; creationDate is plain.
@@ -128,6 +142,12 @@ export async function encryptCipher(
       publicKey: await enc(item.sshKey.publicKey, key),
       fingerprint: await enc(item.sshKey.fingerprint, key),
     };
+  } else if (item.type === 'bankAccount') {
+    body.bankAccount = await encryptNativeFields(item.bankAccount, emptyBankAccount(), key);
+  } else if (item.type === 'driversLicense') {
+    body.driversLicense = await encryptNativeFields(item.driversLicense, emptyDriversLicense(), key);
+  } else if (item.type === 'passport') {
+    body.passport = await encryptNativeFields(item.passport, emptyPassport(), key);
   } else if (item.type === 'secureNote') {
     // ⚠️ secureNote 只有 `{ type: 0 }` 一个合法值，而且**不被加密**
     body.secureNote = { type: item.secureNote?.type ?? 0 };

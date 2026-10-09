@@ -90,6 +90,28 @@ export const IconTerminal = (p: IconProps) => (
   </Svg>
 );
 
+export const IconBank = (p: IconProps) => (
+  <Svg {...p}>
+    <path d="m3 8 9-5 9 5M3 9h18M4 21h16M3 18h18M6 9v9M10 9v9M14 9v9M18 9v9" />
+  </Svg>
+);
+
+export const IconDriversLicense = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="2.5" y="5" width="19" height="14" rx="2.5" />
+    <circle cx="8" cy="10.5" r="2" />
+    <path d="M5 16a3 3 0 0 1 6 0M14 9h4M14 12h4M14 15h2" />
+  </Svg>
+);
+
+export const IconPassport = (p: IconProps) => (
+  <Svg {...p}>
+    <rect x="5" y="2.5" width="14" height="19" rx="2" />
+    <circle cx="12" cy="10.5" r="4" />
+    <path d="M8 10.5h8M12 6.5a7 7 0 0 1 0 8 7 7 0 0 1 0-8M9.5 18h5" />
+  </Svg>
+);
+
 export const IconUnknown = (p: IconProps) => (
   <Svg {...p}>
     <circle cx="12" cy="12" r="9" />
@@ -306,6 +328,9 @@ export function TypeIcon({ type, size = 16 }: { type: string; size?: number }) {
     case 'identity': return <IconIdentity size={size} />;
     case 'secureNote': return <IconNote size={size} />;
     case 'sshKey': return <IconTerminal size={size} />;
+    case 'bankAccount': return <IconBank size={size} />;
+    case 'driversLicense': return <IconDriversLicense size={size} />;
+    case 'passport': return <IconPassport size={size} />;
     default: return <IconUnknown size={size} />;
   }
 }
