@@ -309,6 +309,8 @@ jobs:
       - name: Isolated native WebView2 regression (no real clipboard)
         env:
           ONEWARDEN_CI_OUTPUT: ${{ runner.temp }}/1warden-ci-native
+          # Diagnostic probe: measure cold readiness beyond the normal 10s budget.
+          ONEWARDEN_NATIVE_STARTUP_PROBE: '1'
         run: bun run test:windows
       - name: Upload native evidence even after failure
         if: always()
