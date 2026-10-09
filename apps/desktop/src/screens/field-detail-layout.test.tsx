@@ -61,13 +61,13 @@ describe('detail native/compound/custom shared label-value contract', () => {
       expect(rows.some(row => row.dataset.fieldLayout === 'row')).toBe(true);
       expect(rows.find(row => row.textContent?.includes('Custom field'))).toBeDefined();
       for (const row of rows) {
-        const content = row.querySelector<HTMLElement>(':scope > [data-field-content]')!;
+        const content = row.querySelector<HTMLElement>('[data-field-content]')!;
         expect(content).not.toBeNull();
         for (const token of FIELD_ROW_CLASS.split(' ')) expect(content.classList.contains(token)).toBe(true);
         const label = content.querySelector<HTMLElement>(':scope > [data-field-label]')!;
         expect(label.className).toBe(FIELD_LABEL_CLASS);
         expect(row.classList.contains('items-center')).toBe(true);
-        expect(row.querySelector(':scope > [data-field-actions]')).not.toBeNull();
+        expect(row.querySelector<HTMLButtonElement>(':scope > [data-field-copy]')?.type).toBe('button');
         expect(row.querySelector('[data-field-value]')?.classList.contains('min-w-0')).toBe(true);
         expect(row.querySelector('[data-field-value]')?.classList.contains('secret')).toBe(false);
         expect(label.nextElementSibling?.contains(row.querySelector('[data-field-value]'))).toBe(true);

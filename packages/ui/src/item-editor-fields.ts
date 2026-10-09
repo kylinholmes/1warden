@@ -35,8 +35,8 @@ const LINKED_TARGETS: Partial<Record<ItemType, readonly LinkedFieldTarget[]>> = 
     { id: 413, label: '用户名', key: 'username' },
     { id: 414, label: '护照号码', key: 'passportNumber' },
     { id: 415, label: '驾照号码', key: 'licenseNumber' },
-    { id: 416, label: '名', key: 'firstName' },
-    { id: 417, label: '姓', key: 'lastName' },
+    { id: 416, label: '名字', key: 'firstName' },
+    { id: 417, label: '姓氏', key: 'lastName' },
     { id: 418, label: '全名', key: 'fullName' },
   ],
 };
@@ -91,7 +91,7 @@ export interface NativeEditorField {
 
 const IDENTITY_EDITOR_GROUPS = [
   { group: '姓名与联系信息', fields: [
-    ['title', '称谓'], ['firstName', '名'], ['middleName', '中间名'], ['lastName', '姓'],
+    ['title', '称谓'], ['firstName', '名字'], ['middleName', '中间名'], ['lastName', '姓氏'],
     ['username', '用户名'], ['company', '公司'], ['email', '邮箱'], ['phone', '电话'],
   ] },
   { group: '地址', fields: [
@@ -124,7 +124,7 @@ export function nativeEditorFields(type: ItemType): NativeEditorField[] {
   ] : type === 'identity' ? IDENTITY_EDITOR_GROUPS.flatMap(({ group, fields }) =>
     fields.flatMap(([key, label]) => {
       if (key === 'firstName') return [compound('identity.name', '姓名', group,
-        [['identity.lastName', '姓'], ['identity.firstName', '名'], ['identity.middleName', '中间名']])];
+        [['identity.lastName', '姓氏'], ['identity.firstName', '名字'], ['identity.middleName', '中间名']])];
       if (key === 'middleName' || key === 'lastName' || key === 'state') return [];
       if (key === 'city') return [compound('identity.region', '地区', group,
         [['identity.state', '省 / 州'], ['identity.city', '城市']])];
@@ -138,12 +138,12 @@ export function nativeEditorFields(type: ItemType): NativeEditorField[] {
     ...Object.entries(BANK_ACCOUNT_LABEL).map(([key, label]) =>
       field(`bankAccount.${key}`, label, '银行账户', ['accountNumber', 'pin', 'iban'].includes(key) ? 'secret' : undefined)),
   ] : type === 'driversLicense' ? [
-    compound('driversLicense.name', '姓名', '驾照', [['driversLicense.lastName', '姓'], ['driversLicense.firstName', '名'], ['driversLicense.middleName', '中间名']]),
+    compound('driversLicense.name', '姓名', '驾照', [['driversLicense.lastName', '姓氏'], ['driversLicense.firstName', '名字'], ['driversLicense.middleName', '中间名']]),
     ...Object.entries(DRIVERS_LICENSE_LABEL).filter(([key]) => !['firstName', 'middleName', 'lastName'].includes(key)).map(([key, label]) =>
       field(`driversLicense.${key}`, label, '驾照', key === 'licenseNumber' ? 'secret'
         : ['dateOfBirth', 'issueDate', 'expirationDate'].includes(key) ? 'date' : undefined)),
   ] : type === 'passport' ? [
-    compound('passport.name', '姓名', '护照', [['passport.surname', '姓'], ['passport.givenName', '名']]),
+    compound('passport.name', '姓名', '护照', [['passport.surname', '姓氏'], ['passport.givenName', '名字']]),
     ...Object.entries(PASSPORT_LABEL).filter(([key]) => !['surname', 'givenName'].includes(key)).map(([key, label]) =>
       field(`passport.${key}`, label, '护照', ['passportNumber', 'nationalIdentificationNumber'].includes(key) ? 'secret'
         : ['dateOfBirth', 'issueDate', 'expirationDate'].includes(key) ? 'date' : undefined)),

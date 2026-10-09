@@ -29,11 +29,11 @@ import { FloatingPanel, useRetainedPresence } from '@1warden/ui';
 import { useToast } from '../components/Toast';
 import {
   BackButton, IconAlert, IconKeyboard, IconPencil, IconPlus,
-  CopyButton, IconChevronDown, IconSearch, IconSpinner, IconStar, IconTrash,
+  CopyField, IconChevronDown, IconSearch, IconSpinner, IconStar, IconTrash,
   CompoundFieldRow, FIELD_LABEL_CLASS, FIELD_ROW_CLASS, nativeEditorFields,
   ItemEditor, ItemRow, NavDrawerProvider, NavTrigger, SecretField, Section,
   TYPE_LABEL, countByType, formatCardExpiry, formatRecordDate,
-  scheduleClipboardClear, typeDestinations, type ItemSummary,
+  typeDestinations, type ItemSummary,
 } from '@1warden/ui';
 
 interface Props {
@@ -1130,40 +1130,41 @@ function TotpRow({ code, remaining, period }: { code: string; remaining: number;
 
   return (
     <div data-field-layout="totp" className="flex min-w-0 items-center gap-3 border-b border-[var(--border-subtle)] py-2 last:border-b-0">
-      <div data-field-content className={`${FIELD_ROW_CLASS} flex-1`}>
-        <span data-field-label className={FIELD_LABEL_CLASS}>验证码</span>
-        {/* key 让每次换码都重放一遍淡入 —— 这就是「它变了」的信号 */}
-        <span key={code} data-field-value className="code-turn min-w-0 flex-1">
-          <span className="secret text-xl font-medium tracking-[0.12em]" style={{ color: tone }}>
-            {code.length > 3 ? `${code.slice(0, 3)} ${code.slice(3)}` : code}
-          </span>
-        </span>
-
-      </div>
-        <span data-field-actions className="flex shrink-0 items-center gap-2.5">
-          {/* Keep the digits neutral; the ring alone communicates urgency. */}
-          <span data-field-persistent
-            className="relative grid h-[30px] w-[30px] place-items-center"
-            title={`${remaining} 秒后失效`}
-            role="timer"
-            aria-label={`验证码剩余 ${remaining} 秒`}
-          >
-            <svg viewBox="0 0 30 30" className="absolute inset-0 h-[30px] w-[30px] -rotate-90">
-              <circle cx="15" cy="15" r={R} fill="none" stroke="var(--border-subtle)" strokeWidth="2" />
-              <circle
-                cx="15" cy="15" r={R} fill="none"
-                stroke={tone} strokeWidth="2" strokeLinecap="round"
-                strokeDasharray={C}
-                strokeDashoffset={C * (1 - pct)}
-                style={{ transition: 'stroke-dashoffset 1s linear, stroke 300ms linear' }}
-              />
-            </svg>
-            <span className="text-[10px] font-medium tabular-nums leading-none text-[var(--ink-secondary)]">
-              {remaining}
+      <CopyField label="验证码" getValue={async () => code}>
+        <span data-field-content className={`${FIELD_ROW_CLASS} flex-1`}>
+          <span data-field-label className={FIELD_LABEL_CLASS}>验证码</span>
+          {/* key 让每次换码都重放一遍淡入 —— 这就是「它变了」的信号 */}
+          <span key={code} data-field-value className="code-turn min-w-0 flex-1">
+            <span className="secret text-xl font-medium tracking-[0.12em]" style={{ color: tone }}>
+              {code.length > 3 ? `${code.slice(0, 3)} ${code.slice(3)}` : code}
             </span>
           </span>
-          <CopyButton getValue={async () => code} onCopied={scheduleClipboardClear} />
+
         </span>
+      </CopyField>
+      <span data-field-actions className="flex shrink-0 items-center gap-2.5">
+        {/* Keep the digits neutral; the ring alone communicates urgency. */}
+        <span data-field-persistent
+          className="relative grid h-[30px] w-[30px] place-items-center"
+          title={`${remaining} 秒后失效`}
+          role="timer"
+          aria-label={`验证码剩余 ${remaining} 秒`}
+        >
+          <svg viewBox="0 0 30 30" className="absolute inset-0 h-[30px] w-[30px] -rotate-90">
+            <circle cx="15" cy="15" r={R} fill="none" stroke="var(--border-subtle)" strokeWidth="2" />
+            <circle
+              cx="15" cy="15" r={R} fill="none"
+              stroke={tone} strokeWidth="2" strokeLinecap="round"
+              strokeDasharray={C}
+              strokeDashoffset={C * (1 - pct)}
+              style={{ transition: 'stroke-dashoffset 1s linear, stroke 300ms linear' }}
+            />
+          </svg>
+          <span className="text-[10px] font-medium tabular-nums leading-none text-[var(--ink-secondary)]">
+            {remaining}
+          </span>
+        </span>
+      </span>
     </div>
   );
 }

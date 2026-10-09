@@ -16,6 +16,17 @@
  * 抽出来时如果不包，工具类就压不住它了 —— 表现是「某处的 padding 改不动」。
  */
 @layer components {
+    .inline-copy { cursor: pointer; user-select: text; -webkit-user-select: text; }
+    .inline-copy:hover { background: color-mix(in srgb, var(--surface-hover) 55%, transparent); }
+    .inline-copy-feedback { min-width: 4em; color: var(--ink-tertiary); }
+    .inline-copy[data-state='ok'] .inline-copy-feedback { color: var(--accent); }
+    .inline-copy[data-state='error'] .inline-copy-feedback { color: var(--risk); }
+    @media (hover: hover) and (pointer: fine) {
+      .inline-copy[data-state='idle']:not(:hover):not(:focus-visible) .inline-copy-feedback { opacity: 0; }
+    }
+    @media (forced-colors: active) {
+      .inline-copy .inline-copy-feedback { opacity: 1 !important; }
+    }
     /* Detail controls keep their layout slot. Only fine-pointer idle actions
        recede; keyboard focus, touch, high contrast and copy feedback stay usable.
        Never hide the action wrapper: it may also contain a live OTP timer. */

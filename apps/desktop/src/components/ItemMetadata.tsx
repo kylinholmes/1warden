@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { CopyButton, IconChevronDown, IconFolder, IconPlus, IconSpinner, TYPE_LABEL } from '@1warden/ui';
+import { CopyField, IconChevronDown, IconFolder, IconPlus, IconSpinner, TYPE_LABEL } from '@1warden/ui';
 import type { VaultFolder } from '@1warden/vault';
 import type { ApplicationClient, ItemDetailData } from '../application/types';
 import { createAndAssignFolder, pendingFolderAssignment } from '../application/folder-assignment';
@@ -147,8 +147,6 @@ function date(value: string | null | undefined): string {
 }
 
 export function ItemRecordInfo({ item }: { item: ItemDetailData }) {
-  const store = useLocalStore(() => ({ error: null as string | null }));
-  const [error, setError] = useStoreField(store, 'error');
   return <footer aria-label="记录信息" data-record-info
     className="mt-8 border-t border-[var(--border-subtle)] pt-4 text-xs leading-relaxed text-[var(--ink-tertiary)]">
     <div className="flex flex-wrap gap-x-5 gap-y-1">
@@ -158,11 +156,9 @@ export function ItemRecordInfo({ item }: { item: ItemDetailData }) {
     </div>
     <div className="mt-1 flex min-w-0 items-center gap-2">
       <span className="shrink-0">{TYPE_LABEL[item.summary.type] ?? '未知类型'} · 记录 ID</span>
-      <span className="min-w-0 truncate select-all" title={item.summary.id}>{item.summary.id}</span>
-      <CopyButton getValue={async () => item.summary.id} label="复制记录 ID" iconOnly iconSize={12}
-        className="shrink-0 rounded p-1 hover:bg-[var(--surface-hover)] hover:text-[var(--ink-secondary)]"
-        onError={() => setError('记录 ID 复制失败，请重试')} />
+      <CopyField getValue={async () => item.summary.id} label="记录 ID">
+        <span className="min-w-0 flex-1 truncate">{item.summary.id}</span>
+      </CopyField>
     </div>
-    {error && <p role="alert" className="mt-1 text-[var(--risk)]">{error}</p>}
   </footer>;
 }

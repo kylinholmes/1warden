@@ -105,8 +105,8 @@ async function stackedGeometry(scope: string, editor: boolean) {
         leftAligned: Math.abs(l.left - v.left) < 1 && Math.abs(l.left - c.left) < 1,
         fullRow: Math.abs(r.left - parent.left) < 1 && Math.abs(r.right - parent.right) < 1,
         compound: compound?.getAttribute('data-compound-field') ?? null,
-        actionsCentered: editor || Boolean(a && Math.abs(a.top + a.height / 2 - c.top - c.height / 2) < 1),
-        actionsBeside: editor || Boolean(a && a.left >= c.right - 1 && a.right <= r.right + 1),
+        actionsCentered: editor || !a || Boolean(a && Math.abs(a.top + a.height / 2 - c.top - c.height / 2) < 1),
+        actionsBeside: editor || !a || Boolean(a && a.left >= c.right - 1 && a.right <= r.right + 1),
         contained: r.left >= 0 && r.right <= innerWidth && row.scrollWidth <= row.clientWidth,
         valueContained: editor || value.scrollWidth <= value.clientWidth,
         contentPresent: editor || Boolean(value.textContent?.trim()),
@@ -309,11 +309,21 @@ async function compoundZoomCases() {
     }
   }
 }
-/** Reveal field actions through real pointer and keyboard interactions, without
- * copying synthetic or real values to the operating-system clipboard.
+/** Exercise inline copying through real pointer/keyboard actions. The browser
+ * clipboard boundary is replaced before load; the OS clipboard is untouched.
  */
 async function fieldActionCases() {
-  const copy = '.vault-detail [data-field-actions] button[aria-label="复制"]';
+  const copy = '.vault-detail [data-field-copy]';
+  const hint = `${copy} [data-copy-feedback]`;
+  await page.evaluateOnNewDocument(() => {
+    const writes: string[] = [];
+    Object.assign(window, { __fieldWrites: writes });
+    Object.defineProperty(navigator, 'clipboard', { configurable: true, value: {
+      writeText: async (value: string) => { writes.push(value); },
+      readText: async () => writes.at(-1) ?? '',
+    } });
+  });
+  const writeCount = () => page.evaluate(() => (window as unknown as { __fieldWrites: string[] }).__fieldWrites.length);
   const opacity = (node: Element) => {
     let value = 1;
     for (let current: Element | null = node; current; current = current.parentElement) value *= parseFloat(getComputedStyle(current).opacity);
@@ -328,15 +338,15 @@ async function fieldActionCases() {
     check('mouse test uses a fine pointer with hover support', await page.evaluate(() => matchMedia('(hover: hover) and (pointer: fine)').matches));
     await page.mouse.move(2, 2); await settle();
     const before = await page.$eval(copy, node => node.getBoundingClientRect().toJSON());
-    check('mouse field copy is quiet before hover or focus', await page.$eval(copy, opacity) < 0.01);
+    check('field values remain visible while the idle copy hint is quiet', await page.$eval(copy, opacity) > 0.99 && await page.$eval(hint, opacity) < 0.01);
     check('field labels and full values do not expose redundant native title tooltips', await page.$$eval('.vault-detail [data-field-label], .vault-detail [data-field-value]', nodes =>
       nodes.every(node => !node.hasAttribute('title'))));
     await page.screenshot({ path: join(output, `${size}-idle.png`) });
     const label = await page.$eval('.vault-detail [data-field-label]', node => node.getBoundingClientRect().toJSON());
     await page.mouse.move(label.left + 2, label.top + 2); await settle();
-    check('hovering field content rather than its button exposes copy', await page.$eval(copy, opacity) > 0.99);
+    check('hovering the field exposes its inline copy hint', await page.$eval(hint, opacity) > 0.99);
     const hover = await page.$eval(copy, node => node.getBoundingClientRect().toJSON());
-    check('hover does not move or resize the reserved copy action slot', ['left', 'top', 'width', 'height'].every(key => Math.abs(before[key] - hover[key]) < 1), { before, hover });
+    check('hover does not move or resize the clickable field', ['left', 'top', 'width', 'height'].every(key => Math.abs(before[key] - hover[key]) < 1), { before, hover });
     await page.screenshot({ path: join(output, `${size}-hover.png`) });
     await page.mouse.move(2, 2); await page.focus('.vault-detail [data-page-back]');
     for (let i = 0; i < 20; i++) {
@@ -344,31 +354,48 @@ async function fieldActionCases() {
       if (await page.$eval(copy, node => document.activeElement === node)) break;
     }
     await settle();
-    check('Tab can reach and visibly expose an initially quiet copy action', await page.$eval(copy, node => document.activeElement === node)
-      && await page.$eval(copy, opacity) > 0.99);
+    check('Tab focuses the field and shows its copy hint and focus outline', await page.$eval(copy, node => document.activeElement === node && getComputedStyle(node).outlineStyle !== 'none')
+      && await page.$eval(hint, opacity) > 0.99);
     const focused = await page.$eval(copy, node => node.getBoundingClientRect().toJSON());
-    check('keyboard focus leaves the reserved action slot unchanged', ['left', 'top', 'width', 'height'].every(key => Math.abs(before[key] - focused[key]) < 1), { before, focused });
+    check('keyboard focus leaves field geometry unchanged', ['left', 'top', 'width', 'height'].every(key => Math.abs(before[key] - focused[key]) < 1), { before, focused });
     await page.screenshot({ path: join(output, `${size}-focus.png`) });
+    await page.keyboard.press('Enter');
+    await page.waitForFunction(() => (window as unknown as { __fieldWrites: string[] }).__fieldWrites.length === 1);
+    await page.keyboard.press('Space');
+    await page.waitForFunction(() => (window as unknown as { __fieldWrites: string[] }).__fieldWrites.length === 2);
+    check('Enter and Space copy the focused field with inline success feedback',
+      await page.$eval(copy, node => node.getAttribute('data-state') === 'ok')
+      && await page.evaluate(() => (window as unknown as { __fieldWrites: string[] }).__fieldWrites.every(value => value === 'Herzog')));
+    await page.click(`${copy} [data-field-value]`);
+    check('clicking the displayed text copies without a separate copy button', await writeCount() === 3);
 
     size = `field-actions-touch-${theme}`;
     await page.setViewport({ width: 600, height: 900, deviceScaleFactor: 1, hasTouch: true, isMobile: true });
     await page.goto(`http://127.0.0.1:${server.port}/?screen=vault&fixture=identity-short&theme=${theme}`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.vault-list li > button'); await page.click('.vault-list li > button'); await page.waitForSelector(copy); await settle();
     check('touch test uses coarse pointer media without hover', await page.evaluate(() => matchMedia('(hover: none) and (pointer: coarse)').matches));
-    const copies = await page.$$(copy);
+    const copies = await page.$$(hint);
     check('touch field copy actions remain continuously discoverable', (await Promise.all(copies.map((node: any) => node.evaluate(opacity)))).every(value => value > 0.99));
+    await page.tap(copy);
+    await page.waitForFunction(() => (window as unknown as { __fieldWrites: string[] }).__fieldWrites.length === 1);
+    check('tapping field content copies once', await writeCount() === 1);
     await page.screenshot({ path: join(output, `${size}.png`) });
 
     size = `totp-actions-${theme}`;
     await page.setViewport({ width: 1280, height: 850, deviceScaleFactor: 1, hasTouch: false, isMobile: false });
     await page.goto(`http://127.0.0.1:${server.port}/?screen=detail&theme=${theme}`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('[data-field-layout="totp"] [role="timer"]'); await settle(); await page.mouse.move(2, 2); await settle();
-    check('TOTP countdown is visible even while its copy action is quiet', await page.$eval('[data-field-layout="totp"] [role="timer"]', opacity) > 0.99
-      && await page.$eval('[data-field-layout="totp"] [data-field-actions] button[aria-label="复制"]', opacity) < 0.01);
+    check('TOTP countdown is visible even while its inline copy hint is quiet', await page.$eval('[data-field-layout="totp"] [role="timer"]', opacity) > 0.99
+      && await page.$eval('[data-field-layout="totp"] [data-copy-feedback]', opacity) < 0.01);
     check('TOTP countdown still has a named, nonzero visible timer surface', await page.$eval('[data-field-layout="totp"] [role="timer"]', (node: HTMLElement) => {
       const rect = node.getBoundingClientRect();
       return Boolean(node.getAttribute('aria-label')) && rect.width > 0 && rect.height > 0 && getComputedStyle(node).visibility === 'visible';
     }));
+    const digits = await page.$eval('[aria-label="复制验证码"] [data-field-value]', node => node.textContent!.replace(/\s/g, ''));
+    await page.click('[aria-label="复制验证码"] [data-field-value]');
+    await page.waitForSelector('[aria-label="复制验证码"][data-state="ok"]');
+    check('OTP content copies digits without display spacing', await page.evaluate(() =>
+      (window as unknown as { __fieldWrites: string[] }).__fieldWrites.at(-1)) === digits);
     await page.screenshot({ path: join(output, `${size}.png`) });
   }
 }

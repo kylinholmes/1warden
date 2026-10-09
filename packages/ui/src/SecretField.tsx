@@ -1,7 +1,6 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { IconEye } from './icons';
-import { CopyButton } from './CopyButton';
-import { scheduleClipboardClear } from './clipboard';
+import { CopyField } from './CopyField';
 import { FIELD_LABEL_CLASS, FIELD_ROW_CLASS } from './CompoundFieldRow';
 
 /**
@@ -102,22 +101,22 @@ export function SecretField({
 
   return (
     <div data-field-layout={layout} className={`group flex min-w-0 items-center gap-3${layout === 'inline' ? '' : ' border-b border-[var(--border-subtle)] py-2 last:border-b-0'}`}>
-      <div data-field-content className={`${FIELD_ROW_CLASS} flex-1 self-stretch`}>
-        <span data-field-label className={FIELD_LABEL_CLASS}>
-          {label}
+      <CopyField label={label} getValue={getValue ?? (async () => value)} onCopied={onCopied} onError={onCopyError}>
+        <span data-field-content className={`${FIELD_ROW_CLASS} flex-1 self-stretch`}>
+          <span data-field-label className={FIELD_LABEL_CLASS}>
+            {label}
+          </span>
+          <span data-field-value
+            className={`${monospace ? 'secret ' : ''}min-w-0 text-md leading-normal ${wrap && !hidden ? 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]' : 'truncate'} ${hidden ? 'tracking-[0.2em] text-[var(--ink-secondary)]' : ''}`}
+          >
+            {shown}
+          </span>
         </span>
-        <span data-field-value
-          className={`${monospace ? 'secret ' : ''}min-w-0 text-md leading-normal ${wrap && !hidden ? 'whitespace-pre-wrap break-words [overflow-wrap:anywhere]' : 'truncate'} ${hidden ? 'tracking-[0.2em] text-[var(--ink-secondary)]' : ''}`}
-        >
-          {shown}
-        </span>
-      </div>
+      </CopyField>
 
-      {/* Fine-pointer hover and keyboard focus reveal actions without moving text.
-          Touch/forced-colors modes and successful-copy feedback stay visible. */}
-      <span data-field-actions className="flex shrink-0 items-center gap-0.5">
-        {masked && (
-          <button
+      {/* Keep reveal separate so it never also triggers copy. */}
+      {masked && <span data-field-actions className="flex shrink-0 items-center gap-0.5">
+        <button
             type="button"
             onClick={() => { void toggle(); }}
             disabled={revealing}
@@ -126,17 +125,8 @@ export function SecretField({
             className="rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)] disabled:opacity-50"
           >
             <IconEye size={14} off={hidden} />
-          </button>
-        )}
-        <CopyButton
-          getValue={getValue ?? (async () => value)}
-          {...(onCopied === undefined ? { onCopied: scheduleClipboardClear } : { onCopied })}
-          {...(onCopyError === undefined ? {} : { onError: onCopyError })}
-          iconOnly
-          iconSize={14}
-          className="rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)] disabled:opacity-50"
-        />
-      </span>
+        </button>
+      </span>}
     </div>
   );
 }

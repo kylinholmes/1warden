@@ -39,6 +39,7 @@ export { BUILTIN_CARD_ICONS } from './card-brand';
 export * from './ItemRow';
 export * from './clipboard';
 export * from './CopyButton';
+export * from './CopyField';
 export * from './SecretField';
 export * from './CompoundFieldRow';
 export { nativeEditorFields } from './item-editor-fields';
