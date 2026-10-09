@@ -29,7 +29,7 @@ async function checkDetail(check: (host: HTMLElement) => void) {
 }
 
 describe('compact credential rows keep actions and countdown discoverable', () => {
-  it('uses compact OTP spacing but keeps the complete timer persistent beside copy', async () => {
+  it('uses compact OTP spacing and keeps the timer persistent beside the clickable value', async () => {
     await checkDetail(host => {
       const row = host.querySelector<HTMLElement>('[data-field-layout="totp"]')!;
       expect(row.classList.contains('py-2')).toBe(true);
@@ -43,8 +43,8 @@ describe('compact credential rows keep actions and countdown discoverable', () =
       expect(timer.textContent?.trim()).toBe('20');
       expect(actions.classList.contains('items-center')).toBe(true);
       expect(actions.classList.contains('hidden')).toBe(false);
-      expect(actions.querySelector('button')).not.toBeNull();
-      expect(actions.querySelector('button')?.hasAttribute('data-field-persistent')).toBe(false);
+      expect(actions.querySelector('button')).toBeNull();
+      expect(row.querySelector('button[aria-label="复制验证码"] [data-field-value]')).not.toBeNull();
       expect(row.querySelector('[data-field-content]')?.classList.contains('gap-1')).toBe(true);
     });
   });

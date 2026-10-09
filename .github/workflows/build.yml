@@ -99,6 +99,8 @@ jobs:
           WEB_VAULT_ENABLED: 'false'
           PUSH_ENABLED: 'false'
           DISABLE_ICON_DOWNLOAD: 'true'
+          # Synthetic CI records must be discarded with this isolated container.
+          I_REALLY_WANT_VOLATILE_STORAGE: 'true'
           LOG_LEVEL: warn
         ports:
           - 127.0.0.1:18083:80

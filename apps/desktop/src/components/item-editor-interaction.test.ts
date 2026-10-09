@@ -227,7 +227,7 @@ describe('complete native editor and custom-field interactions', () => {
     const region = host.querySelector('[data-compound-field="identity.region"]')!;
     expect(name.querySelector('[data-compound-cells]')?.children).toHaveLength(3);
     expect(region.querySelector('[data-compound-cells]')?.children).toHaveLength(2);
-    const given = name.querySelector<HTMLInputElement>('[aria-label="名"]')!;
+    const given = name.querySelector<HTMLInputElement>('[aria-label="名字"]')!;
     given.focus();
     await input(given, 'Given name');
     expect(document.activeElement).toBe(given);

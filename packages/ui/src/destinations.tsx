@@ -42,7 +42,7 @@ export const TYPE_ORDER = ['login', 'card', 'bankAccount', 'identity', 'driversL
  * 取值以桌面端为准（它是参考实现，而且「身份证号」对中国用户更具体）。
  */
 export const IDENTITY_LABEL: Record<string, string> = {
-  title: '称谓', firstName: '名', middleName: '中间名', lastName: '姓',
+  title: '称谓', firstName: '名字', middleName: '中间名', lastName: '姓氏',
   address1: '地址', address2: '地址 2', address3: '地址 3', city: '城市',
   state: '省/州', postalCode: '邮编', country: '国家', company: '公司',
   email: '邮箱', phone: '电话', ssn: '身份证号', username: '用户名',
@@ -57,13 +57,13 @@ export const BANK_ACCOUNT_LABEL = {
 } as const satisfies Record<keyof BankAccountFields, string>;
 
 export const DRIVERS_LICENSE_LABEL = {
-  firstName: '名', middleName: '中间名', lastName: '姓', dateOfBirth: '出生日期',
+  firstName: '名字', middleName: '中间名', lastName: '姓氏', dateOfBirth: '出生日期',
   licenseNumber: '驾照号码', issuingCountry: '签发国家 / 地区', issuingState: '签发省 / 州',
   issueDate: '签发日期', expirationDate: '到期日期', issuingAuthority: '签发机关', licenseClass: '准驾车型',
 } as const satisfies Record<keyof DriversLicenseFields, string>;
 
 export const PASSPORT_LABEL = {
-  surname: '姓', givenName: '名', dateOfBirth: '出生日期', sex: '性别', birthPlace: '出生地',
+  surname: '姓氏', givenName: '名字', dateOfBirth: '出生日期', sex: '性别', birthPlace: '出生地',
   nationality: '国籍', issuingCountry: '签发国家 / 地区', passportNumber: '护照号码',
   passportType: '护照类型', nationalIdentificationNumber: '国民身份号码',
   issuingAuthority: '签发机关', issueDate: '签发日期', expirationDate: '到期日期',

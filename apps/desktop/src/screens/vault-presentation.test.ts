@@ -203,8 +203,8 @@ describe('shared compound-field presentation in record details', () => {
       if (index > 0) expect(html.indexOf(values[index - 1]!)).toBeLessThan(html.indexOf(value));
     });
     expect(html.match(/data-field-layout="inline"/g)).toHaveLength(values.length);
-    expect(html).toMatch(/data-field-label="true" class="[^"]*text-xs[^"]*">姓<\/span>/);
-    expect(html).toMatch(/data-field-label="true" class="[^"]*text-xs[^"]*">名<\/span>/);
+    expect(html).toMatch(/data-field-label="true" class="[^"]*text-xs[^"]*">姓氏<\/span>/);
+    expect(html).toMatch(/data-field-label="true" class="[^"]*text-xs[^"]*">名字<\/span>/);
     expect(html).not.toContain('w-[76px]');
     expect(html).not.toContain('col-span-2');
     expect(html).not.toMatch(/<span[^>]*>姓名<\/span>/);
@@ -218,7 +218,7 @@ describe('shared compound-field presentation in record details', () => {
     expect(html).toContain('data-compound-field="identity.region"');
     expect(html).toContain('Only-surname');
     expect(html).toContain('Only-city');
-    expect(html).not.toMatch(/data-field-label="true"[^>]*>名<\/span>/);
+    expect(html).not.toMatch(/data-field-label="true"[^>]*>名字<\/span>/);
     expect(html).not.toMatch(/data-field-label="true"[^>]*>中间名<\/span>/);
     expect(html).not.toMatch(/data-field-label="true"[^>]*>省 \/ 州<\/span>/);
     expect(html).not.toContain('grid-template-columns');

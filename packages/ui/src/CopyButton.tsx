@@ -1,7 +1,6 @@
-import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { useEffect, useRef } from 'react';
 import { IconCheck, IconCopy } from './icons';
-import { CLIPBOARD_CLEAR_MS, writeClipboardText } from './clipboard';
+import { CLIPBOARD_CLEAR_MS } from './clipboard';
+import { useCopyAction } from './useCopyAction';
 
 /**
  * 复制到剪贴板 —— **桌面端和浏览器插件共用**。
@@ -73,28 +72,8 @@ export function CopyButton({
   getValue, onCopied, onError, className = 'btn btn-ghost shrink-0 gap-1.5',
   iconOnly = false, iconSize = 13, label = '复制',
 }: CopyButtonProps) {
-  const viewStore = useLocalStore(() => {
-    const copied = false;
-    return { copied };
-  });
-  const [copied, setCopied] = useStoreField(viewStore, 'copied');
-  const timer = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => () => { if (timer.current) clearTimeout(timer.current); }, []);
-
-  async function copy(): Promise<void> {
-    try {
-      const value = await getValue();
-      await writeClipboardText(value);
-      await onCopied?.(value);
-      setCopied(true);
-      if (timer.current) clearTimeout(timer.current);
-      timer.current = setTimeout(() => setCopied(false), 2000);
-    } catch (e) {
-      setCopied(false);
-      onError?.(e);
-    }
-  }
+  const { state, copy } = useCopyAction({ getValue, onCopied, onError });
+  const copied = state === 'ok';
 
   return (
     <button

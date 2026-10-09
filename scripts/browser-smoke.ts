@@ -734,9 +734,9 @@ try {
   if (process.env.ONEWARDEN_SMOKE_CLIPBOARD === '1') {
     const copyPassword = async () => {
       await click('.vault-list li > button span::-p-text(Alpha smoke login)');
-      await click('div.group:has(> span[title="密码"]) button[aria-label="复制"]');
-      await popup.waitForSelector('button[aria-label="已复制"]');
-      check('real shared copy button writes the revealed password',
+      await click('[data-field-copy][aria-label="复制密码"]');
+      await popup.waitForSelector('[data-field-copy][aria-label="复制密码"][data-state="ok"]');
+      check('clicking the shared password field copies the revealed password',
         await popup.evaluate(() => navigator.clipboard.readText()) === secret);
     };
     const closePastDeadline = async () => {
