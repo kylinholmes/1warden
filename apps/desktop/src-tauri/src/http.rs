@@ -891,9 +891,60 @@ mod tests {
         }
     }
 
+    fn read_loopback_http_request(socket: &mut std::net::TcpStream) -> std::io::Result<Vec<u8>> {
+        use std::io::Read;
+        // Windows can inherit nonblocking mode from the fixture listener.
+        // Accept polling must stay cancellable, but a connected socket must
+        // wait for request bytes; a read timeout alone does not change its mode.
+        socket.set_nonblocking(false)?;
+        socket.set_read_timeout(Some(std::time::Duration::from_secs(2)))?;
+        let mut request = Vec::new();
+        loop {
+            let mut buffer = [0_u8; 1024];
+            let size = socket.read(&mut buffer)?;
+            if size == 0 { break; }
+            request.extend_from_slice(&buffer[..size]);
+            if request.windows(4).any(|part| part == b"\r\n\r\n") { break; }
+        }
+        Ok(request)
+    }
+
+    #[test]
+    fn loopback_http_reader_waits_for_request_on_nonblocking_socket() {
+        use std::io::Write;
+        use std::net::{TcpListener, TcpStream};
+        use std::sync::mpsc::{channel, RecvTimeoutError};
+        use std::time::Duration;
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let mut client = TcpStream::connect(listener.local_addr().unwrap()).unwrap();
+        let (mut socket, _) = listener.accept().unwrap();
+        // Explicitly model Windows' inherited mode on every platform. Keep the
+        // request absent until the reader has had an opportunity to wait for it.
+        socket.set_nonblocking(true).unwrap();
+        let (started_tx, started_rx) = channel();
+        let (request_tx, request_rx) = channel();
+        let server = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            request_tx.send(read_loopback_http_request(&mut socket)).unwrap();
+        });
+        started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let early = request_rx.recv_timeout(Duration::from_millis(50));
+        let expected = b"GET /target HTTP/1.1\r\nHost: localhost\r\n\r\n";
+        if matches!(early, Err(RecvTimeoutError::Timeout)) {
+            client.write_all(expected).unwrap();
+        }
+        drop(client);
+        server.join().unwrap();
+        assert!(matches!(early, Err(RecvTimeoutError::Timeout)),
+            "reader must wait for the request, not return WouldBlock: {early:?}");
+        let request = request_rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
+        assert_eq!(request, expected, "the delayed request must arrive intact");
+    }
+
     #[test]
     fn redirect_modes_do_not_contact_target_unless_follow_requested() {
-        use std::io::{Read, Write};
+        use std::io::Write;
         use std::net::TcpListener;
         use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
         use std::time::Duration;
@@ -915,15 +966,7 @@ mod tests {
                     }
                     Err(error) => panic!("local HTTP accept failed: {error}"),
                 };
-                socket.set_read_timeout(Some(Duration::from_secs(2))).unwrap();
-                let mut request = Vec::new();
-                loop {
-                    let mut buffer = [0_u8; 1024];
-                    let size = socket.read(&mut buffer).unwrap();
-                    if size == 0 { break; }
-                    request.extend_from_slice(&buffer[..size]);
-                    if request.windows(4).any(|part| part == b"\r\n\r\n") { break; }
-                }
+                let request = read_loopback_http_request(&mut socket).expect("local HTTP request read failed");
                 let target = String::from_utf8_lossy(&request).lines().next().unwrap_or("").contains(" /target ");
                 let response = if target {
                     server_hits.fetch_add(1, Ordering::SeqCst);

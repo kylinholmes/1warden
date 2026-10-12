@@ -29,6 +29,7 @@ const errors: string[] = [];
 const safeAreaSamples: unknown[] = [];
 const exitTraces: unknown[] = [];
 const browserVersion = await browser.version();
+const originalUserAgent = await browser.userAgent();
 page.on('pageerror', (error: Error) => errors.push(error.message));
 function check(label: string, passed: boolean, diagnostic?: unknown) {
   if (!passed) throw new Error(`${label}: ${JSON.stringify(diagnostic)}`);
@@ -71,9 +72,11 @@ async function safeAreaGeometry(phase: string) {
     const env = getComputedStyle(probe);
     return {
       os: document.documentElement.dataset.os ?? null,
+      titlebarHeight: getComputedStyle(document.documentElement).getPropertyValue('--titlebar-h').trim(),
       envTop: parseFloat(env.paddingTop), envBottom: parseFloat(env.paddingBottom),
       reservedTop: getComputedStyle(panel, '::before').height,
       reservedBottom: getComputedStyle(panel, '::after').height,
+      panelTop: panel.getBoundingClientRect().top, panelTransform: getComputedStyle(panel).transform,
       headerTop: head.getBoundingClientRect().top, footerBottom: foot.getBoundingClientRect().bottom,
       viewportHeight: innerHeight, devicePixelRatio, visualViewportHeight: visualViewport?.height,
     };
@@ -147,16 +150,23 @@ async function closePanel(selector: string, label: string, narrow: boolean) {
 }
 
 try {
+  // Native initPlatform runs before React's first render. Configure this
+  // fixture the same way instead of changing its OS after the entrance has
+  // settled and immediately sampling invalidated container/pseudo layout.
+  await page.setUserAgent({ userAgent: originalUserAgent.replace(/\([^)]*\)/, '(Macintosh; Intel Mac OS X 10_15_7)') });
   await visit('generator');
-  await page.evaluate(() => { document.documentElement.dataset.os = 'mac'; });
-  check('native narrow header clears the 28px titlebar', await page.$eval('.panel-head', (element: HTMLElement) => element.getBoundingClientRect().top >= 28));
-  const cdp = await page.createCDPSession();
   await page.evaluate(() => {
     const probe = document.createElement('div');
     probe.dataset.qaSafeArea = 'true'; probe.setAttribute('aria-hidden', 'true');
     probe.style.cssText = 'position:fixed;visibility:hidden;pointer-events:none;inset:0 auto auto 0;width:0;height:0;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)';
     document.body.append(probe);
   });
+  const native = await safeAreaGeometry('native-initial-render');
+  check('native preview initializes macOS before rendering', native.os === 'mac' && native.titlebarHeight === '28px', native);
+  check('native narrow header clears the 28px titlebar', native.headerTop >= 28, native);
+  // All later scenarios retain the actual browser's shortcut/platform behavior.
+  await page.setUserAgent({ userAgent: originalUserAgent });
+  const cdp = await page.createCDPSession();
   await cdp.send('Emulation.setSafeAreaInsetsOverride', { insets: { top: 47, bottom: 34 } });
   await page.evaluate(() => { document.documentElement.dataset.os = 'ios'; });
   await safeAreaGeometry('notch-requested');
