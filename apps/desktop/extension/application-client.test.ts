@@ -6,6 +6,26 @@ import { twoFactorChallenge } from '../src/screens/auth-error';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+it('forwards only merge IDs, preview tokens and explicit choices through the bridge', async () => {
+  vi.resetModules();
+  const send = vi.fn(async (request: { method: string; args: unknown[] }) => ({ ok: true,
+    result: request.method === 'mergeItems' ? { baseId: 'base', saved: true, trashedIds: ['source'], retainedSources: [] }
+      : request.method === 'revealMergeValue' ? 'explicit-secret' : request.method === 'previewMerge' ? { token: 'opaque' } : EMPTY_SNAPSHOT }));
+  vi.stubGlobal('chrome', { storage: { session: {} }, runtime: { sendMessage: send } });
+  const { createExtensionApplicationClient } = await import('./application-client');
+  const client = createExtensionApplicationClient();
+  await expect(client.previewMerge({ baseId: 'base', sourceIds: ['source'] })).resolves.toEqual({ token: 'opaque' });
+  await expect(client.revealMergeValue({ token: 'opaque', fieldKey: 'password', itemId: 'source' })).resolves.toBe('explicit-secret');
+  await expect(client.mergeItems({ token: 'opaque', choices: { password: 'source' } })).resolves.toMatchObject({ saved: true });
+  expect(send.mock.calls.map(call => call[0])).toEqual([
+    { type: '1warden:application', method: 'previewMerge', args: [{ baseId: 'base', sourceIds: ['source'] }] },
+    { type: '1warden:application', method: 'revealMergeValue', args: [{ token: 'opaque', fieldKey: 'password', itemId: 'source' }] },
+    { type: '1warden:application', method: 'mergeItems', args: [{ token: 'opaque', choices: { password: 'source' } }] },
+    { type: '1warden:application', method: 'snapshot', args: [] },
+  ]);
+  client.dispose();
+});
+
 it('sends the organization report as a no-argument read without refreshing or mutating', async () => {
   vi.resetModules();
   const report = { total: 1, checked: 1, skipped: 0, duplicates: [], missingUrls: ['fixture-id'], missingUsernames: [], lowInformationNames: [], unfiled: [] };

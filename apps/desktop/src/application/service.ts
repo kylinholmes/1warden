@@ -306,6 +306,9 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
       return reportBrief(buildReport(activeItems(), now), (i) => i.nameFailed ? '无法解密' : i.name);
     },
     async organizationReport() { return buildOrganizationReport(activeItems()); },
+    async previewMerge(request) { activeItems(); return guarded(() => client.previewMerge(request)); },
+    async revealMergeValue(request) { activeItems(); return guarded(() => client.revealMergeValue(request)); },
+    async mergeItems(request) { activeItems(); return guarded(() => client.mergeItems(request)); },
     async checkBreaches() { return guarded(() => checkBreaches(activeItems())); },
     async parseImport(file) {
       const parsed = await guarded(() => parseImport(fromBase64(file.dataBase64), file.format));

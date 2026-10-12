@@ -21,7 +21,10 @@ async function input(node: HTMLInputElement, value: string) {
     node.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
-async function select(node: HTMLSelectElement, value: string) { await act(() => { node.value = value; node.dispatchEvent(new Event('change', { bubbles: true })); }); }
+async function select(node: HTMLButtonElement, value: string) {
+  await act(() => node.click());
+  await act(() => host!.querySelector<HTMLElement>(`[role="option"][data-value="${value}"]`)!.click());
+}
 const textField: CustomField = { name: '中文字段名称 with a long description', value: 'Readable ordinary text', type: 0, linkedId: null, sourceId: 'stable-text' };
 async function custom(initial: CustomField[]) {
   let fields = initial;
@@ -44,7 +47,7 @@ describe('single-column custom field editing', () => {
     const name = control<HTMLInputElement>('字段 1 名称'); const value = control<HTMLInputElement>('字段 1 值');
     expect(name.closest('label')).not.toBeNull(); expect(value.closest('label')).not.toBeNull();
     expect(row.querySelectorAll('input, select, button')).toHaveLength(4);
-    expect([...row.querySelectorAll('input, select')].map(node => node.getAttribute('aria-label')))
+    expect([...row.querySelectorAll('input, [role="combobox"]')].map(node => node.getAttribute('aria-label')))
       .toEqual(['字段 1 名称', '字段 1 值', '字段 1 类型']);
     const nameRow = name.closest('[data-editor-custom-name-row]');
     expect(nameRow).not.toBeNull(); expect(control('删除字段 1').closest('[data-editor-custom-name-row]')).toBe(nameRow);
@@ -86,9 +89,9 @@ describe('single-column custom field editing', () => {
     const linked = { ...textField, type: 3 as const, linkedId: 999, sourceId: 'linked' };
     const fixture = await custom([unknown, linked]);
     expect(control<HTMLInputElement>('字段 1 名称').disabled).toBe(true);
-    expect(control<HTMLSelectElement>('字段 1 类型').disabled).toBe(true);
+    expect(control<HTMLButtonElement>('字段 1 类型').disabled).toBe(true);
     expect(control('字段 1 值')).toBeNull();
-    expect(control<HTMLSelectElement>('字段 2 关联目标').value).toBe('999');
+    expect(control<HTMLButtonElement>('字段 2 关联目标').value).toBe('999');
     expect(fixture.onChange).not.toHaveBeenCalled();
     await act(() => control<HTMLButtonElement>('删除字段 1').click());
     expect(fixture.fields()).toEqual([linked]);
@@ -111,14 +114,14 @@ describe('single-column URL editing', () => {
       expect(input.classList.contains('secret')).toBe(false);
       const row = input.closest('[data-editor-url]')!;
       expect(row.querySelector('h3, h4, legend')).toBeNull();
-      expect([...row.querySelectorAll('input, select')].map(node => node.getAttribute('aria-label')))
+      expect([...row.querySelectorAll('input, [role="combobox"]')].map(node => node.getAttribute('aria-label')))
         .toEqual([`网址 ${index}`, `网址 ${index} 匹配方式`]);
     }
   });
   it('retains all URLs and match rules through text edits, matching changes, adding and removing', async () => {
     const fixture = await urls([first, second]);
     expect(fixture.onChange).not.toHaveBeenCalled();
-    expect(control<HTMLSelectElement>('网址 2 匹配方式').value).toBe('99');
+    expect(control<HTMLButtonElement>('网址 2 匹配方式').value).toBe('99');
     const current = control<HTMLInputElement>('网址 1');
     await act(() => current.focus()); await input(current, 'https://revised.example');
     expect(control('网址 1')).toBe(current); expect(document.activeElement).toBe(current);

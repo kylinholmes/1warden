@@ -2,6 +2,7 @@ import { useRef } from 'react';
 import { IMPORT_FORMATS, type ImportFormatId } from '@1warden/vault';
 import { IconAlert, IconCheck, IconImport } from './icons';
 import { TYPE_LABEL } from './destinations';
+import { Select } from './Select';
 
 /**
  * 从别处导入 —— **两端共用这一份**。
@@ -124,16 +125,14 @@ export function ImportView({
           <label htmlFor="import-format" className="mb-1.5 block text-xs text-[var(--ink-tertiary)]">
             格式{autoFormat === null ? '（自动识别不了，请手动选）' : '（已自动识别，可手动改）'}
           </label>
-          <select
+          <Select
             id="import-format"
             value={preview?.format ?? autoFormat ?? 'auto'}
-            onChange={(e) => onFormatChange(e.target.value as ImportFormatId)}
-            className="field w-full"
-          >
-            {IMPORT_FORMATS.map((f) => (
-              <option key={f.id} value={f.id}>{f.label}</option>
-            ))}
-          </select>
+            onChange={value => onFormatChange(value as ImportFormatId)}
+            disabled={busy}
+            options={IMPORT_FORMATS.map(format => ({ value: format.id, label: format.label }))}
+            className="w-full"
+          />
         </div>
       )}
 

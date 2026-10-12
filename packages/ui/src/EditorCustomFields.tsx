@@ -2,6 +2,7 @@ import type { CustomField, ItemType } from '@1warden/vault';
 import { IconTrash } from './icons';
 import { changeCustomFieldType, linkedFieldTargets } from './item-editor-fields';
 import { FIELD_LABEL_CLASS, FIELD_ROW_CLASS } from './CompoundFieldRow';
+import { Select } from './Select';
 
 export function EditorCustomFields({ fields, itemType, onChange, onRemove }: {
   fields: CustomField[];
@@ -54,14 +55,12 @@ export function EditorCustomFields({ fields, itemType, onChange, onRemove }: {
                 <>
                   <label className={FIELD_ROW_CLASS}>
                     <span className="sr-only">字段 {index + 1} 关联目标</span>
-                    <select className="field min-w-0" value={field.linkedId === null ? '' : String(field.linkedId)}
+                    <Select className="min-w-0" value={field.linkedId === null ? '' : String(field.linkedId)}
                       aria-label={`字段 ${index + 1} 关联目标`}
-                      onChange={event => update(index, { linkedId: Number(event.target.value), value: '' })}>
-                      {!linkedSupported && <option value={field.linkedId === null ? '' : String(field.linkedId)} disabled>
-                        现有关联 ({field.linkedId ?? '未指定'})
-                      </option>}
-                      {targets.map(target => <option key={target.id} value={target.id}>{target.label}</option>)}
-                    </select>
+                      onChange={value => update(index, { linkedId: Number(value), value: '' })}
+                      options={[...(!linkedSupported ? [{ value: field.linkedId === null ? '' : String(field.linkedId),
+                        label: `现有关联 (${field.linkedId ?? '未指定'})`, disabled: true }] : []),
+                      ...targets.map(target => ({ value: String(target.id), label: target.label }))]} />
                   </label>
                   {!linkedSupported && <p className="mt-1 text-xs text-[var(--ink-tertiary)]">此关联目标暂不支持，未改动时会保留。</p>}
                 </>
@@ -76,13 +75,12 @@ export function EditorCustomFields({ fields, itemType, onChange, onRemove }: {
             </div>
             <label className={FIELD_ROW_CLASS}>
               <span className={FIELD_LABEL_CLASS}>类型</span>
-              <select value={field.type} disabled={unsupported} className="field min-w-0"
+              <Select value={String(field.type)} disabled={unsupported} className="min-w-0"
                 aria-label={`字段 ${index + 1} 类型`}
-                onChange={event => onChange(fields.map((f, i) => i === index
-                  ? changeCustomFieldType(f, Number(event.target.value) as CustomField['type'], itemType) : f))}>
-                <option value={0}>文本</option><option value={1}>隐藏</option><option value={2}>开关</option>
-                {(targets.length > 0 || field.type === 3) && <option value={3} disabled={targets.length === 0}>关联</option>}
-              </select>
+                onChange={value => onChange(fields.map((f, i) => i === index
+                  ? changeCustomFieldType(f, Number(value) as CustomField['type'], itemType) : f))}
+                options={[{ value: '0', label: '文本' }, { value: '1', label: '隐藏' }, { value: '2', label: '开关' },
+                  ...(targets.length > 0 || field.type === 3 ? [{ value: '3', label: '关联', disabled: targets.length === 0 }] : [])]} />
             </label>
           </div>
         );

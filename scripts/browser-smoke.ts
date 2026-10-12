@@ -70,6 +70,7 @@ const folderCreates: { name: string }[] = [];
 let rejectFolderMove = false;
 const cipherWrites: CipherDto[] = [];
 const cipherCreates: CipherDto[] = [];
+const mergeTrashRequests: string[] = [];
 const savedDtos = new Map<string, CipherDto>();
 
 function check(label: string, passed: boolean, diagnostic = ''): void {
@@ -84,7 +85,9 @@ const site = Bun.serve({
     const url = new URL(request.url);
     if (url.pathname === '/api/ciphers' && request.method === 'POST') {
       const body = await request.json() as CipherDto;
-      const dto = { ...body, id: `smoke-registration-${cipherCreates.length + 1}`,
+      // Request-only concurrency/owner fields are not part of CipherDto responses.
+      const { encryptedFor: _owner, lastKnownRevisionDate: _revision, ...responseBody } = body as CipherDto & { encryptedFor?: string; lastKnownRevisionDate?: string };
+      const dto = { ...responseBody, id: `smoke-registration-${cipherCreates.length + 1}`,
         creationDate: new Date().toISOString(), revisionDate: new Date().toISOString(),
         deletedDate: null, archivedDate: null, attachments: [] };
       const record = await decryptCipher(dto, { encKey: Buffer.alloc(32, 17), macKey: Buffer.alloc(32, 23) });
@@ -115,12 +118,23 @@ const site = Bun.serve({
         return new Response(null, { status: 204 });
       }
     }
+    if (url.pathname.endsWith('/delete') && request.method === 'PUT') {
+      const record = seed.items.find(record => url.pathname === `/api/ciphers/${record.id}/delete`);
+      if (record) {
+        record.deletedAt = new Date().toISOString();
+        const saved = savedDtos.get(record.id);
+        if (saved) savedDtos.set(record.id, { ...saved, deletedDate: record.deletedAt });
+        mergeTrashRequests.push(record.id);
+        return new Response(null, { status: 204 });
+      }
+    }
     if (url.pathname.startsWith('/api/ciphers/') && request.method === 'PUT') {
       const index = seed.items.findIndex(record => url.pathname === `/api/ciphers/${record.id}`);
       if (index >= 0) {
         const record = seed.items[index]!;
         const body = await request.json() as CipherDto;
-        const dto = { ...body, id: record.id, creationDate: record.createdAt, revisionDate: new Date().toISOString(),
+        const { encryptedFor: _owner, lastKnownRevisionDate: _revision, ...responseBody } = body as CipherDto & { encryptedFor?: string; lastKnownRevisionDate?: string };
+        const dto = { ...responseBody, id: record.id, creationDate: record.createdAt, revisionDate: new Date().toISOString(),
           deletedDate: null, archivedDate: null, attachments: record.attachments.map(attachment => ({
             ...attachment, fileName: encryptFixture(Buffer.from(attachment.fileName), 17, 23),
           })) };
@@ -226,6 +240,12 @@ async function type(selector: string, value: string): Promise<void> {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, text);
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }, value);
+}
+async function selectOption(selector: string, value: string): Promise<void> {
+  await click(selector);
+  const popupId = await popup.$eval(selector, (element: HTMLElement) => element.getAttribute('aria-controls'));
+  await click(`[id=${JSON.stringify(popupId)}] [role="option"][data-value=${JSON.stringify(value)}]`);
+  await popup.waitForFunction((selector: string) => document.querySelector(selector)?.getAttribute('aria-expanded') === 'false', {}, selector);
 }
 async function openNavigation(): Promise<void> {
   // Explicit state, not hover or an intermediate slide-animation position.
@@ -367,7 +387,7 @@ try {
   check('detail shows folder organization and record metadata', await popup.$('[data-folder-organization]') !== null
     && await popup.evaluate(() => ['创建时间', '更新时间', '密码更新', '记录 ID'].every(label => document.body.textContent?.includes(label))));
   await openFolderEditor();
-  await popup.select('[data-item-folder]', 'work');
+  await selectOption('[data-item-folder]', 'work');
   await waitForFolder('work');
   const filed = await rpc('getItem', ['smoke-alpha']);
   check('detail folder choice updates the real background record and revision', filed.ok
@@ -389,7 +409,7 @@ try {
   await popup.waitForSelector('[aria-label="更改文件夹归类"]', { visible: true });
   await openFolderEditor();
   rejectFolderMove = true;
-  await popup.select('[data-item-folder]', '');
+  await selectOption('[data-item-folder]', '');
   await popup.waitForSelector('[aria-label="通知"] [role="alert"]');
   check('rejected assignment leaves the saved folder selected and exposes the error',
     await popup.$eval('[data-item-folder]', (picker: HTMLSelectElement) => picker.value === 'work' && !picker.disabled)
@@ -415,7 +435,7 @@ try {
   await click('.panel-foot button::-p-text(取消)');
   await popup.waitForSelector('#editor-title', { hidden: true });
   rejectFolderMove = false;
-  await popup.select('[data-item-folder]', '');
+  await selectOption('[data-item-folder]', '');
   await waitForFolder('');
   check('detail can remove folder membership without changing its password',
     (await rpc('getItem', ['smoke-alpha'])).result.summary.folderId === null
@@ -437,7 +457,7 @@ try {
       && createdFolderDetail.result.attachments[0]?.fileName === 'smoke-attachment.txt');
   await screenshot('created-folder-detail-440');
   await openFolderEditor();
-  await popup.select('[data-item-folder]', '');
+  await selectOption('[data-item-folder]', '');
   await waitForFolder('');
   await click('button::-p-text(编辑)');
   await popup.waitForSelector('#editor-title', { visible: true });
@@ -510,10 +530,10 @@ try {
   await click('[data-editor-add-url]');
   await type('[aria-label="网址 3"]', 'https://new.example.invalid');
   await click('[data-editor-url="2"] summary');
-  await popup.select('[aria-label="网址 3 匹配方式"]', '5');
+  await selectOption('[aria-label="网址 3 匹配方式"]', '5');
   await popup.$eval('[aria-label="字段 1 开关"]', (button: HTMLElement) => button.scrollIntoView({ block: 'center' }));
   await click('[aria-label="字段 1 开关"]');
-  await popup.select('[aria-label="字段 2 关联目标"]', '101');
+  await selectOption('[aria-label="字段 2 关联目标"]', '101');
   await click('.panel-foot button::-p-text(保存)');
   await popup.waitForFunction(() => !document.querySelector('#editor-title'));
   await popup.waitForSelector('[data-record-info]');
@@ -570,21 +590,26 @@ try {
     && !organizationText.includes(username) && !organizationText.includes(siteUrl));
   check('organization RPC does not write or create ciphers or folders', organizationWriteCounts() === beforeOrganization);
   await navigation('整理与分析');
-  await popup.waitForSelector('main[aria-label="整理与分析"] select[aria-label="整理分类"]', { visible: true });
+  const organizationPicker = 'main[aria-label="整理与分析"] [role="combobox"][aria-label="整理分类"]';
+  await popup.waitForSelector(organizationPicker, { visible: true });
   const organizationCategories = [
     ['identical', '已检查内容一致'], ['similar', '疑似重复'], ['missingUrls', '未填写网址'],
     ['missingUsernames', '未填写用户名'], ['lowInformationNames', '名称信息少'], ['unfiled', '未分类'],
   ] as const;
-  check('organization exposes all six distinct local finding categories', await popup.$$eval(
-    'main[aria-label="整理与分析"] select option', (options: HTMLOptionElement[], expected: string[]) =>
-      options.length === expected.length && options.every((option, index) => option.value === expected[index]),
+  await click(organizationPicker);
+  check('organization exposes all six distinct local finding categories in a themed picker', await popup.$$eval(
+    'main[aria-label="整理与分析"] [role="option"]', (options: HTMLElement[], expected: string[]) =>
+      options.length === expected.length && options.every((option, index) => option.dataset.value === expected[index]),
     organizationCategories.map(([id]) => id)));
+  check('organization does not render a platform-native select', await popup.$('main[aria-label="整理与分析"] select') === null);
+  await screenshot('organization-picker-440');
+  await click(organizationPicker);
   for (const [id, label] of organizationCategories) {
-    await popup.select('main[aria-label="整理与分析"] select', id);
+    await selectOption(organizationPicker, id);
     await popup.waitForFunction((label: string) => document.querySelector('main[aria-label="整理与分析"] h2:not(.sr-only)')?.textContent === label, {}, label);
   }
   check('organization category filtering updates the current findings without navigation', true);
-  await popup.select('main[aria-label="整理与分析"] select', 'similar');
+  await selectOption(organizationPicker, 'similar');
   await popup.waitForSelector('main[aria-label="整理与分析"] button[aria-label="编辑「Alpha smoke login」"]', { visible: true });
   check('organization groups show readable summaries without revealed passwords', await popup.$eval(
     'main[aria-label="整理与分析"]', (node: HTMLElement, expected: { username: string; secret: string }) =>
@@ -603,18 +628,28 @@ try {
   await click('main[aria-label="整理与分析"] button[aria-label="编辑「Alpha smoke login」"]');
   await popup.waitForSelector('[aria-labelledby="editor-title"]', { visible: true });
   check('organization edit opens the existing editor above the same filtered report', await popup.$eval(
-    'main[aria-label="整理与分析"] select', (node: HTMLSelectElement) => node.value === 'similar')
+    'main[aria-label="整理与分析"] [role="combobox"]', (node: HTMLElement) => node.textContent?.includes('疑似重复'))
     && await popup.$$eval('main[aria-label="整理与分析"] button[aria-label^="编辑「"]',
       (nodes: HTMLButtonElement[]) => nodes.length === 2 && nodes.every(node => node.disabled)));
   await click('.panel-foot button::-p-text(取消)');
   await popup.waitForFunction(() => !document.querySelector('#editor-title')
-    && (document.querySelector('main[aria-label="整理与分析"] select') as HTMLSelectElement | null)?.value === 'similar');
+    && document.querySelector('main[aria-label="整理与分析"] [role="combobox"]')?.textContent?.includes('疑似重复'));
   check('organization edit cancellation preserves category and restores reachable report focus', await popup.evaluate(() => {
     const active = document.activeElement;
     return !!active && active !== document.body && active.closest('main[aria-label="整理与分析"]') !== null
       && !active.closest('[inert]');
   }));
   check('organization navigation, filtering and canceled editing remain read-only', organizationWriteCounts() === beforeOrganization);
+  await click('[aria-label="合并第 1 组"]');
+  await popup.waitForSelector('[role="combobox"][aria-label="合并主条目"]', { visible: true });
+  await click('.panel-foot button::-p-text(预览合并)');
+  await popup.waitForFunction(() => document.querySelector('[role="dialog"] [role="alert"]')?.textContent?.includes('附件'));
+  check('merge preview blocks records with attachments without changing any source', organizationWriteCounts() === beforeOrganization
+    && await popup.$eval('.panel-foot button', (node: HTMLButtonElement) => node.disabled));
+  await screenshot('organization-merge-blocked-440');
+  await click('[aria-label="返回选择主条目"]');
+  await click('[aria-label="取消合并"]');
+  await popup.waitForSelector('[role="dialog"]', { hidden: true });
   await click('main[aria-label="整理与分析"] [data-page-back]');
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   check('organization shared back returns to the vault list', await popup.$('main[aria-label="整理与分析"]') === null);
@@ -731,6 +766,63 @@ try {
   await enterHome();
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   await screenshot('vault-440');
+  // Exercise the complete merge against this loopback server, after unrelated
+  // capture checks. New records have neither attachments nor linked fields.
+  const mergePasswords = ['Synthetic-Merge-Base!42', 'Synthetic-Merge-Source!87'];
+  const mergeIds: string[] = [];
+  for (const [index, title] of ['Merge smoke base', 'Merge smoke source'].entries()) {
+    const draft = item('', title, '2026-10-12T00:00:00Z');
+    draft.customFields = []; draft.attachments = [];
+    draft.notes = index ? 'Source note survives merging' : 'Base note survives merging';
+    draft.login = { ...draft.login!, username: 'merge-user@example.invalid', password: mergePasswords[index]!,
+      uris: [{ uri: 'https://merge.example.invalid/login', match: 1 }] };
+    const created = await rpc('saveItem', [draft]);
+    check(`synthetic merge source ${index + 1} is created through the encrypted service`, created.ok);
+    mergeIds.push(created.result.id);
+  }
+  const mergePreview = await rpc('previewMerge', [{ baseId: mergeIds[0], sourceIds: [mergeIds[1]] }]);
+  check('merge preview crosses the extension boundary without secret values', mergePreview.ok
+    && mergePreview.result.blockers.length === 0
+    && mergePasswords.every(value => !JSON.stringify(mergePreview).includes(value)),
+    JSON.stringify({ ok: mergePreview.ok, error: mergePreview.error, blockers: mergePreview.result?.blockers }));
+  await openPopup(true); await enterHome();
+  await navigation('整理与分析');
+  await selectOption(organizationPicker, 'similar');
+  const groupLabel = await popup.$$eval('main[aria-label="整理与分析"] section', (sections: HTMLElement[]) =>
+    sections.find(section => section.textContent?.includes('Merge smoke base'))?.getAttribute('aria-label'));
+  check('new related records are discoverable as a duplicate group', Boolean(groupLabel));
+  await click(`section[aria-label=${JSON.stringify(groupLabel)}] button[aria-label^="合并第"]`);
+  await selectOption('[aria-label="合并主条目"]', mergeIds[0]!);
+  const beforeMergeWrites = cipherWrites.length;
+  await click('.panel-foot button::-p-text(预览合并)');
+  await popup.waitForSelector('[aria-label="冲突字段"]', { visible: true });
+  check('merge remains read-only until confirmation and requires conflict choices', cipherWrites.length === beforeMergeWrites
+    && mergeTrashRequests.length === 0 && await popup.$eval('.panel-foot button', (node: HTMLButtonElement) => node.disabled));
+  const revealLabel = await popup.$$eval('button[aria-label^="显示密码"]', (buttons: HTMLElement[]) => buttons[0]?.getAttribute('aria-label'));
+  await click(`button[aria-label=${JSON.stringify(revealLabel)}]`);
+  await popup.waitForFunction((value: string) => document.querySelector('[role="dialog"]')?.textContent?.includes(value), {}, mergePasswords[0]);
+  check('merge reveals a single conflict only after its explicit action', !(await popup.evaluate(() => document.body.textContent)).includes(mergePasswords[1]));
+  await click('button[aria-label^="隐藏密码"]');
+  const baseChoices = await popup.$$eval('[aria-label="冲突字段"] input[type="radio"]', (inputs: HTMLInputElement[]) =>
+    inputs.filter(input => input.getAttribute('aria-label')?.includes('Merge smoke base')).map(input => input.getAttribute('aria-label')));
+  for (const label of baseChoices) await click(`input[aria-label=${JSON.stringify(label)}]`);
+  await screenshot('organization-merge-preview-440');
+  await click('.panel-foot button::-p-text(确认合并)');
+  await popup.waitForFunction(() => document.querySelector('[role="dialog"]')?.textContent?.includes('1 条来源已移到回收站'));
+  const mergedRecord = seed.items.find(record => record.id === mergeIds[0])!;
+  check('merge saves the selected base, retains both notes and password history, then trashes only the source',
+    cipherWrites.length === beforeMergeWrites + 1 && mergedRecord.login?.password === mergePasswords[0]
+    && mergedRecord.passwordHistory.some(entry => entry.password === mergePasswords[1])
+    && mergedRecord.notes?.includes('Source note survives merging') === true
+    && mergedRecord.notes.includes('Base note survives merging')
+    && JSON.stringify(mergeTrashRequests) === JSON.stringify([mergeIds[1]])
+    && !!seed.items.find(record => record.id === mergeIds[1])?.deletedAt
+    && mergePasswords.every(value => !JSON.stringify(cipherWrites).includes(value)));
+  await screenshot('organization-merge-result-440');
+  await click('.panel-foot button::-p-text(完成)');
+  await popup.waitForSelector('[role="dialog"]', { hidden: true });
+  await click('main[aria-label="整理与分析"] [data-page-back]');
+  await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   if (process.env.ONEWARDEN_SMOKE_CLIPBOARD === '1') {
     const copyPassword = async () => {
       await click('.vault-list li > button span::-p-text(Alpha smoke login)');

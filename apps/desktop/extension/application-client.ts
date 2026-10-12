@@ -68,6 +68,8 @@ export function createExtensionApplicationClient(): ApplicationClient {
     removePasskey: (...args) => call('removePasskey', ...args),
     clearPasswordHistory: (...args) => call('clearPasswordHistory', ...args),
     securityReport: (...args) => call('securityReport', ...args), organizationReport: () => call('organizationReport'), checkBreaches: () => call('checkBreaches'),
+    previewMerge: (...args) => call('previewMerge', ...args), mergeItems: (...args) => call('mergeItems', ...args),
+    revealMergeValue: (...args) => call('revealMergeValue', ...args),
     parseImport: (...args) => call('parseImport', ...args), importData: (...args) => call('importData', ...args),
   };
   const client = createApplicationClient(service, {

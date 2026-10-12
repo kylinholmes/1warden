@@ -1,6 +1,7 @@
 import type { AccountTarget } from './account-target';
 import type {
   UserProfile, ProfilePreferences, ProfileDeviceInput, ProfileSettings, AccountInfo, Attachment, CardFields, ConnectParams, IdentityFields, OrganizationReport,
+  OrganizationMergeRequest, OrganizationMergePreview, OrganizationMergeCommit, OrganizationMergeResult, OrganizationMergeReveal,
   BankAccountFields, DriversLicenseFields, PassportFields, ImportFormatId, LoginUri, SessionStatus, VaultFolder, VaultItem,
 } from '@1warden/vault';
 import type { ImportOutcome, ImportPreview, ItemSummary, ReportBrief } from '@1warden/ui';
@@ -125,6 +126,9 @@ export interface ApplicationService {
   clearPasswordHistory(id: string): Promise<void>;
   securityReport(now: number): Promise<ReportBrief>;
   organizationReport(): Promise<OrganizationReport>;
+  previewMerge(request: OrganizationMergeRequest): Promise<OrganizationMergePreview>;
+  revealMergeValue(request: OrganizationMergeReveal): Promise<string>;
+  mergeItems(request: OrganizationMergeCommit): Promise<OrganizationMergeResult>;
   checkBreaches(): Promise<ReportBrief['breached']>;
   parseImport(file: ImportFile): Promise<ImportPreview>;
   importData(file: ImportFile): Promise<ImportOutcome>;

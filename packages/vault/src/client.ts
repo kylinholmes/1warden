@@ -29,6 +29,9 @@ import type { ImportedItem } from './import';
 import { emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
 import { retainItemMetadata } from './preservation';
 import { isProfileItem } from './profile';
+import { buildOrganizationReport } from './organization-report';
+import { mergeOrganizationItems, previewOrganizationMerge, type OrganizationMergeCommit, type OrganizationMergePreview,
+  type OrganizationMergeRequest, type OrganizationMergeResult, type OrganizationMergeReveal } from './organization-merge';
 
 /** 导入的类型名 → Bitwarden 的数字类型 */
 const RAW_TYPE: Record<ImportedItem['type'], number> = {
@@ -62,6 +65,25 @@ function editableState(item: VaultItem): string {
     login, card: item.card, identity: item.identity, secureNote: item.secureNote, sshKey: item.sshKey,
     bankAccount: item.bankAccount ?? null, driversLicense: item.driversLicense ?? null, passport: item.passport ?? null,
     customFields: item.customFields }, (key, value) => key === 'sourceId' ? undefined : value);
+}
+
+/** Compare complete encrypted server snapshots without exposing content hashes. */
+function mergeFingerprint(item: VaultItem): string {
+  const canonical = (value: unknown): unknown => Array.isArray(value) ? value.map(canonical)
+    : value !== null && typeof value === 'object' ? Object.fromEntries(Object.entries(value).sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, entry]) => [key, canonical(entry)])) : value;
+  return JSON.stringify(canonical(item.preservation?.source ?? item));
+}
+
+function mergedContentPresent(expected: VaultItem, saved: VaultItem): boolean {
+  if (saved.nameFailed || saved.notesFailed || saved.preservation?.failures.length) return false;
+  const content = (item: VaultItem) => ({ name: item.name, notes: item.notes, favorite: item.favorite, folderId: item.folderId,
+    username: item.login?.username, password: item.login?.password, totp: item.login?.totp,
+    autofill: item.login?.autofillOnPageLoad ?? null,
+    uris: item.login?.uris.map(row => [row.uri, row.match]),
+    fields: item.customFields.map(row => [row.name, row.value, row.type, row.linkedId]) });
+  return JSON.stringify(content(expected)) === JSON.stringify(content(saved))
+    && expected.passwordHistory.every(row => saved.passwordHistory.some(candidate => candidate.password === row.password && candidate.lastUsedDate === row.lastUsedDate));
 }
 
 /**
@@ -124,6 +146,9 @@ export class VaultClient {
   private _lastSyncedAt: number | null = null;
   private syncRequest: { key: SymmetricKey; promise: Promise<void> } | null = null;
   private readonly itemWrites = new Map<string, Promise<void>>();
+  /** Owner-memory only; never included in exported session state or persistence. */
+  private readonly mergePreviews = new Map<string, { ids: string[]; snapshots: string[]; reveals: Record<string, string[]>;
+    expires: number; assertCurrent: () => void }>();
 
   /** 传输层。桌面端注入走 Rust 的实现，扩展注入浏览器 fetch。 */
   private readonly fetchImpl: typeof fetch;
@@ -269,6 +294,7 @@ export class VaultClient {
   }
 
   private invalidateAuthentication(): void {
+    this.mergePreviews.clear();
     this.authenticationGeneration++;
     this.itemWrites.clear();
     this.syncVerified = false;
@@ -857,7 +883,7 @@ export class VaultClient {
     });
   }
 
-  private async saveItemNow(item: VaultItem): Promise<VaultItem> {
+  private async saveItemNow(item: VaultItem, preserveMergedHistory = false): Promise<VaultItem> {
     const current = item.id ? this.requireItem(item.id) : null;
     if (current?.login && item.login) {
       const changed = current.login.password !== item.login.password;
@@ -865,11 +891,12 @@ export class VaultClient {
       const changedAt = changed ? new Date().toISOString() : current.login.passwordRevisionDate;
       if (changed && current.login.password) {
         // A caller may already have generated the exact history row.
-        const alreadyAdded = history[0]?.password === current.login.password &&
-          (history[0]?.password !== current.passwordHistory[0]?.password || history[0]?.lastUsedDate !== current.passwordHistory[0]?.lastUsedDate);
+        const alreadyAdded = preserveMergedHistory ? history.some(row => row.password === current.login!.password)
+          : history[0]?.password === current.login.password &&
+            (history[0]?.password !== current.passwordHistory[0]?.password || history[0]?.lastUsedDate !== current.passwordHistory[0]?.lastUsedDate);
         if (!alreadyAdded) history = [{ password: current.login.password, lastUsedDate: changedAt! }, ...history];
       }
-      item = { ...item, passwordHistory: changed ? history.slice(0, 5) : history,
+      item = { ...item, passwordHistory: changed && !preserveMergedHistory ? history.slice(0, 5) : history,
         login: { ...item.login, passwordRevisionDate: changedAt } };
     }
     const assertCurrent = this.currentSessionGuard();
@@ -909,6 +936,150 @@ export class VaultClient {
     assertCurrent();
     this.applyLocally(saved, isNew);
     return saved;
+  }
+
+  private queueMergeWrite<T>(ids: readonly string[], operation: () => Promise<T>): Promise<T> {
+    const sorted = [...ids].sort();
+    const lock = (index: number): Promise<T> => index === sorted.length ? operation()
+      : this.queueItemWrite(sorted[index]!, () => lock(index + 1));
+    return lock(0);
+  }
+
+  private validateMergeIds(request: OrganizationMergeRequest): string[] {
+    if (!request || typeof request.baseId !== 'string' || !request.baseId || !Array.isArray(request.sourceIds)
+      || request.sourceIds.length < 1 || request.sourceIds.length > 49
+      || request.sourceIds.some(id => typeof id !== 'string' || !id || id.length > 256)) {
+      throw new Error('请选择 2 至 50 条重复登录条目');
+    }
+    const ids = [request.baseId, ...request.sourceIds];
+    if (new Set(ids).size !== ids.length) throw new Error('合并条目不能重复');
+    ids.forEach(id => this.requireItem(id));
+    const report = buildOrganizationReport(this.session.items);
+    if (!report.duplicates.some(group => ids.every(id => group.itemIds.includes(id)))) throw new Error('这些条目已不属于同一重复组，请重新分析');
+    return ids;
+  }
+
+  private async readMergeItems(ids: readonly string[]): Promise<VaultItem[]> {
+    const assertCurrent = this.currentSessionGuard();
+    const result: VaultItem[] = [];
+    for (const id of ids) {
+      this.requireItem(id);
+      const dto = await getCipher(this.http, id);
+      assertCurrent();
+      if (dto.id !== id) throw new Error('服务器返回的条目不匹配，请重新同步');
+      const item = await this.withWriteKey(key => decryptCipher(dto, key));
+      assertCurrent();
+      result.push(item);
+    }
+    return result;
+  }
+
+  async previewMerge(request: OrganizationMergeRequest): Promise<OrganizationMergePreview> {
+    const ids = this.validateMergeIds(request);
+    return this.queueMergeWrite(ids, async () => {
+      const assertCurrent = this.currentSessionGuard();
+      let items: VaultItem[];
+      try { items = await this.readMergeItems(ids); }
+      catch { assertCurrent(); throw new Error('无法读取最新条目，请同步成功后重新预览'); }
+      assertCurrent();
+      const now = Date.now();
+      for (const [token, entry] of this.mergePreviews) if (entry.expires <= now) this.mergePreviews.delete(token);
+      if (this.mergePreviews.size >= 20) this.mergePreviews.delete(this.mergePreviews.keys().next().value!);
+      const token = crypto.randomUUID();
+      const preview = previewOrganizationMerge(items, this.session.folders, token);
+      if (!buildOrganizationReport(items).duplicates.some(group => ids.every(id => group.itemIds.includes(id)))) {
+        preview.blockers.push('最新条目已不属于同一重复组，请重新同步分析');
+      }
+      if (!preview.blockers.length) this.mergePreviews.set(token, {
+        ids, snapshots: items.map(mergeFingerprint), expires: now + 10 * 60_000, assertCurrent,
+        reveals: Object.fromEntries(preview.fields.filter(field => field.secret).map(field => [field.key, field.options.map(option => option.itemId)])),
+      });
+      return preview;
+    });
+  }
+
+  async revealMergeValue(request: OrganizationMergeReveal): Promise<string> {
+    if (!request || typeof request.token !== 'string' || !['password', 'totp'].includes(request.fieldKey)
+      || typeof request.itemId !== 'string') throw new Error('无效的合并字段');
+    const { token, fieldKey, itemId } = request;
+    const entry = this.mergePreviews.get(token);
+    if (!entry || entry.expires <= Date.now()) throw new Error('合并预览已过期或已执行，请重新预览');
+    if (!entry.reveals[fieldKey]?.includes(itemId)) throw new Error('这个字段不属于当前合并预览');
+    return this.queueItemWrite(itemId, async () => {
+      entry.assertCurrent();
+      const assertPreview = () => {
+        entry.assertCurrent();
+        if (this.mergePreviews.get(token) !== entry || entry.expires <= Date.now()) throw new Error('合并预览已过期或已执行，请重新预览');
+      };
+      assertPreview();
+      let item: VaultItem;
+      try { item = (await this.readMergeItems([itemId]))[0]!; }
+      catch { assertPreview(); throw new Error('无法复核字段，请重新预览'); }
+      assertPreview();
+      if (mergeFingerprint(item) !== entry.snapshots[entry.ids.indexOf(itemId)]) throw new Error('条目已变化，请重新预览');
+      const value = item.login?.[fieldKey];
+      if (typeof value !== 'string') throw new Error('无法读取此字段，请重新预览');
+      return value;
+    });
+  }
+
+  async mergeItems(request: OrganizationMergeCommit): Promise<OrganizationMergeResult> {
+    if (!request || typeof request.token !== 'string' || request.token.length > 128 || !request.choices || typeof request.choices !== 'object'
+      || Array.isArray(request.choices) || Object.keys(request.choices).length > 6
+      || Object.values(request.choices).some(value => typeof value !== 'string' || value.length > 256)) {
+      throw new Error('合并选择无效，请重新预览');
+    }
+    const entry = this.mergePreviews.get(request.token);
+    if (!entry || entry.expires <= Date.now()) throw new Error('合并预览已过期或已执行，请重新预览');
+    entry.assertCurrent();
+    const choices = Object.fromEntries(Object.entries(request.choices));
+    // Consume before waiting for locks: a double-click/retry cannot repeat a write.
+    this.mergePreviews.delete(request.token);
+    return this.queueMergeWrite(entry.ids, async () => {
+      entry.assertCurrent();
+      if (entry.expires <= Date.now()) throw new Error('合并预览已过期，请重新预览');
+      let items: VaultItem[];
+      try { items = await this.readMergeItems(entry.ids); }
+      catch { entry.assertCurrent(); throw new Error('无法复核最新条目，未执行合并，请重新预览'); }
+      if (items.some((item, index) => mergeFingerprint(item) !== entry.snapshots[index])) {
+        throw new Error('条目自预览后已变化，未执行合并，请重新预览');
+      }
+      const merged = mergeOrganizationItems(items, choices);
+      const base = items[0]!;
+      // Save uses the freshly fetched revision and its own wrapped cipher key.
+      this.applyLocally(base, false);
+      let saved: VaultItem;
+      try { saved = await this.saveItemNow(merged, true); }
+      catch { entry.assertCurrent(); throw new Error('主条目保存未能确认，未处理任何来源。请重新同步核实后再操作'); }
+      const result: OrganizationMergeResult = { baseId: base.id, saved: true, trashedIds: [], retainedSources: [] };
+      // Never trash sources until returned ciphertext has been decrypted and its
+      // complete merged content checked. A server that truncates history is unsafe.
+      if (!mergedContentPresent(merged, saved)) {
+        result.retainedSources = entry.ids.slice(1).map(id => ({ id, reason: '主条目已保存，但内容核验未通过，来源已保留，请检查后再操作' }));
+        return result;
+      }
+      for (const [index, id] of entry.ids.entries()) {
+        if (index === 0) continue;
+        try {
+          entry.assertCurrent();
+          const current = (await this.readMergeItems([id]))[0]!;
+          if (mergeFingerprint(current) !== entry.snapshots[index]) {
+            result.retainedSources.push({ id, reason: '来源在合并期间发生变化，已保留原条目' });
+            continue;
+          }
+          // Vaultwarden has no conditional soft-delete endpoint. Recheck directly
+          // before this reversible operation, and never retry an ambiguous write.
+          await softDeleteCipher(this.http, id);
+          entry.assertCurrent();
+          this.removeLocally(id);
+          result.trashedIds.push(id);
+        } catch {
+          entry.assertCurrent();
+          result.retainedSources.push({ id, reason: '未能确认移入回收站，请重新同步检查；不要重复合并' });
+        }
+      }
+      return result;
+    });
   }
 
   /** 软删除 —— 进回收站，**可恢复**。UI 上的「移到回收站」走这条。 */

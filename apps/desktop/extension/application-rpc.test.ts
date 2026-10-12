@@ -29,6 +29,24 @@ describe('application message authority', () => {
 });
 
 describe('application dispatcher', () => {
+  it('validates merge requests and treats commit as a published mutation', async () => {
+    const calls: unknown[] = []; let changed = 0;
+    const dispatch = createApplicationDispatcher({
+      previewMerge: async (request: unknown) => { calls.push(request); return { token: 'opaque' }; },
+      mergeItems: async (request: unknown) => { calls.push(request); return { baseId: 'base', saved: true, trashedIds: ['source'], retainedSources: [] }; },
+    } as unknown as ApplicationService, { onChanged: () => { changed++; } });
+    for (const request of [null, { baseId: 'base', sourceIds: [] }, { baseId: 'base', sourceIds: [1] },
+      { baseId: 'base', sourceIds: Array(50).fill('source') }]) {
+      await expect(dispatch({ method: 'previewMerge', args: [request] })).rejects.toThrow(/无效/);
+    }
+    await expect(dispatch({ method: 'mergeItems', args: [{ token: 'opaque', choices: { password: 5 } }] })).rejects.toThrow(/无效/);
+    await expect(dispatch({ method: 'mergeItems', args: [{ token: 'opaque', choices: [] }] })).rejects.toThrow(/无效/);
+    expect(calls).toEqual([]);
+    await expect(dispatch({ method: 'previewMerge', args: [{ baseId: 'base', sourceIds: ['source'] }] })).resolves.toEqual({ token: 'opaque' });
+    expect(changed).toBe(0);
+    await expect(dispatch({ method: 'mergeItems', args: [{ token: 'opaque', choices: { password: 'source' } }] })).resolves.toMatchObject({ saved: true });
+    expect(changed).toBe(1);
+  });
   it('accepts only a no-argument organization report and treats it as a local read', async () => {
     const run = createSerialRunner(); let release!: () => void; let entered!: () => void;
     const started = new Promise<void>(resolve => { entered = resolve; });

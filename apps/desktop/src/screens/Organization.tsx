@@ -1,12 +1,13 @@
 import { useEffect, useRef } from 'react';
 import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
-import { IconSpinner, PageHeader, TYPE_LABEL, type ItemSummary } from '@1warden/ui';
+import { IconSpinner, PageHeader, Select, TYPE_LABEL, type ItemSummary } from '@1warden/ui';
 import type { OrganizationReport } from '@1warden/vault';
 import type { ApplicationClient, ApplicationSnapshot } from '../application/types';
+import { OrganizationMerge } from './OrganizationMerge';
 
 const PAGE_SIZE = 20;
 const CATEGORIES = [
-  { id: 'identical', label: '已检查内容一致', unit: '组', hint: '已检查的内容一致；历史、附件等未比较内容仍需逐条确认。本页不会合并或删除条目。' },
+  { id: 'identical', label: '已检查内容一致', unit: '组', hint: '已检查的内容一致；历史、附件等未比较内容仍需逐条确认。合并前会重新核对完整记录，并展示差异。' },
   { id: 'similar', label: '疑似重复', unit: '组', hint: '这些条目之间存在相同用户名和站点线索，可能关联不同网站或用途，请逐条人工核对后再整理。' },
   { id: 'missingUrls', label: '未填写网址', unit: '条', hint: '补充登录网址有助于识别网站与匹配登录。没有网址也可能是正常的使用方式。' },
   { id: 'missingUsernames', label: '未填写用户名', unit: '条', hint: '确认这些登录是否需要用户名；无需用户名的登录可以保持现状。' },
@@ -24,7 +25,7 @@ function rowsOf(report: OrganizationReport, category: Category): ResultRow[] {
   return report[category].map(id => ({ itemIds: [id] }));
 }
 
-/** Local, read-only findings. A result belongs to one account and one snapshot. */
+/** Analysis stays read-only. Merging is a separate, explicit, previewed operation. */
 export function Organization({ client, onBack, onEditItem, editing = false }: {
   client: ApplicationClient;
   onBack: () => void;
@@ -33,11 +34,13 @@ export function Organization({ client, onBack, onEditItem, editing = false }: {
 }) {
   const snapshot = useStoreSnapshot(client.subscribe, client.getSnapshot);
   const source = sourceOf(snapshot);
+  const accountKey = JSON.stringify([snapshot.account?.serverUrl, snapshot.account?.email, snapshot.account?.userId]);
   const unlocked = snapshot.status === 'unlocked' && snapshot.account !== null;
   const store = useLocalStore(() => ({ owner: null as ApplicationClient | null, source: '',
     report: null as OrganizationReport | null, error: null as string | null, retry: 0,
     category: null as Category | null, limit: PAGE_SIZE, groupLimits: {} as Record<string, number>,
-    editingId: null as string | null, editError: null as string | null }));
+    editingId: null as string | null, editError: null as string | null,
+    merge: null as { owner: ApplicationClient; account: string; items: ItemSummary[]; open: boolean } | null }));
   const [owner] = useStoreField(store, 'owner');
   const [reportSource] = useStoreField(store, 'source');
   const [storedReport] = useStoreField(store, 'report');
@@ -48,9 +51,15 @@ export function Organization({ client, onBack, onEditItem, editing = false }: {
   const [groupLimits, setGroupLimits] = useStoreField(store, 'groupLimits');
   const [editingId] = useStoreField(store, 'editingId');
   const [editError] = useStoreField(store, 'editError');
+  const [merge, setMerge] = useStoreField(store, 'merge');
+  const mergeSession = unlocked && merge?.owner === client && merge.account === accountKey ? merge : null;
+  const merging = Boolean(mergeSession?.open);
   const request = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
   useEffect(() => { heading.current?.focus({ preventScroll: true }); }, [client]);
+  useEffect(() => {
+    if (!unlocked || (merge && !mergeSession)) setMerge(null);
+  }, [unlocked, merge, mergeSession, setMerge]);
   useEffect(() => {
     const current = ++request.current;
     store.setState({ owner: client, source, report: null, error: null, limit: PAGE_SIZE, groupLimits: {}, editingId: null, editError: null });
@@ -78,6 +87,16 @@ export function Organization({ client, onBack, onEditItem, editing = false }: {
   const incomplete = snapshot.syncing || !!snapshot.syncError || snapshot.lastSyncedAt === null;
   const wasEditing = useRef(editing);
   const focusAfterEdit = useRef(false);
+  const wasMerging = useRef(false);
+  useEffect(() => {
+    if (wasMerging.current && !merging) {
+      queueMicrotask(() => {
+        const active = document.activeElement;
+        if (!active || active === document.body || active.closest('[inert]')) heading.current?.focus({ preventScroll: true });
+      });
+    }
+    wasMerging.current = merging;
+  }, [merging]);
   useEffect(() => {
     if (wasEditing.current && !editing) focusAfterEdit.current = true;
     wasEditing.current = editing;
@@ -120,7 +139,7 @@ export function Organization({ client, onBack, onEditItem, editing = false }: {
     </li>;
   }
 
-  return <main aria-label="整理与分析" className="flex min-h-0 flex-1 flex-col">
+  return <><main aria-label="整理与分析" inert={merging || undefined} className="flex min-h-0 flex-1 flex-col">
     <PageHeader navigation title="整理与分析" onBack={onBack} backLabel="返回保险库"
       breadcrumbs={[{ label: '保险库', onSelect: onBack }, { label: '整理与分析' }]} />
     <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-8">
@@ -130,7 +149,7 @@ export function Organization({ client, onBack, onEditItem, editing = false }: {
           {report && <button type="button" className="btn btn-quiet" disabled={editing || !!editingId}
             onClick={() => setRetry(value => value + 1)}>重新分析</button>}
         </div>
-        <p className="mb-3 text-sm leading-relaxed text-[var(--ink-secondary)]">只在本地读取当前账户已载入的条目，不上传分析内容，不更改记录，也不生成安全评分。</p>
+        <p className="mb-3 text-sm leading-relaxed text-[var(--ink-secondary)]">只在本地读取当前账户已载入的条目，不上传分析内容，也不生成安全评分。分析本身不改动记录；编辑或合并需由你单独确认。</p>
         {unlocked && <p role="note" className="mb-5 break-words text-xs leading-relaxed text-[var(--ink-tertiary)]">
           {snapshot.syncing ? '正在同步；本页仅分析当前已载入的记录，同步完成后会更新结果。'
             : snapshot.syncError ? '同步未完成；当前记录可能不是最新版本，本页结果不代表服务器上的全部内容。'
@@ -152,12 +171,11 @@ export function Organization({ client, onBack, onEditItem, editing = false }: {
             </div> : !hasFindings ? <div role="status" className="card p-6 text-sm text-[var(--ink-secondary)]">
               已检查的记录暂未发现整理线索。{report.skipped > 0 && '未能检查的记录不在此结论范围内。'}
             </div> : <>
-              <label className="mb-5 block text-sm"><span className="mb-2 block text-[var(--ink-secondary)]">查看分类</span>
-                <select aria-label="整理分类" className="field max-w-full sm:max-w-[320px]" value={selected.id}
-                  onChange={event => { setCategory(event.target.value as Category); setLimit(PAGE_SIZE); }}>
-                  {CATEGORIES.map(option => <option key={option.id} value={option.id}>{option.label} · {rowsOf(report, option.id).length} {option.unit}</option>)}
-                </select>
-              </label>
+              <div className="mb-5 text-sm"><span className="mb-2 block text-[var(--ink-secondary)]">查看分类</span>
+                <Select aria-label="整理分类" className="w-full sm:max-w-[320px]" value={selected.id}
+                  options={CATEGORIES.map(option => ({ value: option.id, label: `${option.label} · ${rowsOf(report, option.id).length} ${option.unit}` }))}
+                  onChange={value => { setCategory(value as Category); setLimit(PAGE_SIZE); }} />
+              </div>
               <h2 className="text-md font-medium">{selected.label}</h2>
               <p className="mt-1 mb-4 text-xs leading-relaxed text-[var(--ink-secondary)]">{selected.hint}</p>
               {current && editError && <p role="alert" className="mb-4 break-words text-sm text-[var(--risk)]">{editError}</p>}
@@ -167,7 +185,12 @@ export function Organization({ client, onBack, onEditItem, editing = false }: {
                     const key = `${selected.id}:${row.itemIds[0]}`;
                     const groupLimit = groupLimits[key] ?? PAGE_SIZE;
                     return <section key={key} className="card overflow-hidden" aria-label={`${selected.label}第 ${index + 1} 组`}>
-                      <h3 className="border-b border-[var(--border-subtle)] px-4 py-3 text-sm font-medium">第 {index + 1} 组 · {row.itemIds.length} 条记录</h3>
+                      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-[var(--border-subtle)] px-4 py-3">
+                        <h3 className="text-sm font-medium">第 {index + 1} 组 · {row.itemIds.length} 条记录</h3>
+                        <button type="button" className="btn btn-quiet" aria-label={`合并第 ${index + 1} 组`} disabled={editing || !!editingId}
+                          onClick={() => setMerge({ owner: client, account: accountKey, open: true,
+                            items: row.itemIds.flatMap(id => items.has(id) ? [{ ...items.get(id)! }] : []) })}>合并…</button>
+                      </div>
                       <ul className="divide-y divide-[var(--border-subtle)]">{row.itemIds.slice(0, groupLimit).map(renderItem)}</ul>
                       {row.itemIds.length > groupLimit && <button type="button" className="btn btn-quiet m-4" aria-label={`显示第 ${index + 1} 组更多条目`}
                         onClick={() => setGroupLimits(value => ({ ...value, [key]: groupLimit + PAGE_SIZE }))}>显示更多条目（还剩 {row.itemIds.length - groupLimit} 条）</button>}
@@ -177,12 +200,14 @@ export function Organization({ client, onBack, onEditItem, editing = false }: {
               {rows.length > limit && <button type="button" className="btn btn-quiet mt-4" onClick={() => setLimit(value => value + PAGE_SIZE)}>
                 显示更多{selected.unit === '组' ? '分组' : '条目'}（还剩 {rows.length - limit} {selected.unit}）
               </button>}
-              <p className="mt-5 text-xs leading-relaxed text-[var(--ink-tertiary)]">同一条目可能出现在多个分类中。编辑后会根据当前已载入的记录重新分析。</p>
+              <p className="mt-5 text-xs leading-relaxed text-[var(--ink-tertiary)]">同一条目可能出现在多个分类中。编辑或合并后会根据当前已载入的记录重新分析。</p>
             </>}
           </>}
       </div>
     </div>
-  </main>;
+  </main>{mergeSession && <OrganizationMerge key={mergeSession.account} client={client} items={mergeSession.items} open={mergeSession.open}
+    onClose={() => setMerge(value => value ? { ...value, open: false } : null)}
+    onComplete={() => setRetry(value => value + 1)} />}</>;
 }
 
 function ItemContext({ item }: { item: ItemSummary }) {

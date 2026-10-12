@@ -56,6 +56,7 @@ async function run(step: SmokeStep) {
   const childEnv = { ...env, TEMP: stepTemp, TMP: stepTemp, TMPDIR: stepTemp,
     ONEWARDEN_LAYOUT_OUTPUT: evidence, ONEWARDEN_HEADER_OUTPUT: evidence,
     ONEWARDEN_PANEL_OUTPUT: evidence, ONEWARDEN_APPEARANCE_OUTPUT: evidence,
+    ONEWARDEN_SELECT_OUTPUT: evidence,
     ONEWARDEN_ACCOUNT_MENU_OUTPUT: evidence, ONEWARDEN_SMOKE_OUT: evidence,
     ONEWARDEN_PANEL_PREVIEW: join(root, 'apps/desktop/dist-preview'),
   };

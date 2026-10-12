@@ -47,7 +47,7 @@ describe('custom-field picker pointer and dismissal event order', () => {
     expect(host.querySelector('[role="menu"]')?.getAttribute('aria-label')).toBe('添加自定义字段');
     expect(host.querySelector('[data-editor-add-more]')?.textContent?.trim()).toBe('添加自定义字段');
     expect(host.querySelector('[data-add-field]')).toBeNull();
-    expect(host.querySelector('[data-editor-field="card.brand"] select')).not.toBeNull();
+    expect(host.querySelector('[data-editor-field="card.brand"] [role="combobox"]')).not.toBeNull();
     expect([...host.querySelectorAll<HTMLElement>('[role="menuitem"]')].map(node => node.dataset.addCustom)).toEqual(['0', '1', '2', '3']);
   });
   it('adds and focuses the chosen custom field after a WebKit null-target blur', async () => {
@@ -135,7 +135,7 @@ describe('custom-field picker pointer and dismissal event order', () => {
     await mount();
     const hidden = host.querySelector<HTMLButtonElement>('[data-add-custom="1"]')!;
     await webkitPress(hidden); await releaseAndClick(hidden);
-    expect(host.querySelector<HTMLSelectElement>('[aria-label="字段 1 类型"]')?.value).toBe('1');
+    expect(host.querySelector<HTMLButtonElement>('[aria-label="字段 1 类型"]')?.value).toBe('1');
     expect(document.activeElement).toBe(host.querySelector('[aria-label="字段 1 名称"]'));
   });
   it('waits for click instead of selecting during a cancelled pointer or touch scroll gesture', async () => {

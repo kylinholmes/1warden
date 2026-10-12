@@ -41,7 +41,8 @@ async function mount(client: ApplicationClient, onEditItem = vi.fn<(id: string) 
 const button = (text: string) => [...host.querySelectorAll('button')].find(control => control.textContent === text)!;
 const editButtons = () => [...host.querySelectorAll<HTMLButtonElement>('button[aria-label^="编辑「"]')];
 async function filter(value: string) {
-  await act(() => { const select = host.querySelector('select')!; select.value = value; select.dispatchEvent(new Event('change', { bubbles: true })); });
+  await act(() => host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="整理分类"]')!.click());
+  await act(() => host.querySelector<HTMLButtonElement>(`[role="option"][data-value="${value}"]`)!.click());
 }
 
 describe('local organization report presentation', () => {
@@ -86,7 +87,10 @@ describe('local organization report presentation', () => {
     await mount(fixture(vi.fn().mockResolvedValue(report), { items: [
       { ...record('a'), summary: 'Never render this opaque summary' }, record('b'),
     ] }).client);
-    expect(host.querySelectorAll('select option')).toHaveLength(6);
+    expect(host.querySelector('select')).toBeNull();
+    await act(() => host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="整理分类"]')!.click());
+    expect(host.querySelectorAll('[role="option"]')).toHaveLength(6);
+    await act(() => host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="整理分类"]')!.click());
     expect(host.textContent).toContain('第 1 组 · 2 条记录');
     expect(host.textContent).toContain('fixture-user');
     expect(host.textContent).toContain('fixture.example');
@@ -167,6 +171,25 @@ describe('local organization report presentation', () => {
     expect(host.querySelector('select')).toBeNull();
   });
 
+  it('removes the whole merge session when locking or switching accounts', async () => {
+    const fixtureClient = fixture(vi.fn().mockResolvedValue(cleanReport({ total: 2, checked: 2,
+      duplicates: [{ kind: 'similar', reason: 'sameUsernameAndHost', itemIds: ['a', 'b'] }] })));
+    const pending = deferred<Awaited<ReturnType<ApplicationClient['previewMerge']>>>();
+    fixtureClient.client.previewMerge = vi.fn().mockReturnValue(pending.promise);
+    await mount(fixtureClient.client);
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="合并第 1 组"]')!.click());
+    await act(() => button('预览合并').click());
+    expect(host.querySelector('[role="dialog"]')).not.toBeNull();
+    await act(async () => fixtureClient.emit({ status: 'locked', items: [] }));
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(host.textContent).not.toContain('Fixture a');
+    await act(async () => pending.resolve({ token: 'late', baseId: 'a', itemIds: ['a', 'b'],
+      items: [{ id: 'a', name: 'Old private account name', updatedAt: '' }], fields: [], additions: [], blockers: [], warnings: [] }));
+    expect(host.textContent).not.toContain('Old private account name');
+    await act(async () => fixtureClient.emit({ status: 'unlocked', account: { ...account, userId: 'new-owner' }, items: [record('a'), record('b')] }));
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+  });
+
   it('drops an old account response and reloads the current account even with the same revision', async () => {
     const old = deferred<OrganizationReport>();
     const next = deferred<OrganizationReport>();
@@ -190,7 +213,7 @@ describe('local organization report presentation', () => {
     expect(host.textContent).not.toContain('Fixture b');
     expect(host.textContent).toContain('正在分析');
     await act(async () => next.resolve(cleanReport({ missingUrls: ['a'], unfiled: ['a'] })));
-    expect(host.querySelector('select')!.value).toBe('unfiled');
+    expect(host.querySelector('[role="combobox"][aria-label="整理分类"]')?.textContent).toContain('未分类');
     expect(host.textContent).toContain('Fixture a');
     expect(host.textContent).not.toContain('Fixture b');
   });

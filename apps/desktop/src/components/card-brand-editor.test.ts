@@ -19,13 +19,14 @@ it.each(['Mastercard', 'visa', 'Local card network'].flatMap(brand => [
   try {
     await act(() => root.render(createElement(ItemEditor, { item, open: true, folders: [], onDone() {}, onCancel() {},
       onSave: async draft => { saved = draft; return { id: 'saved', name: draft.name }; } })));
-    const picker = host.querySelector<HTMLSelectElement>('select[aria-label="卡片品牌"]');
+    const picker = host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="卡片品牌"]');
     expect(picker).not.toBeNull();
     expect(host.querySelector('input[aria-label="卡片品牌"]')).toBeNull();
     expect(picker!.value).toBe(brand);
-    expect([...picker!.options].some(option => option.value === 'UnionPay')).toBe(true);
+    await act(() => picker!.click());
+    expect(host.querySelector('[role="option"][data-value="UnionPay"]')).not.toBeNull();
     const save = [...host.querySelectorAll('button')].find(button => button.textContent === '保存')!;
-    if (target !== brand) await act(() => { picker!.value = target; picker!.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(() => host.querySelector<HTMLElement>(`[role="option"][data-value="${target}"]`)!.click());
     await act(() => save.click());
     expect(saved?.card?.brand).toBe(target);
     expect(saved?.card?.number).toBe('synthetic-number');

@@ -11,6 +11,24 @@ function deferred<T>() {
 const unlocked: ApplicationSnapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked', revision: 1 };
 
 describe('application client lifecycle', () => {
+  it('does not publish an explicit merge secret across a lock boundary', async () => {
+    const secret = deferred<string>();
+    const client = createApplicationClient({ snapshot: async () => unlocked, revealMergeValue: () => secret.promise,
+      lock: async () => {} } as unknown as ApplicationService, options);
+    await client.initialize();
+    const pending = client.revealMergeValue({ token: 'opaque', fieldKey: 'password', itemId: 'source' });
+    const rejected = expect(pending).rejects.toThrow(/锁定|过期/);
+    await client.lock(); secret.resolve('must-not-publish'); await rejected; client.dispose();
+  });
+
+  it('refreshes the snapshot after a partially successful merge without hiding its result', async () => {
+    let snapshots = 0;
+    const result = { baseId: 'base', saved: true as const, trashedIds: [], retainedSources: [{ id: 'source', reason: '未能确认' }] };
+    const client = createApplicationClient({ snapshot: async () => { snapshots++; return unlocked; }, mergeItems: async () => result } as unknown as ApplicationService, options);
+    await client.initialize();
+    await expect(client.mergeItems({ token: 'opaque', choices: {} })).resolves.toEqual(result);
+    expect(snapshots).toBe(2); client.dispose();
+  });
   it.each(['lock', 'switchAccount'] as const)('rejects organization findings crossing a %s boundary', async boundary => {
     const report = deferred<Awaited<ReturnType<ApplicationService['organizationReport']>>>();
     const client = createApplicationClient({ snapshot: async () => unlocked, organizationReport: () => report.promise,

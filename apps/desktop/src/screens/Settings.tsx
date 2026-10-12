@@ -215,12 +215,12 @@ export function Settings({ client, open, onClose, initialSection, capabilities =
           {section === 'security' && (
             <Group title="安全" hint="锁定与剪贴板的行为">
               <Row label="解锁后自动锁定" hint="解锁 15 分钟后自动锁定；重新打开界面不会延长期限">
-                <Select disabled value="15" options={[['5', '5 分钟'], ['15', '15 分钟'], ['60', '1 小时'], ['0', '不自动锁定']]} />
+                <span className="text-md text-[var(--ink-secondary)]">15 分钟</span>
               </Row>
               <Row label="复制后清空剪贴板" hint={capabilities.native && detectOs() === 'win'
                 ? '30 秒后清除本次复制；新复制的内容不进入 Windows 剪贴板历史或云同步。已有历史需自行删除。'
                 : '只在剪贴板里还是我们写进去的值时才清'}>
-                <Select disabled value="30" options={[['10', '10 秒'], ['30', '30 秒'], ['60', '1 分钟'], ['0', '不清空']]} />
+                <span className="text-md text-[var(--ink-secondary)]">30 秒</span>
               </Row>
               <Row label="已泄露密码检查" hint="在安全报告中按需开启检查；只发送 SHA-1 哈希的前 5 个字符" />
             </Group>
@@ -307,18 +307,6 @@ function Row({ label, hint, value, children }: {
       )}
       {children && <div className="flex shrink-0 items-center gap-1.5">{children}</div>}
     </div>
-  );
-}
-
-function Select({ value, options, disabled }: {
-  value: string;
-  options: Array<[string, string]>;
-  disabled?: boolean;
-}) {
-  return (
-    <select className="field w-[146px] py-1.5" defaultValue={value} disabled={disabled} tabIndex={-1}>
-      {options.map(([v, label]) => <option key={v} value={v}>{label}</option>)}
-    </select>
   );
 }
 

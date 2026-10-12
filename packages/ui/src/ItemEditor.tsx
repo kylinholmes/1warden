@@ -9,6 +9,7 @@ import { EditorCardExpiry, EditorDateField } from './EditorDateFields';
 import { CompoundFieldRow, FIELD_LABEL_CLASS, FIELD_ROW_CLASS } from './CompoundFieldRow';
 import { EditorCustomFields } from './EditorCustomFields';
 import { EditorAddMore } from './EditorAddMore';
+import { Select } from './Select';
 import {
   blankEditorItem, blankLogin, blankCard, blankIdentity, blankSshKey,
   createCustomField, customFieldsForItemType,
@@ -18,7 +19,7 @@ import {
 import { STRENGTH_COLORS, STRENGTH_LABELS } from './strength';
 import { TYPE_LABEL, TYPE_ORDER } from './destinations';
 import {
-  IconChevronDown, IconSpinner, IconStar, TypeIcon,
+  IconSpinner, IconStar, TypeIcon,
 } from './icons';
 
 interface Props {
@@ -245,12 +246,11 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
           if (year !== (current.card?.expYear ?? '')) next = updateNativeField(next, 'card.expYear', year);
           return next;
         })} />
-      : field.id === 'card.brand' ? <select value={value} aria-label={field.label} className="field min-w-0"
-        onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))}>
-        <option value="">选择卡片品牌</option>
-        {value && !CARD_BRANDS.some(([brand]) => brand === value) && <option value={value}>已保存：{value}</option>}
-        {CARD_BRANDS.map(([brand, label]) => <option key={brand} value={brand}>{label}</option>)}
-      </select>
+      : field.id === 'card.brand' ? <Select value={value} aria-label={field.label} className="min-w-0"
+        onChange={value => setDraft(current => updateNativeField(current, field.id, value))}
+        options={[{ value: '', label: '选择卡片品牌' },
+          ...(value && !CARD_BRANDS.some(([brand]) => brand === value) ? [{ value, label: `已保存：${value}` }] : []),
+          ...CARD_BRANDS.map(([value, label]) => ({ value, label }))]} />
       : field.kind === 'multiline' ? <textarea value={value} rows={field.id === 'sshKey.publicKey' ? 2 : 4}
         aria-label={field.label} autoComplete="off" spellCheck={false}
         placeholder={field.id === 'sshKey.privateKey' ? '-----BEGIN OPENSSH PRIVATE KEY-----' : field.id === 'sshKey.publicKey' ? 'ssh-ed25519 AAAA…' : '需要记下来的其他事情'}
@@ -413,7 +413,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
         {draft.type === 'login' && <details className="mb-4 text-xs text-[var(--ink-tertiary)]">
           <summary className="cursor-pointer py-2">高级设置{draft.login?.autofillOnPageLoad == null ? '' : ` · 自动填充${draft.login.autofillOnPageLoad ? '开启' : '关闭'}`}</summary>
           <div className="@container card px-4"><Row label="自动填充">
-            <Select label="自动填充" value={draft.login?.autofillOnPageLoad == null ? '' : String(draft.login.autofillOnPageLoad)}
+            <Select aria-label="自动填充" value={draft.login?.autofillOnPageLoad == null ? '' : String(draft.login.autofillOnPageLoad)}
               onChange={value => patchLogin({ autofillOnPageLoad: value === '' ? null : value === 'true' })}
               options={[{ value: '', label: '使用默认设置' }, { value: 'true', label: '开启' }, { value: 'false', label: '关闭' }]} />
           </Row></div>
@@ -421,7 +421,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
         <details className="text-xs text-[var(--ink-tertiary)]">
           <summary className="cursor-pointer py-2">文件夹 · {allFolders.find(folder => folder.id === draft.folderId)?.name ?? (draft.folderId ? '现有文件夹' : '无')}</summary>
           <div className="@container card px-4"><Row label="文件夹">
-            <Select label="文件夹" value={draft.folderId ?? ''} onChange={value => patch({ folderId: value || null })}
+            <Select aria-label="文件夹" value={draft.folderId ?? ''} onChange={value => patch({ folderId: value || null })}
               options={[{ value: '', label: '（无）' },
                 ...(draft.folderId && !allFolders.some(folder => folder.id === draft.folderId) ? [{ value: draft.folderId, label: '现有文件夹' }] : []),
                 ...allFolders.map(folder => ({ value: folder.id, label: 'nameFailed' in folder && folder.nameFailed ? '无法解密' : folder.name }))]} />
@@ -473,29 +473,6 @@ function Row({ label, fieldId, hideLabel = false, children }: {
       <div className="min-w-0 flex-1">{children}</div>
     </div>
   </div>;
-}
-
-/** 原生下拉框的箭头又大又靠边 —— 关掉它，自己画一个 */
-function Select({ value, onChange, options, label }: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: { value: string; label: string }[];
-}) {
-  return (
-    <div className="relative">
-      <select
-        value={value}
-        aria-label={label}
-        onChange={(e) => onChange(e.target.value)}
-        className="field appearance-none pr-9"
-      >
-        {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-      </select>
-      <IconChevronDown size={15}
-        className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-[var(--ink-tertiary)]" />
-    </div>
-  );
 }
 
 /**

@@ -22,8 +22,8 @@ Actions 下载的是外层 artifact ZIP，先解压它，再使用其中的安�
 
 | 检查 | 运行环境与覆盖 |
 | --- | --- |
-| Automated ui smoke | Windows Edge；桌面/移动端/扩展预览的宽度布局、返回/面包屑/焦点、动效溢出、主题、账户菜单、Zustand 生命周期 |
-| Automated extensions smoke | Windows Edge 与 Firefox 的真实已编译扩展；搜索/详情/填充/锁定、失败连接恢复、资料自动保存/头像裁剪/加密同步 |
+| Automated ui smoke | Windows Edge；桌面/移动端/扩展预览的宽度布局、返回/面包屑/焦点、动效溢出、主题、账户菜单、统一下拉控件、Zustand 生命周期 |
+| Automated extensions smoke | Windows Edge 与 Firefox 的真实已编译扩展；搜索/详情/填充/锁定、失败连接恢复、资料自动保存/头像裁剪/加密同步、重复登录确认合并与来源回收站 |
 | Windows x64 packages and WebView2 smoke | Rust 单元测试、NSIS/EXE 构建，然后用独立原生进程验证快速窗口的快捷键、透明背景、失焦/临时固定/调用权限，以及真实 CSP 下的头像和资料同步 |
 
 所有 smoke 只使用合成的 loopback 保险库、临时浏览器/WebView2 配置。原生套件还隔离 `APPDATA` 与 `LOCALAPPDATA`；禁止继承真实服务测试地址、剪贴板测试开关和调试配置。不启用真实剪贴板读写测试。每个脚本有限时，失败会让 job 失败；UI 矩阵互不取消，原生验证不通过时不发布 Windows 产物。标签发布必须等待 UI/扩展与原生验证完成。

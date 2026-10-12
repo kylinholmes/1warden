@@ -344,7 +344,7 @@ describe('complete native editor and custom-field interactions', () => {
     await click(button('创建文件夹'));
     expect(requestedName).toBe('Work');
     expect(saved).toBeUndefined();
-    expect(host.querySelector<HTMLSelectElement>('[aria-label="文件夹"]')?.value).toBe('new-folder');
+    expect(host.querySelector<HTMLButtonElement>('[aria-label="文件夹"]')?.value).toBe('new-folder');
     await click(button('保存'));
     expect(saved?.folderId).toBe('new-folder');
   });
@@ -355,16 +355,18 @@ describe('complete native editor and custom-field interactions', () => {
     await mount(item, callbacks.onSave, callbacks);
     await input(host.querySelector<HTMLInputElement>('[aria-label="新文件夹名称"]')!, 'Temporary');
     await click(button('创建文件夹'));
-    expect(host.querySelector('option[value="removed-later"]')).not.toBeNull();
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="文件夹"]')!);
+    expect(host.querySelector('[role="option"][data-value="removed-later"]')).not.toBeNull();
     await act(() => root.render(createElement(ItemEditor, { folders: [], item, open: false, ...callbacks })));
     await act(() => root.render(createElement(ItemEditor, { folders: [], item, open: true, ...callbacks })));
-    expect(host.querySelector('option[value="removed-later"]')).toBeNull();
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="文件夹"]')!);
+    expect(host.querySelector('[role="option"][data-value="removed-later"]')).toBeNull();
   });
   it('creates the selected custom boolean while retaining the distinct URL add action', async () => {
     await mount({ ...blankEditorItem(), name: 'Login' });
     await click(button('添加自定义字段'));
     await click(host.querySelector<HTMLButtonElement>('[data-add-custom="2"]')!);
-    expect(host.querySelector<HTMLSelectElement>('[aria-label="字段 1 类型"]')?.value).toBe('2');
+    expect(host.querySelector<HTMLButtonElement>('[aria-label="字段 1 类型"]')?.value).toBe('2');
     expect(host.querySelector<HTMLInputElement>('[aria-label="字段 1 开关"]')?.checked).toBe(false);
     expect(host.querySelectorAll('[data-editor-add-url]')).toHaveLength(1);
     expect(host.querySelectorAll('[data-editor-add-more]')).toHaveLength(1);

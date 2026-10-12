@@ -246,7 +246,7 @@ async function alignedDetails(width: number, height: number) {
     const custom = await page.$eval('[data-editor-custom="0"]', (node: HTMLElement) => {
       const name = node.querySelector<HTMLInputElement>('[aria-label="字段 1 名称"]')!;
       const value = node.querySelector<HTMLInputElement>('[aria-label="字段 1 值"]')!;
-      const type = node.querySelector<HTMLSelectElement>('[aria-label="字段 1 类型"]')!;
+      const type = node.querySelector<HTMLButtonElement>('[aria-label="字段 1 类型"]')!;
       const remove = node.querySelector<HTMLButtonElement>('[aria-label="删除字段 1"]')!;
       const nameRow = node.querySelector<HTMLElement>('[data-editor-custom-name-row]')!;
       const label = type.parentElement!.querySelector('span')!;

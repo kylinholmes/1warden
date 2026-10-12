@@ -62,8 +62,9 @@ async function start(kind: 'resource' | 'folder' | 'history') {
   }
   else {
     await click('更改');
-    const select = host.querySelector<HTMLSelectElement>('[data-item-folder]')!;
-    await act(() => { select.value = 'fixture-folder'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    const select = host.querySelector<HTMLButtonElement>('[data-item-folder]')!;
+    await act(() => select.click());
+    await act(() => host.querySelector<HTMLElement>('[role="option"][data-value="fixture-folder"]')!.click());
   }
 }
 
@@ -121,9 +122,10 @@ it.each(['resource', 'folder'] as const)('reenables %s controls and supports ret
   await act(() => f.fail());
   if (kind === 'resource') await click('取回');
   else {
-    const select = host.querySelector<HTMLSelectElement>('[data-item-folder]')!;
+    const select = host.querySelector<HTMLButtonElement>('[data-item-folder]')!;
     expect(select.disabled).toBe(false);
-    await act(() => { select.value = 'fixture-folder'; select.dispatchEvent(new Event('change', { bubbles: true })); });
+    await act(() => select.click());
+    await act(() => host.querySelector<HTMLElement>('[role="option"][data-value="fixture-folder"]')!.click());
   }
   expect(f.operation).toHaveBeenCalledTimes(2);
   await act(() => f.fail());

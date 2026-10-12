@@ -1,6 +1,6 @@
 import { useEffect, useId, useRef } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { CopyField, IconChevronDown, IconFolder, IconPlus, IconSpinner, TYPE_LABEL } from '@1warden/ui';
+import { CopyField, IconChevronDown, IconFolder, IconPlus, IconSpinner, TYPE_LABEL, Select } from '@1warden/ui';
 import type { VaultFolder } from '@1warden/vault';
 import type { ApplicationClient, ItemDetailData } from '../application/types';
 import { createAndAssignFolder, pendingFolderAssignment } from '../application/folder-assignment';
@@ -116,14 +116,12 @@ export function ItemFolderPicker({ client, item, folders, onOpenFolder, onError,
     }}>
       {changing && <>
         {!creating ? <div className="mt-3 flex flex-wrap items-center gap-2">
-          <select id={id} data-item-folder aria-label="更改文件夹" autoFocus
-            className="field min-w-0 flex-1 basis-40 text-xs"
+          <Select id={id} data-item-folder aria-label="更改文件夹" autoFocus
+            className="min-w-0 flex-1 basis-40 text-xs"
             value={folderId ?? ''} disabled={busy || disabled} aria-busy={busy}
-            onChange={event => move(event.target.value)}>
-            <option value="">未分类</option>
-            {missing && <option value={folderId}>文件夹暂不可用</option>}
-            {folders.map(folder => <option key={folder.id} value={folder.id}>{folder.nameFailed ? '无法解密的文件夹' : folder.name}</option>)}
-          </select>
+            onChange={move} options={[{ value: '', label: '未分类' },
+              ...(missing && folderId ? [{ value: folderId, label: '文件夹暂不可用' }] : []),
+              ...folders.map(folder => ({ value: folder.id, label: folder.nameFailed ? '无法解密的文件夹' : folder.name }))]} />
           <button type="button" disabled={busy || disabled} className="btn btn-quiet gap-1.5 text-xs"
             onClick={() => { setCreating(true); setError(null); }}><IconPlus size={13} />新建文件夹</button>
         </div> : <form className="mt-3 flex flex-wrap items-center gap-2" onSubmit={event => { event.preventDefault(); create(); }}>

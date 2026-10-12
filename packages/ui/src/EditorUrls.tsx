@@ -3,6 +3,7 @@ import { useId } from 'react';
 import { IconPlus, IconTrash } from './icons';
 import { removeLoginUri, updateLoginUri } from './item-editor-fields';
 import { FIELD_LABEL_CLASS, FIELD_ROW_CLASS } from './CompoundFieldRow';
+import { Select } from './Select';
 
 const MATCH_MODES = [
   { value: '', label: '默认' }, { value: '0', label: '域名' },
@@ -42,14 +43,11 @@ export function EditorUrls({ uris, onChange, onRemove, onAdd }: {
             <summary className="cursor-pointer py-1">匹配方式 · {MATCH_MODES.find(mode => mode.value === String(uri.match ?? ''))?.label ?? `现有方式 (${uri.match})`}</summary>
             <label className="mt-1 block">
               <span className="sr-only">匹配方式</span>
-              <select className="field w-full min-w-0" value={uri.match === null ? '' : String(uri.match)}
+              <Select className="w-full min-w-0" value={uri.match === null ? '' : String(uri.match)}
                 aria-label={`网址 ${index + 1} 匹配方式`}
-                onChange={event => onChange(updateLoginUri(rows, index, { match: event.target.value === '' ? null : Number(event.target.value) }))}>
-                {MATCH_MODES.map(mode => <option key={mode.value} value={mode.value}>{mode.label}</option>)}
-                {uri.match !== null && !MATCH_MODES.some(mode => mode.value === String(uri.match)) && (
-                  <option value={uri.match} disabled>现有方式 ({uri.match})</option>
-                )}
-              </select>
+                onChange={value => onChange(updateLoginUri(rows, index, { match: value === '' ? null : Number(value) }))}
+                options={[...MATCH_MODES, ...(uri.match !== null && !MATCH_MODES.some(mode => mode.value === String(uri.match))
+                  ? [{ value: String(uri.match), label: `现有方式 (${uri.match})`, disabled: true }] : [])]} />
             </label>
           </details>
         </div>

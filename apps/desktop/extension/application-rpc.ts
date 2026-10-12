@@ -135,6 +135,12 @@ const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
       || (['custom', 'history'].includes(String(field['kind'])) && Number.isInteger(field['index']) && Number(field['index']) >= 0);
   },
   totp: strings(1), downloadAttachment: strings(2), securityReport: (a) => a.length === 1 && number(a[0]), organizationReport: none,
+  previewMerge: (a) => a.length === 1 && object(a[0]) && string(a[0]['baseId']) && Array.isArray(a[0]['sourceIds'])
+    && a[0]['sourceIds'].length > 0 && a[0]['sourceIds'].length < 50 && a[0]['sourceIds'].every(string),
+  mergeItems: (a) => a.length === 1 && object(a[0]) && string(a[0]['token']) && object(a[0]['choices'])
+    && Object.keys(a[0]['choices']).length <= 6 && Object.values(a[0]['choices']).every(string),
+  revealMergeValue: (a) => a.length === 1 && object(a[0]) && string(a[0]['token']) && string(a[0]['itemId'])
+    && ['password', 'totp'].includes(String(a[0]['fieldKey'])),
   uploadAttachment: strings(3), deleteAttachment: strings(2), removePasskey: strings(2), clearPasswordHistory: strings(1),
   checkBreaches: none, parseImport: (a) => a.length === 1 && file(a[0]), importData: (a) => a.length === 1 && file(a[0]),
 };
@@ -143,7 +149,7 @@ const mutations = new Set<ApplicationMethod>([
   'sync',
   'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'savePreferences', 'recordDevice', 'toggleFavorite',
   'moveToTrash', 'restoreItem', 'deletePermanently', 'createFolder', 'renameFolder', 'deleteFolder', 'moveToFolder',
-  'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory', 'importData',
+  'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory', 'importData', 'mergeItems',
 ]);
 
 /** In-memory reads must not wait for network writes or an unresponsive webpage. */
@@ -187,6 +193,9 @@ function invoke(service: ApplicationService, request: ApplicationRequest): Promi
     case 'clearPasswordHistory': return service.clearPasswordHistory(...request.args);
     case 'securityReport': return service.securityReport(...request.args);
     case 'organizationReport': return service.organizationReport(...request.args);
+    case 'previewMerge': return service.previewMerge(...request.args);
+    case 'revealMergeValue': return service.revealMergeValue(...request.args);
+    case 'mergeItems': return service.mergeItems(...request.args);
     case 'checkBreaches': return service.checkBreaches(...request.args);
     case 'parseImport': return service.parseImport(...request.args);
     case 'importData': return service.importData(...request.args);
