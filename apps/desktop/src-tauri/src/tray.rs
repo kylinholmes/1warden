@@ -81,8 +81,23 @@ pub fn install(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
-fn show_main(app: &AppHandle) {
-    if let Some(w) = app.get_webview_window("main") {
+/// All main-window entry points also work after macOS closes its WebView.
+pub fn show_main(app: &AppHandle) {
+    let window = app.get_webview_window("main");
+    #[cfg(target_os = "macos")]
+    let window = window.or_else(|| {
+        // Use the original configuration so a recreated window retains its
+        // title bar, size constraints, effects and local application URL.
+        let config = app.config().app.windows.iter().find(|config| config.label == "main")?;
+        match tauri::WebviewWindowBuilder::from_config(app, config).and_then(|builder| builder.build()) {
+            Ok(window) => Some(window),
+            Err(error) => {
+                eprintln!("[onewarden] 无法重新打开主窗口：{error}");
+                None
+            }
+        }
+    });
+    if let Some(w) = window {
         let _ = w.show();
         let _ = w.unminimize();
         let _ = w.set_focus();

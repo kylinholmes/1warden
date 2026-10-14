@@ -11,6 +11,14 @@ use crate::http::HttpState;
 #[derive(Default, Clone)]
 pub struct WebSocketState(Arc<Mutex<HashMap<String, mpsc::Sender<Message>>>>);
 
+impl WebSocketState {
+    /// Only the main WebView can own sockets. Dropping its senders cancels
+    /// pending handshakes and closes idle connections without relying on JS.
+    pub fn close_all(&self) {
+        if let Ok(mut sockets) = self.0.lock() { sockets.clear(); }
+    }
+}
+
 #[derive(Clone, Serialize)]
 #[serde(tag = "type", content = "data", rename_all = "lowercase")]
 pub enum SocketEvent { Open, Text(String), Binary(Vec<u8>), Close, Error }
@@ -153,5 +161,32 @@ mod tests {
             serde_json::json!({"type":"binary", "data":[2,145,6]})]);
         assert!(state.0.lock().unwrap().is_empty());
         peer.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn closing_the_owner_disconnects_idle_sockets_and_releases_their_slots() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("ws://{}/notifications/hub", listener.local_addr().unwrap());
+        let peer = tokio::spawn(async move {
+            let (tcp, _) = listener.accept().await.unwrap();
+            let mut ws = tokio_tungstenite::accept_async(tcp).await.unwrap();
+            assert!(matches!(ws.next().await, Some(Ok(Message::Close(_)))));
+        });
+        let state = WebSocketState::default();
+        let http = HttpState::new(std::env::temp_dir().join(format!("onewarden-socket-owner-test-{}.json", std::process::id()))).unwrap();
+        let (events, mut received) = mpsc::unbounded_channel();
+        let channel = Channel::new(move |body| {
+            if let tauri::ipc::InvokeResponseBody::Json(json) = body {
+                let _ = events.send(serde_json::from_str::<serde_json::Value>(&json).unwrap());
+            }
+            Ok(())
+        });
+        open_socket(&state, &http, "owner-test".into(), url, channel).unwrap();
+        let opened = tokio::time::timeout(Duration::from_secs(5), received.recv()).await.unwrap().unwrap();
+        assert_eq!(opened["type"], "open");
+        // Simulate destruction of the owning WebView without any JS close call.
+        state.close_all();
+        tokio::time::timeout(Duration::from_secs(2), peer).await.expect("socket survived its window").unwrap();
+        assert!(state.0.lock().unwrap().is_empty());
     }
 }

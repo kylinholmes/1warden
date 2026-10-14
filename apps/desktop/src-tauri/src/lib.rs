@@ -126,17 +126,18 @@ fn quick_hide(app: tauri::AppHandle) {
 #[tauri::command]
 fn quick_open_main(app: tauri::AppHandle) {
     quick::hide(&app);
-    if let Some(w) = app.get_webview_window("main") {
-        let _ = w.show();
-        let _ = w.unminimize();
-        let _ = w.set_focus();
-    }
+    tray::show_main(&app);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let builder = tauri::Builder::default()
         .on_window_event(|window, event| {
+            if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
+                if let Some(sockets) = window.app_handle().try_state::<websocket::WebSocketState>() {
+                    sockets.close_all();
+                }
+            }
             #[cfg(desktop)]
             if window.label() == "quick" {
                 match event {
@@ -261,6 +262,15 @@ pub fn run() {
         context
     };
     builder
-        .run(context)
-        .expect("启动 1Warden 失败");
+        .build(context)
+        .expect("启动 1Warden 失败")
+        .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                // A visible quick panel must not suppress reopening the main window.
+                tray::show_main(app);
+            }
+            #[cfg(not(target_os = "macos"))]
+            let _ = (app, event);
+        });
 }
