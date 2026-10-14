@@ -27,7 +27,13 @@ export function validateWorkflow(workflow: any): string[] {
   const windowsCommands = (windows?.steps ?? []).map((step: any) => step.run ?? '').join('\n');
   require(windowsCommands.includes('bun run test:windows'), 'Windows release executable must pass native smoke');
   require(windowsCommands.includes('windows-x64-portable.exe') && windowsCommands.includes('Get-FileHash'), 'Windows artifacts must include a checksummed portable executable');
-  require(workflow?.jobs?.release?.needs?.includes('ui'), 'Releases must wait for automated UI/extension checks');
+  const release = workflow?.jobs?.release;
+  require(release?.if === "success() && github.event_name == 'push' && github.ref == 'refs/heads/main'", 'Only successful main pushes may publish releases');
+  require(workflow?.concurrency?.['cancel-in-progress'] === "${{ github.ref != 'refs/heads/main' }}", 'Main releases must not be cancelled by newer pushes');
+  for (const dependency of ['check', 'ui', 'vaultwarden', 'extensions', 'macos', 'windows']) {
+    require(release?.needs?.includes(dependency), `Releases must wait for ${dependency}`);
+  }
+  require(release?.needs?.includes('ui'), 'Releases must wait for automated UI/extension checks');
   const real = workflow?.jobs?.vaultwarden;
   const service = real?.services?.vaultwarden;
   require(real?.['runs-on'] === 'ubuntu-24.04', 'Real Vaultwarden checks must use the isolated Ubuntu runner');

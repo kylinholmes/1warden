@@ -7,6 +7,11 @@ import { isSmokeEvidence, smokeEnvironment, smokePlan } from './ci-smoke-plan';
 const workflow = JSON.parse(execFileSync('bun', ['scripts/ci-validate.ts', '--json'], { encoding: 'utf8', windowsHide: true }));
 const copy = () => structuredClone(workflow);
 describe('CI workflow and synthetic smoke contract', () => {
+  it('publishes only successful main pushes after every test and platform build', () => {
+    expect(workflow.jobs.release.if).toBe("success() && github.event_name == 'push' && github.ref == 'refs/heads/main'");
+    expect([...workflow.jobs.release.needs].sort()).toEqual(['check', 'ui', 'vaultwarden', 'extensions', 'macos', 'windows'].sort());
+    expect(workflow.jobs.macos.env.RELEASE_BUILD).toBe("${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}");
+  });
   it('parses the actual YAML and enforces least privilege, pinned actions and required validation', () => {
     expect(validateWorkflow(workflow)).toEqual([]);
     const packageJson = JSON.parse(readFileSync('package.json', 'utf8'));

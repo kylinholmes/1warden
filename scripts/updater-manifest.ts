@@ -34,7 +34,7 @@ if (import.meta.main) {
   const root = resolve(import.meta.dir, '..');
   const directory = resolve(process.argv[2] ?? 'release-artifacts');
   const { version } = JSON.parse(readFileSync(join(root, 'apps/desktop/package.json'), 'utf8'));
-  if (process.env.GITHUB_REF_NAME !== `v${version}`) throw new Error('Updater release tag does not match package version');
+  if ((process.env.RELEASE_TAG ?? process.env.GITHUB_REF_NAME) !== `v${version}`) throw new Error('Updater release tag does not match package version');
   const repository = process.env.GITHUB_REPOSITORY;
   if (!repository) throw new Error('Missing GitHub repository');
   const archive = join(directory, `1Warden-${version}-macos-apple-silicon.app.tar.gz`);

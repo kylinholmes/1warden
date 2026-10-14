@@ -1,6 +1,6 @@
 # 构建与下载
 
-GitHub Actions 在每次代码 push、Pull Request 和手动运行时执行类型检查、单元测试、跨端界面和真实扩展回归，并生成浏览器扩展、macOS 和 Windows 安装包/免安装程序（仅文档修改不触发）。Windows 构建还会运行真实 WebView2 回归。打开 [Actions](https://github.com/kylinholmes/1warden/actions)，选择成功的 `1Warden builds` 运行，在页面底部下载 Artifacts；构建产物保留 30 天，测试截图与日志保留 14 天。推送与包版本一致的 `v` 标签后，流水线会把相同的安装包和 SHA-256 校验文件发布到 [Releases](https://github.com/kylinholmes/1warden/releases)。代码与发布包已按用户选择设为公开；macOS 自动更新无需 GitHub 登录。
+GitHub Actions 在每次代码 push、Pull Request 和手动运行时执行类型检查、单元测试、跨端界面和真实扩展回归，并生成浏览器扩展、macOS 和 Windows 安装包/免安装程序（仅文档修改不触发）。Windows 构建还会运行真实 WebView2 回归。打开 [Actions](https://github.com/kylinholmes/1warden/actions)，选择成功的 `1Warden builds` 运行，在页面底部下载 Artifacts；构建产物保留 30 天，测试截图与日志保留 14 天。`main` 的 push 只有在全部 CI 检查和平台构建成功后，才会自动递增补丁版本、提交版本号、创建 `v` 标签，并把本次验证过的安装包和 SHA-256 校验文件发布到 [Releases](https://github.com/kylinholmes/1warden/releases)。PR、其他分支和手动运行只验证并生成 artifacts。代码与发布包已按用户选择设为公开；macOS 自动更新无需 GitHub 登录。
 
 | 产物 | 用途 |
 | --- | --- |
@@ -26,7 +26,7 @@ Actions 下载的是外层 artifact ZIP，先解压它，再使用其中的安�
 | Automated extensions smoke | Windows Edge 与 Firefox 的真实已编译扩展；搜索/详情/填充/锁定、失败连接恢复、资料自动保存/头像裁剪/加密同步、重复登录确认合并与来源回收站 |
 | Windows x64 packages and WebView2 smoke | Rust 单元测试、NSIS/EXE 构建，然后用独立原生进程验证快速窗口的快捷键、透明背景、失焦/临时固定/调用权限，以及真实 CSP 下的头像和资料同步 |
 
-所有 smoke 只使用合成的 loopback 保险库、临时浏览器/WebView2 配置。原生套件还隔离 `APPDATA` 与 `LOCALAPPDATA`；禁止继承真实服务测试地址、剪贴板测试开关和调试配置。不启用真实剪贴板读写测试。每个脚本有限时，失败会让 job 失败；UI 矩阵互不取消，原生验证不通过时不发布 Windows 产物。标签发布必须等待 UI/扩展与原生验证完成。
+所有 smoke 只使用合成的 loopback 保险库、临时浏览器/WebView2 配置。原生套件还隔离 `APPDATA` 与 `LOCALAPPDATA`；禁止继承真实服务测试地址、剪贴板测试开关和调试配置。不启用真实剪贴板读写测试。每个脚本有限时，失败会让 job 失败；UI 矩阵互不取消，原生验证不通过时不发布 Windows 产物。自动发布必须等待类型/单元、UI/扩展、真实 Vaultwarden、macOS 和 Windows 原生验证全部完成；失败、取消或跳过任一必需检查都不发布。
 
 测试包装器是 `scripts/ci-smoke.ts`，复用现有 smoke 脚本，不复制业务测试逻辑。它保存每一步日志、退出码、耗时、JSON 报告和截图，并产生 Actions 页面摘要；只收集白名单证据文件，**不上传浏览器 profile、Cookie、localStorage 数据库或账户缓存**。`test-results-*` artifacts 在失败时也上传，不匹配发布包的 `1Warden-*` 下载模式。
 
@@ -46,7 +46,7 @@ bun run test:windows                    # 原生 EXE 已构建时运行
 
 CI 固定 `windows-2022`，使用其预装浏览器并在启动原生测试前检查 WebView2 Runtime。浏览器与运行时仍随 runner 镜像更新，日志保留版本信息用于排查。[Runner 软件清单](https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md)、[Puppeteer 自行管理浏览器说明](https://pptr.dev/guides/installation)、[WebView2 运行时检测](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution#detect-if-a-webview2-runtime-is-already-installed)。
 
-工作流使用 `pull_request`（不是 `pull_request_target`），默认只有 `contents: read`，checkout 不保留凭据；新增 UI/原生测试不引用 secrets，所有 actions 固定完整提交 SHA。现有签名 secrets 仍仅用于原有标签发布路径，普通 main push 不发布 Release。[GitHub 权限规则](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)、[失败时保留日志](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#always)。
+工作流使用 `pull_request`（不是 `pull_request_target`），默认只有 `contents: read`，checkout 不保留凭据；新增 UI/原生测试不引用 secrets，所有 actions 固定完整提交 SHA。`main` push 的 macOS 打包步骤才可读取更新签名 secret；PR、其他分支和手动运行不读取它。只有最终发布 job 具有 `contents: write`，用于版本提交、标签和 Release。[GitHub 权限规则](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)、[失败时保留日志](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#always)。
 
 本轮只修改构建/测试配置，不迁移任何生产数据。若 CI 环境发生兼容问题，先看 `test-results-*` 和 runner 版本；可回退该 CI 提交恢复原流水线，不能用忽略失败或关闭安全限制代替修复。首次托管运行结果以 Actions 实际运行记录为准，本机通过不等于所有托管平台已经验证。
 
@@ -117,21 +117,32 @@ CI=true APPLE_SIGNING_IDENTITY=- \
 
 ## 发布版本
 
-当前包版本为 `0.1.0`。例如发布 `v0.1.1` 前，先把以下四处版本更新为 `0.1.1`：
+无需手工修改补丁号或推送标签。每次 `main` 代码 push 的流程是：
+
+1. 检查现有四处包版本一致，依据已存在的正式版本标签自动选择下一个补丁号，例如 `v0.2.1 → v0.2.2`。显式提高主/次版本号时采用该新版本。
+2. 在 CI 工作目录统一更新桌面、Tauri、扩展、Cargo 及 Bun/Cargo 锁文件。所有验证和构建使用同一版本，尚不写入远程仓库。
+3. 全部检查成功后，发布 job 确认版本变更后的 Git tree 与检查阶段完全一致，以普通快进、原子 push 提交版本号并创建标签。若 `main` 已被新代码推进则跳过过时发布，绝不强推覆盖。
+4. 下载同次运行的安装包，生成签名更新清单与校验文件，上传完整 draft 后公开为最新 Release。
+
+主分支运行不会被后续 push 中途取消；后续运行排队。自动版本提交使用 `GITHUB_TOKEN`，不会递归触发新构建。文档改动仍不触发构建。
+
+重跑相同运行会根据版本提交中的 `Release-Source`、父提交和 Git tree 复用版本。如果标签已创建、上传中断，可重跑失败 job 恢复 draft；已公开的 Release 不覆盖、不重复发版。若之后已有更新的主线提交，该旧运行不再发布，以免把旧版本重新设为 latest。
+
+需要提升主版本或次版本时，同步修改以下文件并提交：
 
 - `apps/desktop/package.json`
 - `apps/desktop/src-tauri/tauri.conf.json`
 - `apps/desktop/src-tauri/Cargo.toml`
 - `apps/desktop/extension/public/manifest.json`
 
-运行 `bun install --lockfile-only` 更新 Bun workspace 锁文件，并运行一次不带 `--locked` 的 `cargo check --manifest-path apps/desktop/src-tauri/Cargo.toml` 更新 Cargo 包版本；随后运行 `bun install --frozen-lockfile`、`bun run scripts/build-version.ts` 和 `bun run check`，提交版本及锁文件，再创建并推送 `v0.1.1` 标签。流水线会检查四处版本一致、标签匹配，然后发布安装包；手动运行只生成 Actions artifacts。现有 release 重新运行时会替换同名资产。
+同步 Bun/Cargo 锁文件后，运行 `bun run scripts/build-version.ts` 和 `bun run check`；推送 `main` 后仍由相同 CI 门禁自动发布。`scripts/release-version.test.ts` 使用临时 Git 仓库覆盖版本递增、依赖锁文件保持、过时构建拒绝发布和中断后重跑。
 
 
 ## 自动更新发布
 
-普通分支、PR 和手动构建生成测试用安装包；只有与四处版本一致的 `v` 标签构建会读取 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`，启用 `createUpdaterArtifacts` 并生成签名的 `.app.tar.gz` / `.sig`。签名私钥留在开发机的仓库外目录与 GitHub Secret，不能提交到代码或写入构建日志。应用内只有公钥。
+其他分支、PR 和手动构建生成测试用安装包；只有 `main` push 构建会读取 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`，启用 `createUpdaterArtifacts` 并生成签名的 `.app.tar.gz` / `.sig`。签名私钥留在开发机的仓库外目录与 GitHub Secret，不能提交到代码或写入构建日志。应用内只有公钥。
 
-标签发布同时生成 `latest.json`，其中 `darwin-aarch64` 指向本版本的签名 archive。新 Release 先作为 draft 上传完整产物，成功后才公开；已有 Release 重试时先上传包和签名，再更新 manifest。应用使用公开的 `releases/latest/download/latest.json` 检查更新，不需要 GitHub token。下载校验通过且安装完成后显示重启提示；源码中的签名版本校验和禁止降级设置不能关闭。
+主分支自动发布同时生成 `latest.json`，其中 `darwin-aarch64` 指向本版本的签名 archive。新 Release 先作为 draft 上传完整产物，成功后才公开；未完成的 draft 重试时先上传包和签名，再更新 manifest；已公开版本保持不变。应用使用公开的 `releases/latest/download/latest.json` 检查更新，不需要 GitHub token。下载校验通过且安装完成后显示重启提示；源码中的签名版本校验和禁止降级设置不能关闭。
 
 Updater archive 供应用自动更新，DMG / `.app.zip` 供首次手动安装，两者用途不同。自动更新的交互及本地签名测试见 [桌面更新说明](updates.md)。
 # 用户详情、资料同步与头像裁剪

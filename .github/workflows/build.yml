@@ -2,6 +2,7 @@ name: 1Warden builds
 
 on:
   push:
+    branches: ['**']
     paths-ignore:
       - 'docs/**'
       - 'README.md'
@@ -16,7 +17,8 @@ permissions:
 
 concurrency:
   group: builds-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
-  cancel-in-progress: true
+  # A main publication must finish atomically; newer pushes wait for it.
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 env:
   BUN_VERSION: '1.3.14'
@@ -31,10 +33,12 @@ jobs:
     timeout-minutes: 15
     outputs:
       version: ${{ steps.version.outputs.version }}
+      tree: ${{ steps.prepare.outputs.tree }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
           node-version: ${{ env.NODE_VERSION }}
@@ -42,6 +46,12 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Validate source versions
+        run: bun run scripts/build-version.ts
+      - name: Prepare automatic patch version for main
+        id: prepare
+        if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+        run: bun run scripts/release-version.ts prepare
       - run: bun install --frozen-lockfile
       - run: bun run check:ci
       - name: Verify package and tag versions
@@ -70,6 +80,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Apply the version validated by check
+        env:
+          APP_VERSION: ${{ needs.check.outputs.version }}
+        run: bun run scripts/release-version.ts apply
       - run: bun install --frozen-lockfile
       - name: Build and test isolated synthetic clients
         env:
@@ -116,6 +130,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Apply the version validated by check
+        env:
+          APP_VERSION: ${{ needs.check.outputs.version }}
+        run: bun run scripts/release-version.ts apply
       - run: bun install --frozen-lockfile
       - name: Register, log in, save, update and sync through fresh clients
         env:
@@ -149,6 +167,10 @@ jobs:
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Apply the version validated by check
+        env:
+          APP_VERSION: ${{ needs.check.outputs.version }}
+        run: bun run scripts/release-version.ts apply
       - run: bun install --frozen-lockfile
       - run: bun run build:extension-firefox
       - name: Archive extensions
@@ -181,7 +203,7 @@ jobs:
       CARGO_PROFILE_DEV_DEBUG: '0'
       CARGO_PROFILE_TEST_DEBUG: '0'
       APPLE_SIGNING_IDENTITY: '-'
-      RELEASE_BUILD: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') }}
+      RELEASE_BUILD: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
@@ -207,6 +229,10 @@ jobs:
           key: macos-arm64-rust-${{ env.RUST_VERSION }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
           restore-keys: |
             macos-arm64-rust-${{ env.RUST_VERSION }}-
+      - name: Apply the version validated by check
+        env:
+          APP_VERSION: ${{ needs.check.outputs.version }}
+        run: bun run scripts/release-version.ts apply
       - run: bun install --frozen-lockfile
       - name: Build frontend for Rust test context
         run: bun run --cwd apps/desktop build
@@ -214,7 +240,7 @@ jobs:
         run: cargo test --locked --manifest-path apps/desktop/src-tauri/Cargo.toml --lib
       - name: Build Apple Silicon app and DMG
         env:
-          TAURI_SIGNING_PRIVATE_KEY: ${{ github.event_name == 'push' && github.ref_type == 'tag' && startsWith(github.ref_name, 'v') && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' && secrets.TAURI_SIGNING_PRIVATE_KEY || '' }}
           TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
         run: |
           set -euo pipefail
@@ -294,6 +320,10 @@ jobs:
             apps/desktop/src-tauri/target
           key: windows-x64-rust-${{ env.RUST_VERSION }}-${{ hashFiles('apps/desktop/src-tauri/Cargo.lock') }}
           restore-keys: windows-x64-rust-${{ env.RUST_VERSION }}-
+      - name: Apply the version validated by check
+        env:
+          APP_VERSION: ${{ needs.check.outputs.version }}
+        run: bun run scripts/release-version.ts apply
       - run: bun install --frozen-lockfile
       - name: Windows packaging regression
         run: bunx vitest run scripts/windows-package.test.ts
@@ -349,20 +379,29 @@ jobs:
           retention-days: 30
 
   release:
-    name: Publish tagged packages
+    name: Publish successful main release
     needs: [check, ui, vaultwarden, extensions, macos, windows]
-    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     permissions:
       contents: write
+    env:
+      APP_VERSION: ${{ needs.check.outputs.version }}
+      RELEASE_TAG: v${{ needs.check.outputs.version }}
+      RELEASE_TREE: ${{ needs.check.outputs.tree }}
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
+          fetch-depth: 0
       - uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2.2.0
         with:
           bun-version: ${{ env.BUN_VERSION }}
+      - name: Apply the version validated by check
+        env:
+          APP_VERSION: ${{ needs.check.outputs.version }}
+        run: bun run scripts/release-version.ts apply
       - uses: actions/download-artifact@018cc2cf5baa6db3ef3c5f8a56943fffe632ef53 # v6.0.0
         with:
           pattern: 1Warden-*
@@ -370,27 +409,44 @@ jobs:
           path: release-artifacts
       - name: Create signed update manifest
         run: bun run scripts/updater-manifest.ts release-artifacts
+      - name: Validate complete release assets
+        working-directory: release-artifacts
+        run: sha256sum ./*.zip ./*.dmg ./*.exe ./*.tar.gz ./*.sig latest.json > SHA256SUMS.txt
+      - name: Commit tested version and tag on main
+        id: release_commit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: bun run scripts/release-commit.ts
       - name: Publish release assets
+        if: steps.release_commit.outputs.publish == 'true'
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
-          RELEASE_TAG: ${{ github.ref_name }}
         run: |
           set -euo pipefail
           cd release-artifacts
-          sha256sum ./*.zip ./*.dmg ./*.exe ./*.tar.gz ./*.sig latest.json > SHA256SUMS.txt
           assets=(./*.zip ./*.dmg ./*.exe ./*.tar.gz ./*.sig SHA256SUMS.txt)
           printf '%s\n' \
             'Includes Chromium and Firefox extensions, Apple Silicon macOS app/DMG, and Windows x64 installer/portable executables.' \
             'These are testing packages: the macOS app is ad-hoc signed, without Developer ID signing or notarization; browser extensions require manual installation.' \
             'macOS prepares signed updates and prompts for an explicit restart. Windows updates use the downloaded installer; Windows packages are not Authenticode signed.' \
             "Installation and build instructions: https://github.com/$GH_REPO/blob/$RELEASE_TAG/docs/builds.md" > release-notes.md
-          if gh release view "$RELEASE_TAG" >/dev/null 2>&1; then
+          release_state=$(mktemp)
+          release_error=$(mktemp)
+          if gh api "repos/$GH_REPO/releases/tags/$RELEASE_TAG" > "$release_state" 2> "$release_error"; then
+            if [ "$(jq -r '.draft' "$release_state")" = false ]; then
+              echo "Release $RELEASE_TAG is already published; nothing to change."
+              exit 0
+            fi
             gh release upload "$RELEASE_TAG" "${assets[@]}" --clobber
             gh release upload "$RELEASE_TAG" latest.json --clobber
           else
+            if ! grep -q 'HTTP 404' "$release_error"; then
+              cat "$release_error" >&2
+              exit 1
+            fi
             gh release create "$RELEASE_TAG" "${assets[@]}" latest.json \
               --draft --verify-tag --title "1Warden $RELEASE_TAG" --generate-notes --notes-file release-notes.md
           fi
-          gh release edit "$RELEASE_TAG" --draft=false
+          gh release edit "$RELEASE_TAG" --draft=false --latest
