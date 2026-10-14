@@ -378,7 +378,8 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
       {fullWidth ? (
         <div className="below-titlebar flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
           <SyncNotice session={session} client={client} />
-          {category.kind === 'trash' ? <TrashView client={client} onBack={() => setCategory({ kind: 'all' })} />
+          {category.kind === 'trash' ? <TrashView client={client} onBack={() => setCategory({ kind: 'all' })}
+            onBusyChange={busy => { transferBusy.current = busy; }} />
           : category.kind === 'organization' ? <Organization client={client} onBack={() => setCategory({ kind: 'all' })}
             onEditItem={edit} editing={mode.kind !== 'browse'} />
           : category.kind === 'profile' ? <ProfilePage client={client} onBack={() => setCategory({ kind: 'all' })} /> : category.kind === 'security' ? (

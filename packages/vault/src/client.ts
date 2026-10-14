@@ -27,9 +27,12 @@ import { encryptBytes } from '@1warden/crypto';
 import type { SessionStatus, StoredSession } from './session';
 import type { VaultFolder, VaultItem } from './model';
 import type { ImportedItem } from './import';
+import { createImportMatcher } from './import-dedupe';
 import { emptyLogin, emptyCard, emptyIdentity, emptySshKey } from './model';
 import { retainItemMetadata } from './preservation';
 import { isProfileItem } from './profile';
+import { inBulkDeleteScope, readBulkDeleteCandidate, type BulkDeleteCandidate, type BulkDeleteScope,
+  type BulkDeletePreview, type BulkDeleteResult } from './bulk-delete';
 import { buildOrganizationReport } from './organization-report';
 import { mergeOrganizationItems, previewOrganizationMerge, type OrganizationMergeCommit, type OrganizationMergePreview,
   type OrganizationMergeRequest, type OrganizationMergeResult, type OrganizationMergeReveal } from './organization-merge';
@@ -150,6 +153,8 @@ export class VaultClient {
   private stopNotifications: (() => void) | null = null;
   private tokenRefresh: Promise<string> | null = null;
   private readonly itemWrites = new Map<string, Promise<void>>();
+  private readonly bulkDeletePreviews = new Map<string, { scope: BulkDeleteScope; records: BulkDeleteCandidate[];
+    expires: number; assertCurrent: () => Promise<void> }>();
   /** Owner-memory only; never included in exported session state or persistence. */
   private readonly mergePreviews = new Map<string, { ids: string[]; snapshots: string[]; reveals: Record<string, string[]>;
     expires: number; assertCurrent: () => void }>();
@@ -304,6 +309,7 @@ export class VaultClient {
     this.stopNotifications = null;
     this.tokenRefresh = null;
     this.mergePreviews.clear();
+    this.bulkDeletePreviews.clear();
     this.authenticationGeneration++;
     this.itemWrites.clear();
     this.syncVerified = false;
@@ -1143,6 +1149,94 @@ export class VaultClient {
     });
   }
 
+  /** Read the full server snapshot, including archives that browsing omits. */
+  async previewBulkDelete(scope: BulkDeleteScope, assertOwner?: () => void | Promise<void>): Promise<BulkDeletePreview> {
+    if (scope !== 'vault' && scope !== 'trash') throw new Error('清理范围无效');
+    const assertSession = this.currentSessionGuard();
+    const assertCurrent = async () => { assertSession(); await assertOwner?.(); assertSession(); };
+    await assertCurrent();
+    const account = this.session.account!;
+    const raw = await syncVia(this.http);
+    await assertCurrent();
+    const records = await this.withWriteKey(async key => {
+      const candidates: BulkDeleteCandidate[] = [];
+      for (const dto of raw.ciphers) {
+        await assertCurrent();
+        const candidate = await readBulkDeleteCandidate(dto, scope, key);
+        await assertCurrent();
+        if (candidate) candidates.push(candidate);
+      }
+      return candidates;
+    });
+    await assertCurrent();
+    const now = Date.now();
+    for (const [token, entry] of this.bulkDeletePreviews) if (entry.expires <= now) this.bulkDeletePreviews.delete(token);
+    if (this.bulkDeletePreviews.size >= 20) this.bulkDeletePreviews.delete(this.bulkDeletePreviews.keys().next().value!);
+    const token = crypto.randomUUID();
+    this.bulkDeletePreviews.set(token, { scope, records, assertCurrent, expires: now + 10 * 60_000 });
+    return { token, scope, count: records.length, account: { serverUrl: account.serverUrl, email: account.email } };
+  }
+
+  /** Confirm once; queued writes cannot extend the confirmed set of record IDs. */
+  async commitBulkDelete(token: string, assertOwner?: () => void | Promise<void>): Promise<BulkDeleteResult> {
+    const entry = typeof token === 'string' && token.length <= 128 ? this.bulkDeletePreviews.get(token) : undefined;
+    if (!entry) throw new Error('清理预览已过期或已执行，请重新预览');
+    // Consume before any await, including the per-record write queue.
+    this.bulkDeletePreviews.delete(token);
+    let cancellation: { error: unknown } | null = null;
+    const assertCurrent = async () => {
+      if (cancellation) throw cancellation.error;
+      try {
+        await entry.assertCurrent();
+        await assertOwner?.();
+        await entry.assertCurrent();
+        if (entry.expires <= Date.now()) throw new Error('清理预览已过期，请重新预览');
+      } catch (error) {
+        cancellation = { error };
+        throw error;
+      }
+    };
+    await assertCurrent();
+    const raw = await syncVia(this.http);
+    await assertCurrent();
+    const current = new Map(raw.ciphers.map(dto => [dto.id, dto]));
+    const result: BulkDeleteResult = { completed: 0, skipped: 0, failed: [] };
+    for (const record of entry.records) {
+      await assertCurrent();
+      const snapshot = current.get(record.id);
+      if (!snapshot || !inBulkDeleteScope(snapshot, entry.scope) || (snapshot.deletedDate ?? null) !== record.deletedDate) {
+        result.skipped++; continue;
+      }
+      let name = record.name;
+      try {
+        const deleted = await this.queueItemWrite(record.id, async () => {
+          await assertCurrent();
+          const dto = await getCipher(this.http, record.id);
+          await assertCurrent();
+          if (dto.id !== record.id) throw new Error('服务器返回了不同的记录');
+          if ((dto.deletedDate ?? null) !== record.deletedDate) return false;
+          const candidate = await this.withWriteKey(key => readBulkDeleteCandidate(dto, entry.scope, key));
+          await assertCurrent();
+          if (!candidate) return false;
+          name = candidate.name;
+          // There is no conditional delete endpoint. Recheck immediately before
+          // the request and never retry an ambiguous response automatically.
+          if (entry.scope === 'trash') await hardDeleteCipher(this.http, record.id);
+          else await softDeleteCipher(this.http, record.id);
+          await assertCurrent();
+          this.removeLocally(record.id);
+          return true;
+        });
+        await assertCurrent();
+        if (deleted) result.completed++; else result.skipped++;
+      } catch {
+        await assertCurrent();
+        result.failed.push({ name, reason: '未能确认此条目的清理结果，请重新同步检查，再重新预览；不会自动重试' });
+      }
+    }
+    return result;
+  }
+
   /** 软删除 —— 进回收站，**可恢复**。UI 上的「移到回收站」走这条。 */
   async moveToTrash(id: string): Promise<void> {
     return this.queueItemWrite(id, async () => {
@@ -1416,32 +1510,58 @@ export class VaultClient {
     items: readonly ImportedItem[],
     onProgress?: (done: number, total: number) => void,
     folderNames: readonly string[] = [],
-  ): Promise<{ created: number; failed: { name: string; reason: string }[] }> {
-    const assertCurrent = this.currentSessionGuard();
+    options: { skipExisting?: boolean; assertCurrent?: () => void | Promise<void> } = {},
+  ): Promise<{ created: number; skippedExisting: number; failed: { name: string; reason: string }[] }> {
+    const assertTargetCurrent = this.currentSessionGuard();
+    let cancellation: { error: unknown } | null = null;
+    const assertCurrent = async () => {
+      if (cancellation) throw cancellation.error;
+      try {
+        assertTargetCurrent();
+        await options.assertCurrent?.();
+        assertTargetCurrent();
+      } catch (error) {
+        cancellation = { error };
+        throw error;
+      }
+    };
+    await assertCurrent();
+    // The active session excludes archives and may have missed an accepted write's response.
+    let snapshot: Awaited<ReturnType<VaultClient['readExportData']>> | null = null;
+    try { if (options.skipExisting) snapshot = await this.readExportData(); }
+    catch (error) { await assertCurrent(); throw error; }
+    await assertCurrent();
+    const consumeExisting = snapshot ? createImportMatcher(snapshot.items, snapshot.folders) : null;
     const failed: { name: string; reason: string }[] = [];
     const failedFolders = new Set<string>();
 
     // 文件夹：已有的按名字复用，缺的建出来
-    const folderIdByName = new Map(this.session.folders.map((f) => [f.name, f.id]));
+    const folderIdByName = new Map((snapshot?.folders ?? this.session.folders).map((f) => [f.name, f.id]));
     const wanted = [...new Set([...folderNames, ...items.map((i) => i.folderName).filter((n): n is string => n !== null)])];
     for (const name of wanted) {
-      assertCurrent();
+      await assertCurrent();
       if (folderIdByName.has(name)) continue;
       try {
-        const created = await this.createFolder(name);
-        assertCurrent();
-        folderIdByName.set(name, created.id);
+        const encryptedName = await this.withWriteKey(key => encryptString(name, key));
+        await assertCurrent();
+        const dto = await createFolderApi(this.http, encryptedName);
+        await assertCurrent();
+        const folder = await this.withWriteKey(key => decryptFolder(dto, key));
+        await assertCurrent();
+        this.session.replaceData(this.session.items.slice(), [...this.session.folders, folder]);
+        folderIdByName.set(name, folder.id);
       } catch {
-        assertCurrent();
+        await assertCurrent();
         failedFolders.add(name);
         failed.push({ name: `文件夹：${name}`, reason: '无法创建文件夹，其所属记录未导入，请修复后重试' });
       }
     }
 
     let created = 0;
+    let skippedExisting = 0;
 
     for (let i = 0; i < items.length; i++) {
-      assertCurrent();
+      await assertCurrent();
       const src = items[i]!;
       try {
         if (src.folderName !== null && failedFolders.has(src.folderName)) throw new Error('所属文件夹创建失败，未导入此记录');
@@ -1483,17 +1603,28 @@ export class VaultClient {
             name: f.name, value: f.value, type: f.type, linkedId: f.linkedId ?? null,
           })),
         };
-        await this.saveItem(item);
-        assertCurrent();
-        created++;
+        if (consumeExisting?.(item, src.folderName)) skippedExisting++;
+        else {
+          // Check both source and destination after encryption, immediately before the mutation.
+          const body = await this.withWriteKey(key => encryptCipher(item, key,
+            item.archivedAt ? { archivedDate: item.archivedAt } : {}));
+          await assertCurrent();
+          const dto = await createCipher(this.http, this.requireUserId(), body);
+          await assertCurrent();
+          const saved = await this.withWriteKey(key => decryptCipher(dto, key));
+          await assertCurrent();
+          this.applyLocally(saved, true);
+          created++;
+        }
       } catch (e) {
-        assertCurrent();
+        await assertCurrent();
         failed.push({ name: src.name, reason: e instanceof Error ? e.message : '写入失败' });
       }
       onProgress?.(i + 1, items.length);
     }
 
-    return { created, failed };
+    await assertCurrent();
+    return { created, skippedExisting, failed };
   }
 
   /** 手动锁定后重新解锁，不需要重新走完整登录 */

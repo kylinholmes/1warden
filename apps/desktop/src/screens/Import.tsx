@@ -7,17 +7,24 @@ import { toBase64 } from '../base64';
 import { ExportPanel } from './Export';
 import { useTransferLifetime } from './transfer-lifetime';
 import { MAX_IMPORT_FILE_BYTES, type DroppedFile } from '../file-drop';
+import { AccountImport } from './AccountImport';
+import { ImportOptions } from './ImportOptions';
+import { BulkDeletePanel } from './BulkDelete';
 
 /** Both operations share one navigation destination across every host. */
 export function ImportScreen({ client, onImported, onBack, droppedFile, onDropConsumed, onBusyChange }: {
   client: ApplicationClient; onImported: () => void; onBack?: () => void;
   droppedFile?: DroppedFile | null | undefined; onDropConsumed?: (() => void) | undefined; onBusyChange?: (busy: boolean) => void;
 }) {
-  const store = useLocalStore(() => ({ tab: 'import' as 'import' | 'export', busy: false }));
+  const store = useLocalStore(() => ({ tab: 'import' as 'import' | 'export', source: 'file' as 'file' | 'account', busy: false, cleaning: false }));
   const [tab, setTab] = useStoreField(store, 'tab');
-  const [busy, setBusy] = useStoreField(store, 'busy');
-  function working(value: boolean) { setBusy(value); onBusyChange?.(value); }
-  useEffect(() => { if (droppedFile && !store.getState().busy) setTab('import'); }, [droppedFile]);
+  const [source, setSource] = useStoreField(store, 'source');
+  const [transferring, setBusy] = useStoreField(store, 'busy');
+  const [cleaning, setCleaning] = useStoreField(store, 'cleaning');
+  const busy = transferring || cleaning;
+  function working(value: boolean) { setBusy(value); onBusyChange?.(value || store.getState().cleaning); }
+  function cleanupWorking(value: boolean) { setCleaning(value); onBusyChange?.(value || store.getState().busy); }
+  useEffect(() => { if (droppedFile && !store.getState().busy && !store.getState().cleaning) { setTab('import'); setSource('file'); } }, [droppedFile]);
   useEffect(() => () => { onBusyChange?.(false); }, []);
   return <div className="flex h-full flex-col">
     <PageHeader navigation title="导入 / 导出" onBack={onBack} backLabel="返回保险库"
@@ -35,9 +42,20 @@ export function ImportScreen({ client, onImported, onBack, droppedFile, onDropCo
               }
             }}>{value === 'import' ? '导入' : '导出'}</button>)}
         </div>
-        <div role="tabpanel" id={`transfer-panel-${tab}`} aria-labelledby={`transfer-tab-${tab}`}>
-          {tab === 'import' ? <ImportPanel client={client} onImported={onImported} droppedFile={droppedFile}
-            onDropConsumed={onDropConsumed} onBusyChange={working} /> : <ExportPanel client={client} onBusyChange={working} />}
+        <div inert={cleaning} role="tabpanel" id={`transfer-panel-${tab}`} aria-labelledby={`transfer-tab-${tab}`}>
+          {tab === 'import' ? <>
+            <div role="group" aria-label="导入来源" className="mb-5 flex flex-wrap gap-2">
+              {(['file', 'account'] as const).map(value => <button key={value} disabled={busy} aria-pressed={source === value}
+                className={`btn px-3 py-1.5 ${source === value ? 'bg-[var(--accent-tint)] text-[var(--accent)]' : 'btn-quiet'}`}
+                onClick={() => setSource(value)}>{value === 'file' ? '从文件导入' : '从其他账户迁移'}</button>)}
+            </div>
+            {source === 'file' ? <ImportPanel client={client} onImported={onImported} droppedFile={droppedFile}
+              onDropConsumed={onDropConsumed} onBusyChange={working} />
+              : <AccountImport client={client} onImported={onImported} onBusyChange={working} />}
+          </> : <ExportPanel client={client} onBusyChange={working} />}
+        </div>
+        <div className="mt-10 border-t border-[var(--border-subtle)] pt-6">
+          <BulkDeletePanel client={client} scope="vault" disabled={transferring} onBusyChange={cleanupWorking} />
         </div>
       </div>
     </div>
@@ -55,7 +73,7 @@ function ImportPanel({ client, onImported, droppedFile, onDropConsumed, onBusyCh
     const parsing = false;
     const error = (null) as string | null;
     const result = (null) as ImportOutcome | null;
-    return { file, preview, busy, parsing, error, result, encrypted: false, password: '' };
+    return { file, preview, busy, parsing, error, result, encrypted: false, password: '', skipExisting: true };
   });
   const [file, setFile] = useStoreField(viewStore, 'file');
   const [preview, setPreview] = useStoreField(viewStore, 'preview');
@@ -65,6 +83,7 @@ function ImportPanel({ client, onImported, droppedFile, onDropConsumed, onBusyCh
   const [result, setResult] = useStoreField(viewStore, 'result');
   const [encrypted, setEncrypted] = useStoreField(viewStore, 'encrypted');
   const [password, setPassword] = useStoreField(viewStore, 'password');
+  const [skipExisting, setSkipExisting] = useStoreField(viewStore, 'skipExisting');
   const request = useTransferLifetime(client);
   useEffect(() => {
     // StrictMode probes mounts with setup/cleanup/setup. Consume only a live mount.
@@ -123,17 +142,17 @@ function ImportPanel({ client, onImported, droppedFile, onDropConsumed, onBusyCh
     if (file && !busy && !parsing) void parse({ ...file, format });
   }
 
-  async function run(): Promise<void> {
+  async function run(retry = false): Promise<void> {
     if (!file || !preview || viewStore.getState().busy || viewStore.getState().parsing) return;
     const current = ++request.current;
     setBusy(true); onBusyChange(true);
     setError(null);
+    if (retry) setSkipExisting(true);
     try {
-      const outcome = await client.importData({ ...file, format: preview.format });
+      const outcome = await client.importData({ ...file, format: preview.format, skipExisting: retry || skipExisting });
       if (current !== request.current) return;
       setResult(outcome);
-      setPreview(null);
-      setFile(null);
+      if (outcome.failed.length === 0) { setPreview(null); setFile(null); }
       onImported();
     } catch (e) {
       if (current === request.current) setError(e instanceof Error ? e.message : '导入失败');
@@ -154,6 +173,7 @@ function ImportPanel({ client, onImported, droppedFile, onDropConsumed, onBusyCh
   }
 
   return <>
+    <ImportOptions skipExisting={skipExisting} onChange={setSkipExisting} disabled={busy || parsing} />
     {parsing && <p role="status" className="mb-4 text-sm text-[var(--ink-secondary)]">正在读取文件…</p>}
     {encrypted && <form className="mb-5 space-y-3 rounded-[var(--radius-md)] bg-[var(--surface-well)] p-4"
       onSubmit={event => { event.preventDefault(); if (file && !parsing && password) void parse({ ...file, password }); }}>
@@ -165,6 +185,6 @@ function ImportPanel({ client, onImported, droppedFile, onDropConsumed, onBusyCh
     <ImportView preview={preview} progress={busy ? { done: null, total: preview?.total ?? 0 } : null}
       result={result} error={error} hasFile={file !== null} autoFormat={preview?.format ?? (encrypted ? 'bitwarden-json' : null)}
       reading={parsing} onPick={f => { void pick(f); }} onFormatChange={changeFormat}
-      onRun={() => { void run(); }} onReset={reset} />
+      onRun={() => { void run(); }} onReset={reset} onRetry={file && preview ? () => { void run(true); } : undefined} />
   </>;
 }

@@ -138,7 +138,8 @@ function secretValue(item: VaultItem, field: SecretRef): string {
 }
 
 /** Runs beside VaultClient in either the Tauri window or extension background. */
-export function createVaultService(client: VaultClient, profileCache?: ProfileCache): ApplicationService {
+export function createVaultService(client: VaultClient, profileCache?: ProfileCache,
+  operationGuard?: () => (() => void | Promise<void>)): ApplicationService {
   let revision = 0;
   let previous: { status: string; account: unknown; syncing: boolean; syncError: string | null;
     lastSyncedAt: number | null; items: unknown; folders: unknown } | null = null;
@@ -278,6 +279,8 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
     },
     async restoreItem(id) { await guarded(() => client.restoreItem(id)); },
     async deletePermanently(id) { find(id); await guarded(() => client.deletePermanently(id)); },
+    async previewBulkDelete(scope) { return guarded(() => client.previewBulkDelete(scope)); },
+    async commitBulkDelete(token) { return guarded(() => client.commitBulkDelete(token)); },
     async createFolder(name) {
       const trimmed = name.trim();
       if (!trimmed) throw new Error('请输入文件夹名称');
@@ -346,12 +349,25 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
     async importData(file) {
       const session = client.getSession();
       const key = session.getKey();
+      const assertOwner = operationGuard?.();
       return guarded(async () => {
+        await assertOwner?.();
         const parsed = await parseImport(fromBase64(file.dataBase64), file.format, file.password);
+        await assertOwner?.();
         if (session.getKey() !== key || !session.isUnlocked()) throw new Error('保险库已锁定，请重新解锁');
         activeItems();
-        return client.importItems(parsed.items, undefined, parsed.folderNames);
+        if (file.skipExisting !== undefined && typeof file.skipExisting !== 'boolean') throw new Error('导入选项无效');
+        const outcome = await client.importItems(parsed.items, undefined, parsed.folderNames,
+          { skipExisting: file.skipExisting ?? false, ...(assertOwner ? { assertCurrent: assertOwner } : {}) });
+        await assertOwner?.();
+        // Include accepted writes whose responses were lost, and folders found by deduplication.
+        // A later sync failure must not overwrite the already known import outcome.
+        await client.refresh().catch(() => {});
+        await assertOwner?.();
+        return outcome;
       });
     },
+    async previewAccountImport() { throw new Error('请在支持多账户的界面中迁移数据'); },
+    async importAccount() { throw new Error('请在支持多账户的界面中迁移数据'); },
   };
 }

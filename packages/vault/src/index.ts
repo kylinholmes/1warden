@@ -14,6 +14,7 @@ export * from './form-fields';
 export * from './health';
 export * from './organization-report';
 export * from './organization-merge';
+export type { BulkDeleteScope, BulkDeletePreview, BulkDeleteResult } from './bulk-delete';
 export * from './csv';
 export * from './import';
 export * from './import-csv';

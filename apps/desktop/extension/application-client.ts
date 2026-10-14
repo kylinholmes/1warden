@@ -73,6 +73,10 @@ export function createExtensionApplicationClient(): ApplicationClient {
     revealMergeValue: (...args) => call('revealMergeValue', ...args),
     exportVault: (...args) => call('exportVault', ...args),
     parseImport: (...args) => call('parseImport', ...args), importData: (...args) => call('importData', ...args),
+    previewAccountImport: (...args) => call('previewAccountImport', ...args),
+    importAccount: (...args) => call('importAccount', ...args),
+    previewBulkDelete: (...args) => call('previewBulkDelete', ...args),
+    commitBulkDelete: (...args) => call('commitBulkDelete', ...args),
   };
   const client = createApplicationClient(service, {
     capabilities: { native: false, browser: true, saveAttachments: true },

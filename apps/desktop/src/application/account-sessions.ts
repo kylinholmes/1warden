@@ -2,6 +2,8 @@ import type { VaultClient } from '@1warden/vault';
 import { APPLICATION_METHODS } from './client';
 import { accountKey, lockedAccount } from './account-target';
 import { createVaultService } from './service';
+import { createAccountMigration } from './account-migration';
+import type { AccountTarget } from './account-target';
 import type { ProfileCache } from './profile-cache';
 import type { ApplicationService } from './types';
 
@@ -16,11 +18,18 @@ export function createAccountSessions(createVault: () => VaultClient, profileCac
   const listeners = new Set<() => void>();
   const createSession = (): AccountSession => {
     const vault = createVault();
-    return { vault, service: createVaultService(vault, profileCache) };
+    return { vault, service: createVaultService(vault, profileCache, () => selectionGuard(vault)) };
   };
   let active = createSession();
   let selection = 0;
   let pending: { session: AccountSession; key: string; selection: number } | null = null;
+
+  function selectionGuard(vault: VaultClient): () => void {
+    const selectedAt = selection;
+    return () => {
+      if (active.vault !== vault || selectedAt !== selection) throw new Error('操作已取消，账户已切换或变更');
+    };
+  }
 
   function cancelAuthentication() {
     const previous = pending;
@@ -58,6 +67,31 @@ export function createAccountSessions(createVault: () => VaultClient, profileCac
     if (selected !== active) return service.snapshot();
     return { ...snapshot, unlockedAccounts: [...sessions].filter(([, session]) => session.vault.isUnlocked())
       .map(([key]) => key) };
+  };
+
+  function migration(source: AccountTarget) {
+    const sourceIdentity = accountKey(source);
+    const selected = active;
+    const selectedAt = selection;
+    const account = selected.vault.getSession().account;
+    if (account && accountKey(account) === sourceIdentity) throw new Error('不能将当前账户导入到相同账户');
+    const origin = sessions.get(sourceIdentity);
+    if (!origin || !origin.vault.isUnlocked()) throw new Error('请先解锁来源账户');
+    return createAccountMigration(origin.vault, selected.vault, () => {
+      if (selected !== active || selectedAt !== selection || sessions.get(sourceIdentity) !== origin) {
+        throw new Error('迁移已取消，账户已切换或变更');
+      }
+    });
+  }
+  service.previewAccountImport = async source => migration(source).preview();
+  service.importAccount = async (source, options) => migration(source).import(options);
+  service.previewBulkDelete = async scope => {
+    const vault = active.vault;
+    return vault.previewBulkDelete(scope, selectionGuard(vault));
+  };
+  service.commitBulkDelete = async token => {
+    const vault = active.vault;
+    return vault.commitBulkDelete(token, selectionGuard(vault));
   };
 
   service.switchAccount = async (target) => {

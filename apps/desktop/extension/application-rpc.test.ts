@@ -29,6 +29,25 @@ describe('application message authority', () => {
 });
 
 describe('application dispatcher', () => {
+  it('validates migration and bulk cleanup requests and publishes only commits', async () => {
+    let changed = 0;
+    const source = { serverUrl: 'https://source.example', email: 'source@example.com' };
+    const dispatch = createApplicationDispatcher({
+      previewAccountImport: async () => ({ total: 2 }), importAccount: async () => ({ created: 2 }),
+      previewBulkDelete: async () => ({ token: 'confirmed', count: 2 }), commitBulkDelete: async () => ({ completed: 2 }),
+    } as unknown as ApplicationService, { onChanged: () => { changed++; } });
+    for (const request of [
+      { method: 'previewAccountImport', args: [null] }, { method: 'importAccount', args: [source, { skipExisting: 'yes' }] },
+      { method: 'previewBulkDelete', args: ['all'] }, { method: 'commitBulkDelete', args: [123] },
+      { method: 'importData', args: [{ name: 'file', dataBase64: '', format: 'auto', skipExisting: 'yes' }] },
+    ]) await expect(dispatch(request)).rejects.toThrow(/无效/);
+    await expect(dispatch({ method: 'previewAccountImport', args: [source] })).resolves.toEqual({ total: 2 });
+    await expect(dispatch({ method: 'previewBulkDelete', args: ['trash'] })).resolves.toMatchObject({ count: 2 });
+    expect(changed).toBe(0);
+    await expect(dispatch({ method: 'importAccount', args: [source, { skipExisting: true }] })).resolves.toEqual({ created: 2 });
+    await expect(dispatch({ method: 'commitBulkDelete', args: ['confirmed'] })).resolves.toEqual({ completed: 2 });
+    expect(changed).toBe(2);
+  });
   it('validates export formats and passwords before dispatching the explicit export operation', async () => {
     const requests: unknown[] = [];
     const dispatch = createApplicationDispatcher({ exportVault: async (request: unknown) => { requests.push(request); return { fileName: 'backup.json' }; } } as unknown as ApplicationService);

@@ -2,29 +2,52 @@ import { useEffect, useRef } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { IconSpinner, PageHeader, TYPE_LABEL } from '@1warden/ui';
 import type { ApplicationClient, TrashItemSummary } from '../application/types';
+import { BulkDeletePanel } from './BulkDelete';
 
 /** Deleted items stay separate from normal vault/search results and secret projections. */
-export function TrashView({ client, onBack }: { client: ApplicationClient; onBack: () => void }) {
+export function TrashView({ client, onBack, onBusyChange }: {
+  client: ApplicationClient; onBack: () => void; onBusyChange?: (busy: boolean) => void;
+}) {
   const store = useLocalStore(() => ({ items: null as TrashItemSummary[] | null, loading: true,
-    restoring: null as string | null, error: null as string | null, restored: null as string | null }));
+    restoring: null as string | null, error: null as string | null, restored: null as string | null, cleaning: false }));
   const [items, setItems] = useStoreField(store, 'items');
   const [loading, setLoading] = useStoreField(store, 'loading');
   const [restoring, setRestoring] = useStoreField(store, 'restoring');
   const [error, setError] = useStoreField(store, 'error');
   const [restored, setRestored] = useStoreField(store, 'restored');
+  const [cleaning, setCleaning] = useStoreField(store, 'cleaning');
   const request = useRef(0);
   const heading = useRef<HTMLHeadingElement>(null);
+  const busyCallback = useRef(onBusyChange); busyCallback.current = onBusyChange;
+  useEffect(() => { busyCallback.current?.(cleaning || !!restoring); }, [cleaning, restoring]);
+  useEffect(() => () => { busyCallback.current?.(false); }, []);
+  function back() { if (!store.getState().cleaning && !store.getState().restoring) onBack(); }
   async function load() {
-    if (store.getState().restoring) return;
+    if (store.getState().restoring || client.getSnapshot().status !== 'unlocked') return;
     const current = ++request.current;
     setLoading(true); setError(null);
     try { const list = await client.listTrash(); if (current === request.current) setItems(list); }
     catch (cause) { if (current === request.current) setError(cause instanceof Error ? cause.message : '无法载入回收站，请重试'); }
     finally { if (current === request.current) setLoading(false); }
   }
-  useEffect(() => { heading.current?.focus({ preventScroll: true }); void load(); return () => { request.current++; }; }, [client]);
+  useEffect(() => {
+    const owner = () => {
+      const snapshot = client.getSnapshot();
+      return JSON.stringify([snapshot.status, snapshot.account?.serverUrl, snapshot.account?.email, snapshot.account?.userId]);
+    };
+    let currentOwner = owner();
+    heading.current?.focus({ preventScroll: true }); void load();
+    const unsubscribe = client.subscribe(() => {
+      const next = owner();
+      if (next === currentOwner) return;
+      currentOwner = next; request.current++;
+      store.setState({ items: null, loading: false, restoring: null, error: null, restored: null, cleaning: false });
+      void load();
+    });
+    return () => { request.current++; unsubscribe(); };
+  }, [client]);
   async function restore(item: TrashItemSummary) {
-    if (item.restoreError || store.getState().restoring || store.getState().loading) return;
+    if (item.restoreError || store.getState().restoring || store.getState().loading || store.getState().cleaning) return;
     const current = ++request.current;
     setRestoring(item.id); setError(null); setRestored(null);
     try {
@@ -36,13 +59,13 @@ export function TrashView({ client, onBack }: { client: ApplicationClient; onBac
     finally { if (current === request.current) setRestoring(null); }
   }
   return <main aria-label="回收站" className="flex min-h-0 flex-1 flex-col">
-    <PageHeader title="回收站" navigation onBack={onBack} backLabel="返回保险库"
-      breadcrumbs={[{ label: '保险库', onSelect: onBack }, { label: '回收站' }]} />
+    <PageHeader title="回收站" navigation onBack={back} backLabel="返回保险库"
+      breadcrumbs={[{ label: '保险库', onSelect: back }, { label: '回收站' }]} />
     <div className="min-h-0 flex-1 overflow-y-auto p-5 sm:p-8">
       <div className="mx-auto max-w-[680px]">
         <div className="mb-4 flex items-center justify-between gap-3">
           <h1 ref={heading} tabIndex={-1} className="text-xl font-semibold outline-none">回收站</h1>
-          <button type="button" className="btn btn-quiet" disabled={loading || !!restoring} onClick={() => { void load(); }}>刷新</button>
+          <button type="button" className="btn btn-quiet" disabled={loading || !!restoring || cleaning} onClick={() => { void load(); }}>刷新</button>
         </div>
         <p className="mb-5 text-sm text-[var(--ink-secondary)]">恢复后，条目会回到原来的文件夹。服务器可能按其保留策略清理回收站。</p>
         {error && <p role="alert" className="mb-4 break-words text-sm text-[var(--risk)]">{error}</p>}
@@ -54,11 +77,13 @@ export function TrashView({ client, onBack }: { client: ApplicationClient; onBac
             <div className="min-w-0 flex-1"><p className="break-words text-md">{item.nameFailed ? '无法解密' : item.name}</p>
               <p className="mt-1 text-xs text-[var(--ink-tertiary)]">{TYPE_LABEL[item.type] ?? '条目'}</p>
               {item.restoreError && <p className="mt-1 break-words text-xs text-[var(--risk)]">{item.restoreError}</p>}</div>
-            <button type="button" className="btn btn-quiet shrink-0" disabled={!!item.restoreError || loading || !!restoring} onClick={() => { void restore(item); }}>
+            <button type="button" className="btn btn-quiet shrink-0" disabled={!!item.restoreError || loading || !!restoring || cleaning} onClick={() => { void restore(item); }}>
               {restoring === item.id ? '恢复中…' : '恢复'}
             </button>
           </li>)}
         </ul>}
+        <div className="mt-6"><BulkDeletePanel client={client} scope="trash" disabled={loading || !!restoring}
+          onBusyChange={setCleaning} onCompleted={() => { setRestored(null); void load(); }} /></div>
       </div>
     </div>
   </main>;

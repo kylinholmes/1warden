@@ -19,7 +19,7 @@ it('persists imported passkeys, password history, linked fields and login settin
       fido2Credentials: [{ credentialId: 'fixture-id', keyType: 'public-key', keyAlgorithm: 'ECDSA', keyCurve: 'P-256',
         keyValue: 'fixture-private-key', rpId: 'example.com', counter: '0', discoverable: 'true', creationDate: '2026-01-01' }] },
   }] })));
-  expect(await client.importItems(parsed.items)).toEqual({ created: 1, failed: [] });
+  expect(await client.importItems(parsed.items)).toEqual({ created: 1, skippedExisting: 0, failed: [] });
   const saved = client.getSession().items[0]!;
   expect(saved).toMatchObject({ reprompt: 1, notes: ' leading whitespace ', archivedAt: '2025-12-01',
     customFields: [{ type: 3, linkedId: 100 }], passwordHistory: [{ password: ' old password ', lastUsedDate: '2025-01-01' }],
@@ -37,7 +37,7 @@ it('restores empty folders from JSON even when the vault has no records', async 
   }) });
   client.restore({ account: { serverUrl: 'https://fixture.invalid', email: 'fixture@example.com', userId: 'fixture', kdf: { kdf: 0, iterations: 1 } },
     userKey: makeUserKey(), token: { accessToken: 'fixture-token' } as never, items: [], folders: [], syncVerified: true });
-  expect(await client.importItems(parsed.items, undefined, parsed.folderNames)).toEqual({ created: 0, failed: [] });
+  expect(await client.importItems(parsed.items, undefined, parsed.folderNames)).toEqual({ created: 0, skippedExisting: 0, failed: [] });
   expect(client.getSession().folders).toMatchObject([{ name: 'Empty folder' }]);
 });
 

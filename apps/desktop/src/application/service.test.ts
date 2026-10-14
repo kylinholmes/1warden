@@ -33,6 +33,34 @@ function restored(items = [record()], fetchImpl: typeof fetch = async () => { th
 }
 
 describe('application display boundary', () => {
+  it('binds a file import to the selected owner through its writes', async () => {
+    const { client } = restored([]);
+    let selection = 0;
+    const service = createVaultService(client, undefined, () => {
+      const expected = selection;
+      return () => { if (selection !== expected) throw new Error('账户已切换'); };
+    });
+    const writes: number[] = [];
+    vi.spyOn(client, 'importItems').mockImplementation(async (_items, _progress, _folders, options) => {
+      await options?.assertCurrent?.(); writes.push(1);
+      selection++;
+      await options?.assertCurrent?.(); writes.push(2);
+      return { created: 2, skippedExisting: 0, failed: [] };
+    });
+    const file = { name: 'file.json', format: 'auto' as const, skipExisting: true,
+      dataBase64: toBase64(new TextEncoder().encode(JSON.stringify({ encrypted: false, items: [{ type: 1, name: 'Test', login: {} }] }))) };
+    await expect(service.importData(file)).rejects.toThrow(/账户已切换/);
+    expect(writes).toEqual([1]);
+  });
+  it('refreshes after import without losing a completed result when refresh fails', async () => {
+    const { client, service } = restored([]);
+    const outcome = { created: 0, skippedExisting: 1, failed: [] };
+    vi.spyOn(client, 'importItems').mockResolvedValue(outcome);
+    const refresh = vi.spyOn(client, 'refresh').mockRejectedValue(new Error('offline refresh'));
+    await expect(service.importData({ name: 'file.json', format: 'auto', skipExisting: true,
+      dataBase64: toBase64(new TextEncoder().encode('{"encrypted":false,"items":[]}')) })).resolves.toEqual(outcome);
+    expect(refresh).toHaveBeenCalledOnce();
+  });
   it('exports individual records through an explicit operation without internal keys or profile records', async () => {
     const item = { ...record(), card: null, sshKey: null, login: { ...record().login!, fido2Credentials: [] } };
     const { service, client } = restored([item, { ...item, id: 'trash', deletedAt: '2026-01-01' },

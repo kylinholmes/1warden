@@ -50,10 +50,12 @@ export interface ImportPreview {
   folders: number;
   /** ⚠️ 必须有 `rowNumber` 和 `reason`，只有个数就等于没报 */
   skipped: { rowNumber: number; reason: string }[];
+  warnings?: string[];
 }
 
 export interface ImportOutcome {
   created: number;
+  skippedExisting?: number;
   failed: { name: string; reason: string }[];
 }
 
@@ -69,6 +71,7 @@ export function ImportView({
   onFormatChange,
   onRun,
   onReset,
+  onRetry,
 }: {
   reading?: boolean;
   preview: ImportPreview | null;
@@ -84,6 +87,7 @@ export function ImportView({
   onFormatChange: (format: ImportFormatId) => void;
   onRun: () => void;
   onReset: () => void;
+  onRetry?: (() => void) | undefined;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
   const busy = progress !== null || reading;
@@ -145,9 +149,9 @@ export function ImportView({
         {progress !== null ? (
           <Progress done={progress.done} total={progress.total} />
         ) : result !== null ? (
-          <Result created={result.created} failed={result.failed} onAgain={onReset} />
+          <ImportResult result={result} onAgain={onReset} onRetry={onRetry} />
         ) : preview !== null ? (
-          <Preview preview={preview} disabled={busy} onRun={onRun} onCancel={onReset} />
+          <ImportPreviewCard preview={preview} disabled={busy} onRun={onRun} onCancel={onReset} />
         ) : (
           <PickStep disabled={busy} hasFile={hasFile} onChoose={() => fileRef.current?.click()} />
         )}
@@ -192,10 +196,10 @@ function Progress({ done, total }: { done: number | null; total: number }) {
   );
 }
 
-function Result({ created, failed, onAgain }: {
-  created: number;
-  failed: { name: string; reason: string }[];
+export function ImportResult({ result: { created, failed, skippedExisting = 0 }, onAgain, onRetry }: {
+  result: ImportOutcome;
   onAgain: () => void;
+  onRetry?: (() => void) | undefined;
 }) {
   return (
     <div className="card p-4 @[640px]:p-5">
@@ -203,8 +207,9 @@ function Result({ created, failed, onAgain }: {
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--safe)] text-[var(--surface-paper)]">
           <IconCheck size={14} />
         </span>
-        {created === 0 && failed.length === 0 ? '文件夹导入完成' : <>已导入 <span className="font-semibold tabular-nums">{created}</span> 条</>}
+        {created === 0 && failed.length === 0 && skippedExisting === 0 ? '文件夹导入完成' : <>已导入 <span className="font-semibold tabular-nums">{created}</span> 条</>}
       </p>
+      {skippedExisting > 0 && <p className="mt-3 text-sm text-[var(--ink-secondary)]">已跳过 {skippedExisting} 条已有条目</p>}
 
       {/*
         ⚠️ 失败的那些**必须逐个列出来**（名字 + 原因）。
@@ -215,11 +220,11 @@ function Result({ created, failed, onAgain }: {
         <div className="mt-4 rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-3.5">
           <p className="mb-2 flex items-center gap-2 text-sm font-medium text-[var(--risk)]">
             <IconAlert size={14} className="shrink-0" />
-            有 {failed.length} 条没写进去
+            有 {failed.length} 项未完成或未能确认
           </p>
           <ul className="space-y-1">
-            {failed.map((f) => (
-              <li key={f.name} className="text-xs">
+            {failed.map((f, index) => (
+              <li key={index} className="text-xs">
                 <span className="font-medium">{f.name}</span>
                 <span className="text-[var(--ink-tertiary)]"> —— {f.reason}</span>
               </li>
@@ -228,16 +233,20 @@ function Result({ created, failed, onAgain }: {
         </div>
       )}
 
-      <button onClick={onAgain} className="btn btn-quiet mt-4">再导入一份</button>
+      <div className="mt-4 flex flex-wrap gap-2">
+        {failed.length > 0 && onRetry && <button onClick={onRetry} className="btn btn-primary">跳过已有条目并重试</button>}
+        <button onClick={onAgain} className="btn btn-quiet">再导入一份</button>
+      </div>
     </div>
   );
 }
 
-function Preview({ preview, disabled, onRun, onCancel }: {
+export function ImportPreviewCard({ preview, disabled, onRun, onCancel, cancelLabel = '换一个文件' }: {
   preview: ImportPreview;
   disabled: boolean;
   onRun: () => void;
   onCancel: () => void;
+  cancelLabel?: string;
 }) {
   const breakdown = Object.entries(preview.byType).map(([t, n]) => `${TYPE_LABEL[t] ?? t} ${n}`);
 
@@ -287,11 +296,14 @@ function Preview({ preview, disabled, onRun, onCancel }: {
         </div>
       )}
 
+      {!!preview.warnings?.length && <ul className="space-y-1 border-b border-[var(--border-subtle)] px-4 py-3 text-xs text-[var(--caution)]">
+        {preview.warnings.map((warning, index) => <li key={index}>{warning}</li>)}
+      </ul>}
       <div className="flex items-center gap-2 px-4 py-3.5">
         <button onClick={onRun} disabled={disabled} className="btn btn-primary">
           {preview.total > 0 ? `导入这 ${preview.total} 条` : `导入 ${preview.folders} 个文件夹`}
         </button>
-        <button onClick={onCancel} disabled={disabled} className="btn btn-quiet">换一个文件</button>
+        <button onClick={onCancel} disabled={disabled} className="btn btn-quiet">{cancelLabel}</button>
       </div>
     </div>
   );

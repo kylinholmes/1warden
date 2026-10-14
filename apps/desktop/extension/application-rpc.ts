@@ -96,7 +96,9 @@ const number = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 const none = (args: unknown[]) => args.length === 0;
 const strings = (count: number) => (args: unknown[]) => args.length === count && args.every(string);
 const file = (v: unknown) => object(v) && string(v['name']) && string(v['dataBase64']) && string(v['format'])
-  && (v['password'] === undefined || string(v['password']));
+  && (v['password'] === undefined || string(v['password']))
+  && (v['skipExisting'] === undefined || typeof v['skipExisting'] === 'boolean');
+const account = (v: unknown) => { try { lockedAccount(v as never); return true; } catch { return false; } };
 const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
   snapshot: none,
   sync: none,
@@ -146,6 +148,10 @@ const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
   exportVault: (a) => a.length === 1 && object(a[0]) && ['encrypted-json', 'json', 'csv'].includes(String(a[0]['format']))
     && (a[0]['password'] === undefined || string(a[0]['password'])),
   checkBreaches: none, parseImport: (a) => a.length === 1 && file(a[0]), importData: (a) => a.length === 1 && file(a[0]),
+  previewAccountImport: (a) => a.length === 1 && account(a[0]),
+  importAccount: (a) => a.length === 2 && account(a[0]) && object(a[1]) && typeof a[1]['skipExisting'] === 'boolean',
+  previewBulkDelete: (a) => a.length === 1 && ['vault', 'trash'].includes(String(a[0])),
+  commitBulkDelete: strings(1),
 };
 
 const mutations = new Set<ApplicationMethod>([
@@ -153,6 +159,7 @@ const mutations = new Set<ApplicationMethod>([
   'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'savePreferences', 'recordDevice', 'toggleFavorite',
   'moveToTrash', 'restoreItem', 'deletePermanently', 'createFolder', 'renameFolder', 'deleteFolder', 'moveToFolder',
   'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory', 'importData', 'mergeItems',
+  'importAccount', 'commitBulkDelete',
 ]);
 
 /** In-memory reads must not wait for network writes or an unresponsive webpage. */
@@ -203,6 +210,10 @@ function invoke(service: ApplicationService, request: ApplicationRequest): Promi
     case 'exportVault': return service.exportVault(...request.args);
     case 'parseImport': return service.parseImport(...request.args);
     case 'importData': return service.importData(...request.args);
+    case 'previewAccountImport': return service.previewAccountImport(...request.args);
+    case 'importAccount': return service.importAccount(...request.args);
+    case 'previewBulkDelete': return service.previewBulkDelete(...request.args);
+    case 'commitBulkDelete': return service.commitBulkDelete(...request.args);
   }
 }
 

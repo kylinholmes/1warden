@@ -19,6 +19,35 @@ function fixture() {
 }
 
 describe('independent browser account sessions', () => {
+  it('reads a parked account without changing selection, data or expiry', async () => {
+    const { store, values, a, b } = fixture();
+    await store.start(a); await store.select(b.account); await store.start(b);
+    const before = structuredClone(values);
+    const lease = await store.readUnlockedAccount(a.account);
+    expect(lease.session).toEqual(a);
+    await lease.assertCurrent();
+    expect(await store.load()).toEqual(b);
+    expect(values).toEqual(before);
+    lease.session.userKey.encKey.fill(0);
+    expect((await store.readUnlockedAccount(a.account)).session.userKey.encKey).toEqual(new Uint8Array(32).fill(1));
+  });
+
+  it('rejects expired, replaced and selection-retired source leases', async () => {
+    const { store, a, b, advance } = fixture();
+    await store.start(a); await store.select(b.account); await store.start(b);
+    const expired = await store.readUnlockedAccount(a.account);
+    advance(SESSION_DURATION_MS);
+    await expect(expired.assertCurrent()).rejects.toThrow(/过期|锁定/);
+    await expect(store.readUnlockedAccount(a.account)).rejects.toThrow(/过期|解锁|锁定/);
+    await store.start(b);
+    const replaced = await store.readUnlockedAccount(b.account);
+    await store.start(b);
+    await expect(replaced.assertCurrent()).rejects.toThrow(/变更|过期|锁定/);
+    const selected = await store.readUnlockedAccount(b.account);
+    await store.select(a.account);
+    await expect(selected.assertCurrent()).rejects.toThrow(/切换|变更|过期|锁定/);
+  });
+
   it('parks a session for Add Account and restores it without extending its deadline', async () => {
     const { store, a, advance } = fixture();
     await store.start(a);

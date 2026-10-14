@@ -11,6 +11,7 @@ export const APPLICATION_METHODS = [
   'createFolder', 'renameFolder', 'deleteFolder', 'moveToFolder', 'reveal', 'totp', 'downloadAttachment',
   'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory',
   'securityReport', 'organizationReport', 'previewMerge', 'revealMergeValue', 'mergeItems', 'checkBreaches', 'exportVault', 'parseImport', 'importData',
+  'previewAccountImport', 'importAccount', 'previewBulkDelete', 'commitBulkDelete',
 ] as const satisfies readonly ApplicationMethod[];
 
 const MUTATIONS = new Set<ApplicationMethod>([
@@ -18,6 +19,7 @@ const MUTATIONS = new Set<ApplicationMethod>([
   'connect', 'connectWithTwoFactor', 'unlock', 'lock', 'logout', 'switchAccount', 'saveItem', 'saveProfile', 'savePreferences', 'recordDevice',
   'toggleFavorite', 'moveToTrash', 'restoreItem', 'deletePermanently', 'createFolder', 'renameFolder',
   'deleteFolder', 'moveToFolder', 'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory', 'importData', 'mergeItems',
+  'importAccount', 'commitBulkDelete',
 ]);
 
 interface Options {

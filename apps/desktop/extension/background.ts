@@ -34,6 +34,8 @@ import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from '.
 import { handleWebauthn, type WebauthnPayload } from './webauthn';
 import { createProfileCache } from '../src/application/profile-cache';
 import { createVaultService } from '../src/application/service';
+import { createAccountMigration } from '../src/application/account-migration';
+import type { AccountTarget } from '../src/application/account-target';
 import type { ApplicationMethod, ApplicationRequest, SiteContext } from '../src/application/types';
 import { authorizeRequest, createApplicationDispatcher, createSerialRunner, serializeError } from './application-rpc';
 import { createClipboardStore } from './clipboard-store';
@@ -225,12 +227,39 @@ let profileCache: ReturnType<typeof createProfileCache> | undefined;
 
 function serviceFor(c: VaultClient) {
   profileCache ??= createProfileCache(host().storage);
-  const application = createVaultService(c, profileCache);
+  const assertLifetime = async () => {
+    requireCurrentClient(c);
+    const deadline = await sessions.expiresAt();
+    requireCurrentClient(c);
+    if (deadline === null || deadline <= Date.now()) throw new Error('当前账户会话已过期，请重新解锁');
+  };
+  const application = createVaultService(c, profileCache, () => assertLifetime);
   const authenticate = async (operation: () => Promise<void>) => {
     authenticating.add(c);
     try { await operation(); }
     catch (error) { authenticating.delete(c); throw error; }
     // Success remains protected until persistState establishes the session deadline.
+  };
+  const withSource = async <T>(source: AccountTarget, operation: (migration: ReturnType<typeof createAccountMigration>) => Promise<T>): Promise<T> => {
+    requireCurrentClient(c);
+    if (accountKey(source) === accountKey(c.getSession().account!)) throw new Error('不能将当前账户导入到相同账户');
+    const borrowed = await sessions.readUnlockedAccount(source);
+    // This reader owns no notifications, cache writes or persistence hooks.
+    const origin = new VaultClient({ fetchImpl: host().fetch, autoLockMs: 0 });
+    try {
+      requireCurrentClient(c);
+      origin.restore(borrowed.session);
+      return await operation(createAccountMigration(origin, c, async () => {
+        requireCurrentClient(c);
+        const deadline = await sessions.expiresAt();
+        await borrowed.assertCurrent();
+        requireCurrentClient(c);
+        if (deadline === null || deadline <= Date.now()) throw new Error('当前账户会话已过期，请重新解锁');
+      }));
+    } finally {
+      origin.logout();
+      borrowed.session.userKey.encKey.fill(0); borrowed.session.userKey.macKey.fill(0);
+    }
   };
   return {
     ...application,
@@ -246,6 +275,10 @@ function serviceFor(c: VaultClient) {
     connect: (...args: Parameters<typeof application.connect>) => authenticate(() => application.connect(...args)),
     connectWithTwoFactor: (...args: Parameters<typeof application.connectWithTwoFactor>) => authenticate(() => application.connectWithTwoFactor(...args)),
     unlock: (...args: Parameters<typeof application.unlock>) => authenticate(() => application.unlock(...args)),
+    previewAccountImport: (source: AccountTarget) => withSource(source, migration => migration.preview()),
+    importAccount: (source: AccountTarget, options: { skipExisting: boolean }) => withSource(source, migration => migration.import(options)),
+    previewBulkDelete: (scope: Parameters<typeof application.previewBulkDelete>[0]) => c.previewBulkDelete(scope, assertLifetime),
+    commitBulkDelete: (token: string) => c.commitBulkDelete(token, assertLifetime),
     switchAccount: (target: Parameters<typeof application.switchAccount>[0]) => {
       const selected = target ? lockedAccount(target) : null;
       const previousAccount = c.getSession().account;

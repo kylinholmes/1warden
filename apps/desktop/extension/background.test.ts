@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { concatBytes, deriveMasterKey, encryptBytes, makeUserKey, stretchMasterKey, toBase64 } from '@1warden/crypto';
+import { concatBytes, deriveMasterKey, encryptBytes, encryptString, fromBase64, makeUserKey, stretchMasterKey, toBase64 } from '@1warden/crypto';
 
 type Listener = (request: unknown, sender: chrome.runtime.MessageSender, reply: (value: unknown) => void) => unknown;
 const account = { serverUrl: 'https://vault.test', email: 'a@b.com', userId: 'u1', kdf: { kdf: 0 as const, iterations: 1000 } };
@@ -46,6 +46,107 @@ beforeEach(async () => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('background application boundary', () => {
+  it.each(['preview-read', 'commit-read', 'first-delete'] as const)('checks the browser session deadline during bulk cleanup %s', async phase => {
+    const slot = data['1warden.session'] as { userKey: { encKey: string; macKey: string }; token: unknown; expiresAt: number };
+    slot.token = { accessToken: 'target-token', expiresIn: 3600, kdf: 0 };
+    const key = { encKey: fromBase64(slot.userKey.encKey), macKey: fromBase64(slot.userKey.macKey) };
+    const records = await Promise.all(['first', 'second'].map(async id => ({ id, type: 2,
+      name: await encryptString(id, key), notes: await encryptString('synthetic', key), secureNote: { type: 0 } })));
+    const mutations: string[] = [];
+    let paused = false;
+    let started!: () => void; let release!: () => void;
+    const waiting = new Promise<void>(r => { started = r; }); const resume = new Promise<void>(r => { release = r; });
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const path = new URL(String(input)).pathname;
+      if (init?.method === 'PUT') mutations.push(path);
+      if (paused && path === (phase === 'first-delete' ? '/api/ciphers/first/delete' : '/api/sync')) {
+        paused = false; started(); await resume;
+      }
+      if (path === '/api/sync') return Response.json({ profile: { id: 'u1' }, ciphers: records, folders: [], collections: [] });
+      if (init?.method === 'PUT') return new Response(null, { status: 204 });
+      if (path.startsWith('/api/ciphers/')) return Response.json(records.find(row => row.id === path.split('/').at(-1)));
+      throw Error(`Unexpected endpoint ${path}`);
+    });
+    const preview = phase === 'preview-read' ? null : await send({ type: '1warden:application', method: 'previewBulkDelete', args: ['vault'] });
+    if (preview) expect(preview).toMatchObject({ ok: true, result: { count: 2 } });
+    paused = true;
+    const pending = send({ type: '1warden:application', method: preview ? 'commitBulkDelete' : 'previewBulkDelete',
+      args: preview ? [preview.result.token] : ['vault'] });
+    await waiting; slot.expiresAt = Date.now() - 1; release();
+    expect(await pending).toMatchObject({ ok: false });
+    expect(mutations).toHaveLength(phase === 'first-delete' ? 1 : 0);
+  });
+
+  async function migrationFixture() {
+    const source = { ...account, serverUrl: 'https://source.test', email: 'source@example.com', userId: 'source' };
+    const key = makeUserKey();
+    const sourceSlot = { account: source, userKey: { encKey: toBase64(key.encKey), macKey: toBase64(key.macKey) },
+      items: [], folders: [], token: { accessToken: 'source-token', expiresIn: 3600, kdf: 0 },
+      expiresAt: Date.now() + 600_000, sessionId: 'source-session', syncVerified: true };
+    const identity = JSON.stringify([source.serverUrl, source.email]);
+    data['1warden.sessions'] = { [identity]: sourceSlot };
+    Object.assign(data['1warden.session'] as object, { token: { accessToken: 'target-token', expiresIn: 3600, kdf: 0 }, syncVerified: true });
+    const sourceCipher = { id: 'source-note', type: 2, name: await encryptString('Source note', key),
+      notes: await encryptString('source secret', key), secureNote: { type: 0 } };
+    const writes: { origin: string; body: unknown }[] = [];
+    let pause: { started: () => void; wait: Promise<void> } | undefined;
+    vi.stubGlobal('fetch', async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = new URL(String(input));
+      if (url.pathname === '/api/sync') {
+        if (url.origin === source.serverUrl && pause) { const pending = pause; pause = undefined; pending.started(); await pending.wait; }
+        return Response.json({ profile: { id: url.origin === source.serverUrl ? 'source' : 'u1' },
+          ciphers: url.origin === source.serverUrl ? [sourceCipher] : [], folders: [], collections: [] });
+      }
+      if (url.pathname === '/api/ciphers' && init?.method === 'POST') {
+        const body = JSON.parse(String(init.body)); writes.push({ origin: url.origin, body });
+        return Response.json({ ...body, id: 'copy-note' });
+      }
+      throw Error(`Unexpected test endpoint ${url.pathname}`);
+    });
+    return { source, sourceSlot, identity, writes,
+      pause() { let started!: () => void; let release!: () => void;
+        const start = new Promise<void>(r => { started = r; }); const wait = new Promise<void>(r => { release = r; });
+        pause = { started, wait }; return { start, release };
+      },
+    };
+  }
+
+  it('copies a parked source within the worker without selecting, saving or extending it', async () => {
+    const f = await migrationFixture();
+    const before = structuredClone(f.sourceSlot);
+    const { VaultClient } = await import('@1warden/vault');
+    const restore = VaultClient.prototype.restore;
+    const borrowed: ReturnType<typeof VaultClient.prototype.exportState>[] = [];
+    const spy = vi.spyOn(VaultClient.prototype, 'restore').mockImplementation(function (this: InstanceType<typeof VaultClient>, state) {
+      if (state.account.serverUrl === f.source.serverUrl) borrowed.push(state);
+      return restore.call(this, state);
+    });
+    try {
+      const preview = await send({ type: '1warden:application', method: 'previewAccountImport', args: [f.source] });
+      expect(preview).toMatchObject({ ok: true, result: { total: 1, folders: 0 } });
+      expect(JSON.stringify(preview)).not.toMatch(/source secret|source-token|Source note/);
+      expect(await send({ type: '1warden:application', method: 'importAccount', args: [f.source, { skipExisting: true }] })).toMatchObject({ ok: true, result: { created: 1, failed: [] } });
+      expect(f.writes.map(row => row.origin)).toEqual([account.serverUrl]);
+      expect((data['1warden.sessions'] as Record<string, unknown>)[f.identity]).toEqual(before);
+      expect(data['1warden.account']).toEqual(account);
+      expect(borrowed.length).toBe(2);
+      expect(borrowed.every(state => [...state.userKey.encKey, ...state.userKey.macKey].every(byte => byte === 0))).toBe(true);
+    } finally { spy.mockRestore(); }
+  });
+
+  it.each(['source-expiry', 'target-expiry', 'source-relogin'] as const)('aborts account copying after %s while reading source data', async reason => {
+    const f = await migrationFixture();
+    const paused = f.pause();
+    const copying = send({ type: '1warden:application', method: 'importAccount', args: [f.source, { skipExisting: true }] });
+    await paused.start;
+    if (reason === 'source-expiry') f.sourceSlot.expiresAt = Date.now() - 1;
+    if (reason === 'target-expiry') (data['1warden.session'] as Record<string, unknown>)['expiresAt'] = Date.now() - 1;
+    if (reason === 'source-relogin') f.sourceSlot.sessionId = 'new-source-session';
+    paused.release();
+    expect(await copying).toMatchObject({ ok: false });
+    expect(f.writes).toEqual([]);
+  });
+
   it('persists explicit sync failure across worker restart and clears it after a successful retry', async () => {
     (data['1warden.session'] as Record<string, unknown>)['token'] = { accessToken: 'test-token', expiresIn: 3600, kdf: 0 };
     let fail = true;

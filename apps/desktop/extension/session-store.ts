@@ -25,7 +25,7 @@
  */
 import { fromBase64, toBase64 } from '@1warden/crypto';
 import type { AccountInfo, VaultFolder, VaultItem, VaultClientState } from '@1warden/vault';
-import { accountKey } from '../src/application/account-target';
+import { accountKey, type AccountTarget } from '../src/application/account-target';
 
 /** 存储键。带前缀，避免与其他扩展数据撞名 */
 const KEY = '1warden.session';
@@ -110,6 +110,7 @@ export type UnlockedSession = VaultClientState;
 interface StoredShape extends Omit<VaultClientState, 'userKey'> {
   userKey: { encKey: string; macKey: string };
   expiresAt: number;
+  sessionId: string;
 }
 
 const KEY_BYTES = 32;
@@ -193,7 +194,7 @@ export class SessionStore {
     const generation = this.generation;
     await this.serialize(async () => {
       if (generation !== this.generation) throw new Error('保险库已锁定，请重新解锁');
-      await this.write(session, this.now() + SESSION_DURATION_MS);
+      await this.write(session, this.now() + SESSION_DURATION_MS, crypto.randomUUID());
       if (generation === this.generation) this.invalidated = false;
     });
   }
@@ -213,14 +214,15 @@ export class SessionStore {
         await this.removeStored({});
         throw new Error('保险库会话已过期，请重新解锁');
       }
-      await this.write(session, deadline);
+      await this.write(session, deadline, isObject(raw) && typeof raw['sessionId'] === 'string' ? raw['sessionId'] : crypto.randomUUID());
     });
   }
 
-  private async write(session: UnlockedSession, expiresAt: number): Promise<void> {
+  private async write(session: UnlockedSession, expiresAt: number, sessionId: string): Promise<void> {
     const generation = this.generation;
     const stored: StoredShape = {
       expiresAt,
+      sessionId,
       account: session.account,
       userKey: {
         encKey: toBase64(session.userKey.encKey),
@@ -288,6 +290,29 @@ export class SessionStore {
   async unlockedAccounts(): Promise<string[]> {
     const got = await this.area.get([KEY, ACCOUNTS_KEY]);
     return Object.entries(this.slots(got)).filter(([key, raw]) => this.validSlot(raw, key)).map(([key]) => key);
+  }
+
+  /** Borrow a detached source snapshot without selecting, persisting or renewing it. */
+  async readUnlockedAccount(account: AccountTarget): Promise<{ session: UnlockedSession; assertCurrent: () => Promise<void> }> {
+    const identity = accountKey(account);
+    const generation = this.generation;
+    const read = async () => {
+      if (this.invalidated || generation !== this.generation) throw new Error('迁移已取消，账户已锁定或切换');
+      const got = await this.area.get([KEY, ACCOUNTS_KEY]);
+      if (this.invalidated || generation !== this.generation) throw new Error('迁移已取消，账户已锁定或切换');
+      const raw = this.slots(got)[identity];
+      if (!this.validSlot(raw, identity)) throw new Error('来源账户已锁定或会话已过期，请重新解锁');
+      return raw as StoredShape;
+    };
+    const raw = await read();
+    const session = revive(structuredClone(raw))!;
+    const assertCurrent = async () => {
+      const current = await read();
+      if (current.sessionId !== raw.sessionId || current.expiresAt !== raw.expiresAt
+        || current.userKey.encKey !== raw.userKey.encKey || current.userKey.macKey !== raw.userKey.macKey
+        || current.account.userId !== raw.account.userId) throw new Error('迁移已取消，来源账户会话已变更');
+    };
+    return { session, assertCurrent };
   }
 
   async nextExpiry(): Promise<number | null> {

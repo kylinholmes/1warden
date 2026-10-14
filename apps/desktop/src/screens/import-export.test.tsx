@@ -10,7 +10,8 @@ const roots: Array<() => Promise<void>> = [];
 afterEach(async () => { for (const dispose of roots.splice(0)) await dispose(); });
 async function mount(overrides: Partial<ApplicationClient> = {}, props: Record<string, unknown> = {}) {
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
-  const client = { getSnapshot: () => ({ ...EMPTY_SNAPSHOT, status: 'unlocked' }), subscribe: () => () => {},
+  const snapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked' as const };
+  const client = { getSnapshot: () => snapshot, subscribe: () => () => {},
     capabilities: { native: true, browser: false, saveAttachments: true }, ...overrides } as ApplicationClient;
   await act(() => root.render(createElement(StrictMode, null, createElement(ImportScreen, { client, onImported: () => {}, ...props }))));
   roots.push(async () => { await act(() => root.unmount()); host.remove(); });
@@ -26,6 +27,59 @@ function input(host: HTMLElement, label: string, value: string) {
   Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
   field.dispatchEvent(new Event('input', { bubbles: true }));
 }
+const preview = { fileName: 'backup.json', format: 'bitwarden-json' as const, formatLabel: 'JSON', total: 2,
+  byType: { login: 2 }, folders: 0, skipped: [] };
+it('keeps a partial import retryable and always skips existing records on retry', async () => {
+  const importData = vi.fn().mockResolvedValueOnce({ created: 1, skippedExisting: 0, failed: [{ name: 'Second', reason: '网络中断' }] })
+    .mockResolvedValueOnce({ created: 1, skippedExisting: 1, failed: [] });
+  const { host, click } = await mount({ parseImport: async () => preview, importData },
+    { droppedFile: { name: 'backup.json', dataBase64: 'YWJj' } });
+  const checkbox = host.querySelector<HTMLInputElement>('input[aria-label="跳过已有条目"]');
+  expect(checkbox?.checked).toBe(true);
+  await act(() => checkbox!.click());
+  await click('导入这 2 条');
+  expect(importData.mock.calls[0]![0]).toMatchObject({ skipExisting: false });
+  expect(host.textContent).toContain('网络中断');
+  await click('跳过已有条目并重试');
+  expect(importData.mock.calls[1]![0]).toMatchObject({ dataBase64: 'YWJj', skipExisting: true });
+  expect(host.textContent).toContain('已跳过 1 条已有条目');
+});
+it('offers only other unlocked accounts and imports into the displayed current account', async () => {
+  const target = { serverUrl: 'https://target.example', email: 'target@example.com', userId: 'target', kdf: { kdf: 0 as const, iterations: 1 } };
+  const source = { serverUrl: 'https://source.example', email: 'source@example.com' };
+  const importAccount = vi.fn(async () => ({ created: 2, skippedExisting: 0, failed: [] }));
+  const previewAccountImport = vi.fn(async () => ({ ...preview, warnings: ['附件需要单独迁移'] }));
+  const snapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked' as const, account: target,
+    unlockedAccounts: [JSON.stringify([target.serverUrl, target.email]), JSON.stringify([source.serverUrl, source.email])] };
+  const { host, click } = await mount({ getSnapshot: () => snapshot,
+    previewAccountImport, importAccount });
+  await click('从其他账户迁移');
+  expect(host.textContent).toContain('target@example.com');
+  const selector = host.querySelector<HTMLButtonElement>('[role="combobox"][aria-label="来源账户"]')!;
+  await act(() => selector.click());
+  expect(host.querySelectorAll('[role="option"]')).toHaveLength(1);
+  expect(host.querySelector('[role="option"]')?.textContent).toContain(source.email);
+  await act(() => selector.click());
+  await click('预览迁移');
+  expect(previewAccountImport).toHaveBeenCalledWith(source);
+  expect(host.textContent).toContain('附件需要单独迁移');
+  await click('导入这 2 条');
+  expect(importAccount).toHaveBeenCalledWith(source, { skipExisting: true });
+});
+it('blocks transfers while a bulk deletion preview is awaiting confirmation', async () => {
+  const account = { serverUrl: 'https://target.example', email: 'target@example.com', userId: 'target', kdf: { kdf: 0 as const, iterations: 1 } };
+  const snapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked' as const, account };
+  const commitBulkDelete = vi.fn(async () => ({ completed: 2, skipped: 0, failed: [] }));
+  const { host, click } = await mount({ getSnapshot: () => snapshot, commitBulkDelete,
+    previewBulkDelete: async () => ({ token: 'confirmed-target', scope: 'vault', count: 2, account }) });
+  await click('预览移到回收站');
+  expect(host.querySelector('[role="tabpanel"]')?.hasAttribute('inert')).toBe(true);
+  expect(host.querySelector<HTMLButtonElement>('#transfer-tab-export')?.disabled).toBe(true);
+  expect(commitBulkDelete).not.toHaveBeenCalled();
+  await click('确认移到回收站');
+  expect(commitBulkDelete).toHaveBeenCalledWith('confirmed-target');
+  expect(host.querySelector('[role="tabpanel"]')?.hasAttribute('inert')).toBe(false);
+});
 it('defaults export to encrypted JSON, validates confirmation, and distinguishes save cancellation', async () => {
   const exportVault = vi.fn(async () => ({ fileName: 'encrypted.json', dataBase64: 'YWJj', itemCount: 2, folderCount: 1, warnings: [] }));
   const saveFile = vi.fn(async () => ({ path: null }));

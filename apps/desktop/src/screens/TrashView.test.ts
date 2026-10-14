@@ -4,7 +4,7 @@ import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { NavDrawerProvider, summarise } from '@1warden/ui';
 import { blankEditorItem } from '../../../../packages/ui/src/item-editor-fields';
-import type { ApplicationClient } from '../application/types';
+import { EMPTY_SNAPSHOT, type ApplicationClient, type ApplicationSnapshot } from '../application/types';
 import { TrashView } from './TrashView';
 
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
@@ -13,6 +13,9 @@ let host: HTMLDivElement;
 const item = { ...summarise({ ...blankEditorItem(), id: 'trashed-fixture', name: 'Deleted fixture', deletedAt: '2026-01-01' }), restoreError: null };
 afterEach(async () => { if (root) await act(() => root.unmount()); host?.remove(); });
 async function mount(client: ApplicationClient) {
+  const snapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked' as const,
+    account: { email: 'trash@example.invalid', serverUrl: 'https://trash.test', userId: 'test', kdf: { kdf: 0 as const, iterations: 1 } } };
+  client = Object.assign({ getSnapshot: () => snapshot, subscribe: () => () => {} }, client);
   host = document.createElement('div'); document.body.append(host); root = createRoot(host);
   await act(async () => { root.render(createElement(NavDrawerProvider, null, createElement(TrashView, { client, onBack() {} }))); });
 }
@@ -61,4 +64,38 @@ it('explains unreadable records without blocking restoration of healthy records'
   expect(host.textContent).toContain('已恢复「Deleted fixture」');
   expect(host.querySelectorAll('ul.card > li')).toHaveLength(1);
   expect(host.textContent).toContain(broken.restoreError);
+});
+
+it('refreshes the trash list after explicit empty-trash confirmation and prevents simultaneous restoration', async () => {
+  const listTrash = vi.fn().mockResolvedValueOnce([item]).mockResolvedValue([]);
+  const previewBulkDelete = vi.fn().mockResolvedValue({ token: 'trash-token', scope: 'trash', count: 1,
+    account: { email: 'trash@example.invalid', serverUrl: 'https://trash.test' } });
+  const commitBulkDelete = vi.fn().mockResolvedValue({ completed: 1, skipped: 0, failed: [] });
+  const restoreItem = vi.fn();
+  await mount({ listTrash, previewBulkDelete, commitBulkDelete, restoreItem } as unknown as ApplicationClient);
+  expect(commitBulkDelete).not.toHaveBeenCalled();
+  await act(async () => button('预览清空回收站').click());
+  expect(button('恢复').disabled).toBe(true);
+  await act(() => host.querySelector<HTMLInputElement>('input[type="checkbox"]')!.click());
+  await act(async () => button('确认永久删除').click());
+  expect(commitBulkDelete).toHaveBeenCalledExactlyOnceWith('trash-token');
+  expect(listTrash).toHaveBeenCalledTimes(2);
+  expect(host.textContent).toContain('回收站为空');
+  expect(host.textContent).toContain('已永久删除 1 条');
+  expect(restoreItem).not.toHaveBeenCalled();
+});
+
+it('discards old-account trash and reloads when the same application client changes account', async () => {
+  let snapshot: ApplicationSnapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked',
+    account: { email: 'old@example.invalid', serverUrl: 'https://trash.test', userId: 'old', kdf: { kdf: 0, iterations: 1 } } };
+  const listeners = new Set<() => void>();
+  let resolve!: (value: typeof item[]) => void;
+  const listTrash = vi.fn().mockReturnValueOnce(new Promise<typeof item[]>(yes => { resolve = yes; })).mockResolvedValue([]);
+  await mount({ listTrash, getSnapshot: () => snapshot,
+    subscribe: (listener: () => void) => { listeners.add(listener); return () => listeners.delete(listener); } } as unknown as ApplicationClient);
+  await act(() => { snapshot = { ...snapshot, account: { ...snapshot.account!, email: 'new@example.invalid', userId: 'new' } }; listeners.forEach(listener => listener()); });
+  await act(async () => resolve([item]));
+  expect(host.textContent).not.toContain('Deleted fixture');
+  expect(host.textContent).toContain('回收站为空');
+  expect(listTrash).toHaveBeenCalledTimes(2);
 });

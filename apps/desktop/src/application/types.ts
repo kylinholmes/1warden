@@ -3,6 +3,7 @@ import type {
   UserProfile, ProfilePreferences, ProfileDeviceInput, ProfileSettings, AccountInfo, Attachment, CardFields, ConnectParams, IdentityFields, OrganizationReport,
   OrganizationMergeRequest, OrganizationMergePreview, OrganizationMergeCommit, OrganizationMergeResult, OrganizationMergeReveal,
   BankAccountFields, DriversLicenseFields, PassportFields, ExportFormat, ImportFormatId, LoginUri, SessionStatus, VaultFolder, VaultItem,
+  BulkDeleteScope, BulkDeletePreview, BulkDeleteResult,
 } from '@1warden/vault';
 import type { ImportOutcome, ImportPreview, ItemSummary, ReportBrief } from '@1warden/ui';
 
@@ -75,6 +76,7 @@ export interface ImportFile {
   dataBase64: string;
   format: ImportFormatId;
   password?: string;
+  skipExisting?: boolean;
 }
 
 export interface ExportRequest { format: ExportFormat; password?: string }
@@ -124,6 +126,8 @@ export interface ApplicationService {
   listTrash(): Promise<TrashItemSummary[]>;
   restoreItem(id: string): Promise<void>;
   deletePermanently(id: string): Promise<void>;
+  previewBulkDelete(scope: BulkDeleteScope): Promise<BulkDeletePreview>;
+  commitBulkDelete(token: string): Promise<BulkDeleteResult>;
   createFolder(name: string): Promise<VaultFolder>;
   renameFolder(id: string, name: string): Promise<void>;
   deleteFolder(id: string): Promise<void>;
@@ -143,6 +147,8 @@ export interface ApplicationService {
   exportVault(request: ExportRequest): Promise<ExportFile>;
   parseImport(file: ImportFile): Promise<ImportPreview>;
   importData(file: ImportFile): Promise<ImportOutcome>;
+  previewAccountImport(source: AccountTarget): Promise<ImportPreview>;
+  importAccount(source: AccountTarget, options: { skipExisting: boolean }): Promise<ImportOutcome>;
 }
 
 export interface BrowserActions {
