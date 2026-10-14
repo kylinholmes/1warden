@@ -66,7 +66,7 @@
 - [x] Exercise synthetic export/import round trips and browser drop interactions.
 - [ ] Manually verify a real Finder drop: native build, ticket rejection and event/adapter tests pass, but this environment did not deliver an OS drop from synthetic pointer input. See ignored `.dev/drop-native-smoke/report.json` for the isolated test route.
 - [x] Request independent review and fix findings.
-- [ ] Commit/push and observe main CI and automatic release.
+- [x] Commit/push and observe main CI and automatic release.
 
 ## Verification evidence
 
@@ -77,3 +77,10 @@
 - Local Vaultwarden at `https://localhost:8443`: 22 synthetic registration/write/export/import/fresh-sync/cleanup checks passed, including archive state, passkeys and password history.
 - Official pinned Bitwarden CLI accepts our encrypted JSON and CSV; its PBKDF2 and Argon2id encrypted exports import successfully.
 - Independent review found no remaining P1/P2 findings. Archive completeness, empty folders, native passkey metadata and completed/cancelled browser downloads were corrected during review.
+
+## Delivery
+
+- Main source: `31d1b6ce9f19863c8c59dbda76c4ef3113eef77c`. All eight CI/publish jobs succeeded: https://github.com/kylinholmes/1warden/actions/runs/38575280558 .
+- Automatically published `v0.2.3` after main checks passed: https://github.com/kylinholmes/1warden/releases/tag/v0.2.3 . Version commit `79ab232` was fast-forwarded locally.
+- CI exposed production-KDF test timeouts and one outdated navigation-title assertion. Fixed both; full local UI suite and the final CI run passed. Encryption strength and assertions remain intact.
+- Physical Finder drag remains the manual verification limitation described above.
