@@ -45,6 +45,7 @@ const SYNONYMS: Record<string, readonly string[]> = {
   extra: ['extra'],
   folder: ['grouping', 'folder', 'group', 'collection', 'vault', 'path', 'category'],
   favorite: ['favorite', 'favourite', 'starred', 'star', 'pinned', 'fav'],
+  reprompt: ['reprompt'],
   type: ['type', 'kind', 'item_type'],
   /** 自定义字段那一格 —— 只有 Bitwarden 有，但认出来能让它走同一条路 */
   fields: ['fields', 'custom_fields', 'extra_fields'],
@@ -152,6 +153,7 @@ export function parseGenericCsv(text: string, _format?: unknown): ImportResult {
 
   if (rows.length === 0) return { items: [], skipped: [] };
   const layout = layoutOf(rows);
+  const bitwarden = layout.headers.includes('loginuri');
 
   // 一个字段都认不出来 → 明确失败。硬导的话会得到一堆只有名字（或连名字都没有）的空条目
   if (layout.index.size === 0) {
@@ -165,6 +167,8 @@ export function parseGenericCsv(text: string, _format?: unknown): ImportResult {
     const i = layout.index.get(field);
     return i === undefined ? undefined : cells[i];
   };
+  const importedText = (value: string | undefined): string | null =>
+    bitwarden ? value === undefined || value === '' ? null : value : orNull(value);
 
   const items: ImportedItem[] = [];
   const skipped: ImportResult['skipped'] = [];
@@ -184,18 +188,19 @@ export function parseGenericCsv(text: string, _format?: unknown): ImportResult {
     }
 
     // 名字缺失时退而用用户名/网址做名字 —— 有名字总比一片空白强
-    const name = orNull(at(cells, 'name'))
-      ?? orNull(at(cells, 'username'))
-      ?? orNull(at(cells, 'uri'));
+    const name = importedText(at(cells, 'name'))
+      ?? importedText(at(cells, 'username'))
+      ?? importedText(at(cells, 'uri'));
     if (name === null) {
       skipped.push({ rowNumber, reason: '没有名称（也没有用户名或网址可当名称）' });
       continue;
     }
 
-    const username = orNull(at(cells, 'username'));
-    const password = orNull(at(cells, 'password'));
-    const totp = orNull(at(cells, 'totp'));
-    const uri = orNull(at(cells, 'uri'));
+    const username = importedText(at(cells, 'username'));
+    const password = importedText(at(cells, 'password'));
+    const totp = importedText(at(cells, 'totp'));
+    const uri = importedText(at(cells, 'uri'));
+    const uris = bitwarden && uri ? (parseCsv(uri)[0] ?? []).map(value => ({ uri: value, match: null })) : undefined;
 
     /*
      * 类型推断。
@@ -221,17 +226,19 @@ export function parseGenericCsv(text: string, _format?: unknown): ImportResult {
      * ⚠️ 早先只在**非登录**条目上回退到 `extra`，而 LastPass 导出的行
      * 全都是登录 —— 于是用户的备注整批丢掉，且不会有人报错。
      */
-    const notesCell = orNull(at(cells, 'notes')) ?? orNull(at(cells, 'extra'));
+    const notesCell = importedText(at(cells, 'notes')) ?? importedText(at(cells, 'extra'));
     // 笔记类条目：登录字段里的东西不能丢，挪进 notes（宁可放错地方，不可丢）
     const notes = type === 'login' ? notesCell : (notesCell ?? username ?? password);
 
     items.push({
       name,
       type,
-      folderName: orNull(at(cells, 'folder')),
+      folderName: importedText(at(cells, 'folder')),
       favorite: truthy(at(cells, 'favorite')),
+      ...(layout.index.has('reprompt') ? { reprompt: at(cells, 'reprompt') === '1' ? 1 : 0 } : {}),
       notes,
-      login: type === 'login' ? { username, password, totp, uri } : null,
+      login: type === 'login' ? { username, password, totp, uri: uris?.[0]?.uri ?? uri,
+        ...(uris && uris.length > 1 ? { uris } : {}) } : null,
       customFields: parseExtraFields(extra),
       rowNumber,
     });

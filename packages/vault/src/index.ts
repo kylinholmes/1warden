@@ -23,6 +23,8 @@ export * from './import-1pux';
 export * from './import-keepass';
 export * from './xml';
 export * from './import-dispatch';
+export * from './import-encrypted';
+export * from './export';
 export * from './cbor';
 export * from './passkey';
 export * from './passkey-match';

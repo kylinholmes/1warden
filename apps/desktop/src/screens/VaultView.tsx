@@ -1,4 +1,5 @@
 import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
+import { subscribeFileDrops, type DroppedFile } from '../file-drop';
 import { Sidebar } from '../components/VaultSidebar';
 import { primaryShortcut } from '../platform';
 import { useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
@@ -51,6 +52,8 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
   const session = useStoreSnapshot(subscribe, getSnapshot, getSnapshot);
   const toast = useToast();
   const viewStore = useLocalStore(() => {
+    const draggingFile = false;
+    const droppedFile = null as DroppedFile | null;
     const query = '';
     const category = ({ kind: 'all' }) as Category;
     const selectedId = (null) as string | null;
@@ -68,8 +71,36 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
     const search = (null) as { query: string; revision: number; items: ItemSummary[] } | null;
     const searchError = (null) as string | null;
     const searchAttempt = 0;
-    return { query, category, selectedId, mode, confirmDelete, settingsOpen, generatorOpen, folderError, sortOpen, sortBy, site, siteError, contextAttempt, search, searchError, searchAttempt };
+    return { draggingFile, droppedFile, query, category, selectedId, mode, confirmDelete, settingsOpen, generatorOpen, folderError, sortOpen, sortBy, site, siteError, contextAttempt, search, searchError, searchAttempt };
   });
+  const [draggingFile, setDraggingFile] = useStoreField(viewStore, 'draggingFile');
+  const [droppedFile, setDroppedFile] = useStoreField(viewStore, 'droppedFile');
+  const transferBusy = useRef(false);
+  useEffect(() => {
+    const initial = client.getSnapshot();
+    const allowed = () => {
+      const current = client.getSnapshot();
+      const view = viewStore.getState();
+      return current.status === 'unlocked' && current.account?.serverUrl === initial.account?.serverUrl
+        && current.account?.email === initial.account?.email && view.mode.kind === 'browse'
+        && !view.settingsOpen && !view.generatorOpen && !view.confirmDelete && !transferBusy.current;
+    };
+    return subscribeFileDrops({
+      onDragging: setDraggingFile,
+      onDropStart() {
+        if (!allowed()) {
+          toast.show({ tone: 'warning', message: transferBusy.current ? '正在导入或导出，请完成后再拖入文件' : '请先完成当前编辑或关闭弹窗，再拖入文件' });
+          return false;
+        }
+        return allowed;
+      },
+      onDrop(file) {
+        if (!allowed()) return;
+        setCategory({ kind: 'import' }); setSelectedId(null); setDroppedFile(file);
+      },
+      onError: message => toast.show({ tone: 'danger', message }),
+    });
+  }, [client]);
   const [query, setQuery] = useStoreField(viewStore, 'query');
   const [category, setCategory] = useStoreField(viewStore, 'category');
   const [selectedId, setSelectedId] = useStoreField(viewStore, 'selectedId');
@@ -280,7 +311,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
     function onKey(e: KeyboardEvent) {
       // 浮层开着时这些快捷键全部让路：焦点在浮层里，
       // 而 ⌘F 会把焦点抢到背后的搜索框上 —— 那就是焦点跑到模态外面去了
-      if (overlayOpen) return;
+      if (overlayOpen || (transferBusy.current && e.key.toLowerCase() !== 'l')) return;
       if (!(e.metaKey || e.ctrlKey)) return;
       if (e.key.toLowerCase() === 'f') {
         e.preventDefault();
@@ -302,7 +333,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
     <Sidebar
       folders={folders}
       category={category}
-      onSelect={(c) => { setCategory(c); setSelectedId(null); closeEditor(); }}
+      onSelect={(c) => { if (transferBusy.current) { toast.show({ tone: 'neutral', message: '正在导入或导出，请稍候' }); return; } setCategory(c); setSelectedId(null); closeEditor(); }}
       counts={{ all: items.length, favorites: items.filter((i) => i.favorite).length }}
       profile={session.profile}
       unlockedAccounts={session.unlockedAccounts ?? []}
@@ -339,6 +370,10 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
     <NavDrawerProvider>
     <div className="screen-in vault-shell app-shell h-full">
       {sidebar}
+      {draggingFile && <div role="status" className="pointer-events-none fixed inset-3 z-[100] grid place-items-center rounded-[var(--radius-md)] border-2 border-dashed border-[var(--accent)] bg-[var(--surface-paper)]/95">
+        <div className="text-center"><p className="text-lg font-medium">松开文件，预览导入内容</p>
+          <p className="mt-2 text-sm text-[var(--ink-secondary)]">一次一个文件，最大 50 MiB</p></div>
+      </div>}
 
       {fullWidth ? (
         <div className="below-titlebar flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
@@ -349,7 +384,8 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
           : category.kind === 'profile' ? <ProfilePage client={client} onBack={() => setCategory({ kind: 'all' })} /> : category.kind === 'security' ? (
             <SecurityReportView client={client} onBack={() => setCategory({ kind: 'all' })} />
           ) : (
-            <ImportScreen client={client} onImported={() => {}} onBack={() => setCategory({ kind: 'all' })} />
+            <ImportScreen client={client} onImported={() => {}} onBack={() => { if (!transferBusy.current) setCategory({ kind: 'all' }); }}
+              droppedFile={droppedFile} onDropConsumed={() => setDroppedFile(null)} onBusyChange={busy => { transferBusy.current = busy; }} />
           )}
         </div>
       ) : (

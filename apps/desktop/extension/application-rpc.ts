@@ -95,7 +95,8 @@ const string = (v: unknown) => typeof v === 'string';
 const number = (v: unknown) => typeof v === 'number' && Number.isFinite(v);
 const none = (args: unknown[]) => args.length === 0;
 const strings = (count: number) => (args: unknown[]) => args.length === count && args.every(string);
-const file = (v: unknown) => object(v) && string(v['name']) && string(v['dataBase64']) && string(v['format']);
+const file = (v: unknown) => object(v) && string(v['name']) && string(v['dataBase64']) && string(v['format'])
+  && (v['password'] === undefined || string(v['password']));
 const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
   snapshot: none,
   sync: none,
@@ -142,6 +143,8 @@ const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
   revealMergeValue: (a) => a.length === 1 && object(a[0]) && string(a[0]['token']) && string(a[0]['itemId'])
     && ['password', 'totp'].includes(String(a[0]['fieldKey'])),
   uploadAttachment: strings(3), deleteAttachment: strings(2), removePasskey: strings(2), clearPasswordHistory: strings(1),
+  exportVault: (a) => a.length === 1 && object(a[0]) && ['encrypted-json', 'json', 'csv'].includes(String(a[0]['format']))
+    && (a[0]['password'] === undefined || string(a[0]['password'])),
   checkBreaches: none, parseImport: (a) => a.length === 1 && file(a[0]), importData: (a) => a.length === 1 && file(a[0]),
 };
 
@@ -197,6 +200,7 @@ function invoke(service: ApplicationService, request: ApplicationRequest): Promi
     case 'revealMergeValue': return service.revealMergeValue(...request.args);
     case 'mergeItems': return service.mergeItems(...request.args);
     case 'checkBreaches': return service.checkBreaches(...request.args);
+    case 'exportVault': return service.exportVault(...request.args);
     case 'parseImport': return service.parseImport(...request.args);
     case 'importData': return service.importData(...request.args);
   }

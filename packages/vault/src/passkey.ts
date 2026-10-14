@@ -49,9 +49,10 @@ export interface StoredPasskey {
   sourceId?: string;
   /** base64url 编码的凭据 ID */
   credentialId: string;
-  keyType: 'public-key';
-  keyAlgorithm: 'ECDSA';
-  keyCurve: 'P-256';
+  /** Preserve native algorithm metadata even when this authenticator cannot use it. */
+  keyType: string;
+  keyAlgorithm: string;
+  keyCurve: string;
   /** base64url 编码的 **PKCS#8** 私钥 */
   keyValue: string;
   rpId: string;

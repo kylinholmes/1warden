@@ -10,7 +10,7 @@ export const APPLICATION_METHODS = [
   'getItem', 'getDraft', 'saveProfile', 'savePreferences', 'recordDevice', 'saveItem', 'toggleFavorite', 'moveToTrash', 'listTrash', 'restoreItem', 'deletePermanently',
   'createFolder', 'renameFolder', 'deleteFolder', 'moveToFolder', 'reveal', 'totp', 'downloadAttachment',
   'uploadAttachment', 'deleteAttachment', 'removePasskey', 'clearPasswordHistory',
-  'securityReport', 'organizationReport', 'previewMerge', 'revealMergeValue', 'mergeItems', 'checkBreaches', 'parseImport', 'importData',
+  'securityReport', 'organizationReport', 'previewMerge', 'revealMergeValue', 'mergeItems', 'checkBreaches', 'exportVault', 'parseImport', 'importData',
 ] as const satisfies readonly ApplicationMethod[];
 
 const MUTATIONS = new Set<ApplicationMethod>([

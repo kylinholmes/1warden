@@ -29,6 +29,18 @@ describe('application message authority', () => {
 });
 
 describe('application dispatcher', () => {
+  it('validates export formats and passwords before dispatching the explicit export operation', async () => {
+    const requests: unknown[] = [];
+    const dispatch = createApplicationDispatcher({ exportVault: async (request: unknown) => { requests.push(request); return { fileName: 'backup.json' }; } } as unknown as ApplicationService);
+    for (const request of [{ format: 'unknown' }, { format: 'json', password: 1 }, null]) {
+      await expect(dispatch({ method: 'exportVault', args: [request] })).rejects.toThrow(/无效/);
+    }
+    expect(requests).toEqual([]);
+    await expect(dispatch({ method: 'exportVault', args: [{ format: 'encrypted-json', password: 'independent-password' }] })).resolves.toEqual({ fileName: 'backup.json' });
+    expect(requests).toEqual([{ format: 'encrypted-json', password: 'independent-password' }]);
+    await expect(dispatch({ method: 'parseImport', args: [{ name: 'backup.json', dataBase64: '', format: 'auto', password: 1 }] })).rejects.toThrow(/无效/);
+  });
+
   it('validates merge requests and treats commit as a published mutation', async () => {
     const calls: unknown[] = []; let changed = 0;
     const dispatch = createApplicationDispatcher({

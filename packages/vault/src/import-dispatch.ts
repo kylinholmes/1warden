@@ -21,6 +21,7 @@ import { parseBitwardenJson, parse1Pif, detectJsonFormat } from './import-json';
 import { parse1Pux, looksLike1Pux } from './import-1pux';
 import { parseKeePassXml, looksLikeKeePassXml } from './import-keepass';
 import type { ImportResult } from './import';
+import { decryptJsonExport, isEncryptedJsonExport } from './import-encrypted';
 
 export type ImportFormatId =
   | 'auto'
@@ -48,7 +49,7 @@ export const IMPORT_FORMATS: readonly ImportFormat[] = [
   { id: 'auto', label: '自动识别' },
   { id: '1pux', label: '1Password 导出（.1pux）', binary: true },
   { id: '1pif', label: '1Password 旧版导出（.1pif）' },
-  { id: 'bitwarden-json', label: 'Bitwarden JSON（未加密）' },
+  { id: 'bitwarden-json', label: 'Bitwarden JSON（含密码加密导出）' },
   { id: 'bitwarden-csv', label: 'Bitwarden CSV' },
   { id: 'keepass2', label: 'KeePass 2 XML' },
   { id: 'csv', label: '其它 CSV（Chrome / Edge / LastPass / Excel …）' },
@@ -82,7 +83,8 @@ export function detectImportFormat(data: Uint8Array): ImportFormatId | null {
   // XML 要先判 —— 它既不是 JSON 也不是 CSV，落到后面只会得到「认不出」
   if (looksLikeKeePassXml(head)) return 'keepass2';
 
-  const json = detectJsonFormat(head);
+  // JSON must be parsed in full: a 4096-byte prefix is usually not valid JSON.
+  const json = detectJsonFormat(head.trimStart().startsWith('{') ? utf8(data) : head);
   if (json?.id === 'bitwarden') return 'bitwarden-json';
   if (json?.id === '1pif') return '1pif';
 
@@ -96,7 +98,7 @@ export function detectImportFormat(data: Uint8Array): ImportFormatId | null {
  *
  * `format` 不传或传 `'auto'` 时自动识别。
  */
-export async function parseImport(data: Uint8Array, format?: ImportFormatId): Promise<ImportResult> {
+export async function parseImport(data: Uint8Array, format?: ImportFormatId, password?: string): Promise<ImportResult> {
   if (data.byteLength === 0) {
     return { items: [], skipped: [{ rowNumber: 1, reason: '这个文件是空的' }] };
   }
@@ -119,7 +121,7 @@ export async function parseImport(data: Uint8Array, format?: ImportFormatId): Pr
     case '1pif':
       return parse1Pif(utf8(data));
     case 'bitwarden-json':
-      return parseBitwardenJson(utf8(data));
+      return parseBitwardenJson(isEncryptedJsonExport(data) ? await decryptJsonExport(data, password) : utf8(data));
     case 'bitwarden-csv':
       return parseBitwardenCsv(utf8(data));
     case 'keepass2':

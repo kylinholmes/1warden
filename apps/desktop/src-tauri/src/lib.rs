@@ -44,6 +44,8 @@ mod autotype;
 #[cfg(desktop)]
 mod save;
 #[cfg(desktop)]
+mod dropped_file;
+#[cfg(desktop)]
 mod website;
 mod hotkey;
 #[cfg(target_os = "windows")]
@@ -133,6 +135,8 @@ fn quick_open_main(app: tauri::AppHandle) {
 pub fn run() {
     let builder = tauri::Builder::default()
         .on_window_event(|window, event| {
+            #[cfg(desktop)]
+            dropped_file::on_window_event(window, event);
             if window.label() == "main" && matches!(event, tauri::WindowEvent::Destroyed) {
                 if let Some(sockets) = window.app_handle().try_state::<websocket::WebSocketState>() {
                     sockets.close_all();
@@ -198,6 +202,8 @@ pub fn run() {
             #[cfg(desktop)]
             save::save_file,
             #[cfg(desktop)]
+            dropped_file::claim_dropped_file,
+            #[cfg(desktop)]
             website::open_website,
             #[cfg(target_os = "macos")]
             biometric::biometric_status,
@@ -219,6 +225,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 app.manage(quick::QuickState::new(dir.join("quick-search.json")));
+                app.manage(dropped_file::DroppedFileState::default());
                 quick::update_shortcut(app.handle());
             }
 

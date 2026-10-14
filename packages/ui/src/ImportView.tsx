@@ -41,6 +41,7 @@ import { Select } from './Select';
 /** 预览要显示的东西 —— 全部**不含明文** */
 export interface ImportPreview {
   fileName: string;
+  needsPassword?: boolean;
   format: ImportFormatId;
   formatLabel: string;
   total: number;
@@ -63,11 +64,13 @@ export function ImportView({
   error,
   hasFile,
   autoFormat,
+  reading = false,
   onPick,
   onFormatChange,
   onRun,
   onReset,
 }: {
+  reading?: boolean;
   preview: ImportPreview | null;
   /** 导入中。桌面端和扩展端都由自己的动作产生 */
   progress: { done: number | null; total: number } | null;
@@ -83,7 +86,7 @@ export function ImportView({
   onReset: () => void;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
-  const busy = progress !== null;
+  const busy = progress !== null || reading;
 
   return (
     <div>
@@ -93,6 +96,7 @@ export function ImportView({
         LastPass、Dashlane 等常见导出与 Excel 存出来的 CSV。
         数据只在本地解析，<strong className="font-medium text-[var(--ink-primary)]">
         文件不会上传到任何地方</strong>。
+        导入会创建新记录，创建和更新时间由服务器重新生成。
       </p>
 
       {error && (
@@ -105,6 +109,7 @@ export function ImportView({
       <input
         ref={fileRef}
         type="file"
+        disabled={busy}
         accept=".csv,.json,.1pux,.1pif,.xml,.txt,text/csv,application/json,text/xml,application/xml"
         className="hidden"
         onChange={(e) => {
@@ -144,25 +149,20 @@ export function ImportView({
         ) : preview !== null ? (
           <Preview preview={preview} disabled={busy} onRun={onRun} onCancel={onReset} />
         ) : (
-          <PickStep hasFile={hasFile} onChoose={() => fileRef.current?.click()} />
+          <PickStep disabled={busy} hasFile={hasFile} onChoose={() => fileRef.current?.click()} />
         )}
       </div>
     </div>
   );
 }
 
-/**
- * 选文件。
- *
- * 做成一整块可点的区域，而不是一个小按钮：导入是个「把文件给它」的动作，
- * 目标越大越好找。措辞里写清楚**是点它选文件** —— 没有实现的拖放
- * 就不摆出拖放的暗示，那只会让人把文件拖进来然后什么都没发生。
- */
-function PickStep({ hasFile, onChoose }: { hasFile: boolean; onChoose: () => void }) {
+/** File picker and window-wide drag/drop lead to the same preview. */
+function PickStep({ hasFile, disabled, onChoose }: { hasFile: boolean; disabled: boolean; onChoose: () => void }) {
   return (
     <button
       type="button"
       onClick={onChoose}
+      disabled={disabled}
       className="group flex w-full flex-col items-center gap-3 rounded-[var(--radius-md)] border border-dashed border-[var(--border-strong)] bg-[var(--surface-well)] px-6 py-10 transition-colors duration-[var(--dur-fast)] hover:border-[var(--accent)] hover:bg-[var(--accent-tint)]"
     >
       <span className="grid h-11 w-11 place-items-center rounded-full bg-[var(--surface-paper)] text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] group-hover:text-[var(--accent)]">
@@ -170,7 +170,7 @@ function PickStep({ hasFile, onChoose }: { hasFile: boolean; onChoose: () => voi
       </span>
       <span className="text-md font-medium">{hasFile ? '换一个文件' : '选择要导入的文件'}</span>
       <span className="text-xs text-[var(--ink-tertiary)]">
-        点这里浏览 —— 选好之后会先给你看一遍再导入
+        点击选择或拖入文件，先预览再确认导入（最大 50 MiB）
       </span>
     </button>
   );
@@ -203,7 +203,7 @@ function Result({ created, failed, onAgain }: {
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--safe)] text-[var(--surface-paper)]">
           <IconCheck size={14} />
         </span>
-        已导入 <span className="font-semibold tabular-nums">{created}</span> 条
+        {created === 0 && failed.length === 0 ? '文件夹导入完成' : <>已导入 <span className="font-semibold tabular-nums">{created}</span> 条</>}
       </p>
 
       {/*
@@ -289,7 +289,7 @@ function Preview({ preview, disabled, onRun, onCancel }: {
 
       <div className="flex items-center gap-2 px-4 py-3.5">
         <button onClick={onRun} disabled={disabled} className="btn btn-primary">
-          导入这 {preview.total} 条
+          {preview.total > 0 ? `导入这 ${preview.total} 条` : `导入 ${preview.folders} 个文件夹`}
         </button>
         <button onClick={onCancel} disabled={disabled} className="btn btn-quiet">换一个文件</button>
       </div>

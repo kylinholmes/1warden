@@ -1,6 +1,7 @@
 import { createApplicationClient } from '../src/application/client';
 import type { ApplicationClient, ApplicationMethod, ApplicationRequest, ApplicationService, SiteContext } from '../src/application/types';
 import { ext } from './ext-api';
+import { downloadFile } from './download-file';
 import { LOCAL_READS, type SerializedError } from './application-rpc';
 import { createConnectionDraftStore } from './connection-draft';
 import { lockedAccount } from '../src/application/account-target';
@@ -70,6 +71,7 @@ export function createExtensionApplicationClient(): ApplicationClient {
     securityReport: (...args) => call('securityReport', ...args), organizationReport: () => call('organizationReport'), checkBreaches: () => call('checkBreaches'),
     previewMerge: (...args) => call('previewMerge', ...args), mergeItems: (...args) => call('mergeItems', ...args),
     revealMergeValue: (...args) => call('revealMergeValue', ...args),
+    exportVault: (...args) => call('exportVault', ...args),
     parseImport: (...args) => call('parseImport', ...args), importData: (...args) => call('importData', ...args),
   };
   const client = createApplicationClient(service, {
@@ -80,17 +82,7 @@ export function createExtensionApplicationClient(): ApplicationClient {
       saveCapture: (tabId) => request({ type: '1warden:save-capture', tabId, application: true }),
       dismissCapture: (tabId) => request({ type: '1warden:dismiss-capture', tabId, application: true }),
     },
-    async saveFile(fileName, dataBase64) {
-      const bytes = Uint8Array.from(atob(dataBase64), (c) => c.charCodeAt(0));
-      const url = URL.createObjectURL(new Blob([bytes]));
-      try {
-        await ext.downloads.download({ url, filename: fileName.replace(/[\\/]/g, '_'), saveAs: true });
-        return { path: fileName };
-      } finally {
-        // The browser has accepted the download by now and owns its response stream.
-        URL.revokeObjectURL(url);
-      }
-    },
+    saveFile: (fileName, dataBase64) => downloadFile(ext.downloads, fileName, dataBase64),
     subscribeRemote(listener) {
       const onMessage = (message: unknown, sender: chrome.runtime.MessageSender) => {
         if (sender.id === ext.runtime.id && sender.tab === undefined && typeof message === 'object' && message !== null

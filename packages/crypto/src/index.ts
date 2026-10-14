@@ -1,5 +1,6 @@
 export * from './bytes';
 export * from './kdf';
+export * from './password-kdf';
 export * from './encstring';
 export * from './keys';
 export * from './rsa';

@@ -114,7 +114,7 @@ function SidebarContent(props: SidebarProps) {
           { key: 'security', label: '安全报告', icon: <IconShield size={16} /> },
           { key: 'organization', label: '整理与分析', icon: <IconSearch size={16} /> },
           { key: 'generator', label: '生成器', icon: <IconDice size={16} /> },
-          { key: 'import', label: '导入', icon: <IconImport size={16} /> },
+          { key: 'import', label: '导入 / 导出', icon: <IconImport size={16} /> },
           { key: 'trash', label: '回收站', icon: <IconTrash size={16} /> },
         ] },
         ...(props.showTypes && props.typeCounts.length ? [{

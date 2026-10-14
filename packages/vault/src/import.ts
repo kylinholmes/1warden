@@ -20,15 +20,17 @@
  *    用户不会发现少了什么，直到某天要登录某个网站。
  */
 import { parseGenericCsv } from './import-csv';
-import type { BankAccountFields, DriversLicenseFields, PassportFields } from './model';
+import type { BankAccountFields, DriversLicenseFields, PassportFields, PasswordHistoryEntry, SecureNoteFields } from './model';
+import type { StoredPasskey } from './passkey';
 
 export type ImportedType = 'login' | 'secureNote' | 'card' | 'identity' | 'sshKey' | 'bankAccount' | 'driversLicense' | 'passport';
 
 export interface ImportedField {
   name: string;
   value: string;
-  /** 0=文本 1=隐藏 —— 与 Bitwarden 的字段类型一致 */
-  type: 0 | 1;
+  /** 0=文本 1=隐藏 2=布尔 3=关联 */
+  type: 0 | 1 | 2 | 3;
+  linkedId?: number | null;
 }
 
 /** 一条网址及其匹配方式。`match` 的含义见 model.ts 的 `LoginUri` */
@@ -38,6 +40,9 @@ export interface ImportedUri {
 }
 
 export interface ImportedLogin {
+  autofillOnPageLoad?: boolean | null;
+  passwordRevisionDate?: string | null;
+  fido2Credentials?: StoredPasskey[];
   username: string | null;
   password: string | null;
   totp: string | null;
@@ -91,6 +96,12 @@ export interface ImportedIdentity {
 }
 
 export interface ImportedItem {
+  reprompt?: number;
+  createdAt?: string;
+  updatedAt?: string;
+  archivedAt?: string | null;
+  passwordHistory?: PasswordHistoryEntry[];
+  secureNote?: SecureNoteFields | null;
   name: string;
   type: ImportedType;
   folderName: string | null;
@@ -118,6 +129,8 @@ export interface ImportedItem {
 export interface ImportResult {
   items: ImportedItem[];
   skipped: { rowNumber: number; reason: string }[];
+  /** Includes empty folders in structured exports. */
+  folderNames?: string[];
 }
 
 /** CSV 里 type 列可能写名字也可能写数字 */

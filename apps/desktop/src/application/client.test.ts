@@ -11,6 +11,18 @@ function deferred<T>() {
 const unlocked: ApplicationSnapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked', revision: 1 };
 
 describe('application client lifecycle', () => {
+  it.each(['lock', 'switchAccount'] as const)('never returns an export generated before %s', async boundary => {
+    const exported = deferred<Awaited<ReturnType<ApplicationService['exportVault']>>>();
+    const client = createApplicationClient({ snapshot: async () => unlocked, exportVault: () => exported.promise,
+      lock: async () => {}, switchAccount: async () => {} } as unknown as ApplicationService, options);
+    await client.initialize();
+    const pending = client.exportVault({ format: 'json' });
+    const rejected = expect(pending).rejects.toThrow(/锁定|过期/);
+    if (boundary === 'lock') await client.lock(); else await client.switchAccount(null);
+    exported.resolve({ fileName: 'backup.json', dataBase64: 'secret', itemCount: 1, folderCount: 0, warnings: [] });
+    await rejected; client.dispose();
+  });
+
   it('does not publish an explicit merge secret across a lock boundary', async () => {
     const secret = deferred<string>();
     const client = createApplicationClient({ snapshot: async () => unlocked, revealMergeValue: () => secret.promise,

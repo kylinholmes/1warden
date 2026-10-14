@@ -19,6 +19,8 @@ import type {
   ImportResult, ImportedUri, ImportedSshKey,
 } from './import';
 import { emptyBankAccount, emptyDriversLicense, emptyPassport } from './model';
+import type { PasswordHistoryEntry } from './model';
+import type { StoredPasskey } from './passkey';
 
 export interface JsonFormatGuess {
   id: string;
@@ -55,8 +57,7 @@ export function detectJsonFormat(text: string): JsonFormatGuess | null {
 
 function str(v: unknown): string | null {
   if (typeof v !== 'string') return null;
-  const t = v.trim();
-  return t.length === 0 ? null : t;
+  return v;
 }
 
 function obj(v: unknown): Record<string, unknown> | null {
@@ -74,10 +75,36 @@ function fieldsOf(raw: unknown): ImportedField[] {
     return {
       name: str(o['name']) ?? '',
       value: typeof o['value'] === 'string' ? o['value'] : '',
-      // 只认 0/1，别的一律当文本 —— 写坏了会把可见字段变成隐藏
-      type: (type === 1 ? 1 : 0) as 0 | 1,
+      type: (type === 1 || type === 2 || type === 3 ? type : 0) as 0 | 1 | 2 | 3,
+      ...(typeof o['linkedId'] === 'number' ? { linkedId: o['linkedId'] } : {}),
     };
-  }).filter((f) => f.name.length > 0);
+  });
+}
+
+function passkeysOf(raw: unknown): StoredPasskey[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw new Error('通行密钥列表格式不正确');
+  const required = ['credentialId', 'keyType', 'keyAlgorithm', 'keyCurve', 'keyValue', 'rpId', 'counter', 'discoverable', 'creationDate'];
+  const optional = ['rpName', 'userHandle', 'userName', 'userDisplayName'];
+  return raw.map(value => {
+    const data = obj(value);
+    if (!data || required.some(key => typeof data[key] !== 'string')) throw new Error('通行密钥字段缺失或无法读取');
+    if (optional.some(key => data[key] != null && typeof data[key] !== 'string')) throw new Error('通行密钥字段无法读取');
+    return Object.fromEntries([...required, ...optional].filter(key => typeof data[key] === 'string')
+      .map(key => [key, data[key]])) as unknown as StoredPasskey;
+  });
+}
+
+function historyOf(raw: unknown): PasswordHistoryEntry[] {
+  if (raw == null) return [];
+  if (!Array.isArray(raw)) throw new Error('密码历史列表格式不正确');
+  return raw.map(value => {
+    const data = obj(value);
+    if (!data || typeof data['password'] !== 'string' || typeof data['lastUsedDate'] !== 'string') {
+      throw new Error('密码历史字段缺失或无法读取');
+    }
+    return { password: data['password'], lastUsedDate: data['lastUsedDate'] };
+  });
 }
 
 function cardOf(raw: unknown): ImportedCard | null {
@@ -154,9 +181,7 @@ function nativeFieldsOf<T extends { [K in keyof T]: string | null }>(raw: unknow
 /**
  * Bitwarden 的未加密 JSON 导出。
  *
- * ⚠️ **加密导出（`encrypted: true`）要明确拒绝**，而不是硬解。
- * 那种文件里是一整块密文，硬当普通 JSON 读会得到零条「成功导入」——
- * 用户以为导完了，其实什么都没有，而报告上一个字都没提。
+ * 密码保护文件先由异步 parseImport 解密，再交给本函数读取明文结构。
  */
 export function parseBitwardenJson(text: string): ImportResult {
   let root: Record<string, unknown>;
@@ -174,7 +199,7 @@ export function parseBitwardenJson(text: string): ImportResult {
       items: [],
       skipped: [{
         rowNumber: 1,
-        reason: '这是 Bitwarden 的**加密**导出，无法直接读取 —— 请在 Bitwarden 里重新导出一份未加密的 JSON（或 CSV）',
+        reason: '这是 Bitwarden 的加密导出，请通过导入页面输入独立的文件密码后读取',
       }],
     };
   }
@@ -200,7 +225,7 @@ export function parseBitwardenJson(text: string): ImportResult {
     }
 
     const name = str(o['name']);
-    if (name === null) {
+    if (name === null || !name.trim()) {
       skipped.push({ rowNumber, reason: '没有名称' });
       continue;
     }
@@ -213,7 +238,11 @@ export function parseBitwardenJson(text: string): ImportResult {
     }).filter((u) => u.uri.length > 0);
 
     let nativeFields: Pick<ImportedItem, 'bankAccount' | 'driversLicense' | 'passport'> = {};
+    let fido2Credentials: StoredPasskey[];
+    let passwordHistory: PasswordHistoryEntry[];
     try {
+      fido2Credentials = passkeysOf(loginRaw?.['fido2Credentials']);
+      passwordHistory = historyOf(o['passwordHistory']);
       if (type === 'bankAccount') nativeFields = { bankAccount: nativeFieldsOf(o['bankAccount'], emptyBankAccount()) };
       if (type === 'driversLicense') nativeFields = { driversLicense: nativeFieldsOf(o['driversLicense'], emptyDriversLicense()) };
       if (type === 'passport') nativeFields = { passport: nativeFieldsOf(o['passport'], emptyPassport()) };
@@ -227,6 +256,12 @@ export function parseBitwardenJson(text: string): ImportResult {
       type,
       folderName: folderName.get(str(o['folderId']) ?? '') ?? null,
       favorite: o['favorite'] === true,
+      reprompt: typeof o['reprompt'] === 'number' ? o['reprompt'] : 0,
+      ...(typeof o['creationDate'] === 'string' ? { createdAt: o['creationDate'] } : {}),
+      ...(typeof o['revisionDate'] === 'string' ? { updatedAt: o['revisionDate'] } : {}),
+      archivedAt: str(o['archivedDate']),
+      passwordHistory,
+      secureNote: type === 'secureNote' ? { type: typeof obj(o['secureNote'])?.['type'] === 'number' ? obj(o['secureNote'])!['type'] as number : 0 } : null,
       notes: str(o['notes']),
       login: type === 'login' && loginRaw !== null
         ? {
@@ -235,6 +270,9 @@ export function parseBitwardenJson(text: string): ImportResult {
           totp: str(loginRaw['totp']),
           uri: uris[0]?.uri ?? null,
           uris,
+          passwordRevisionDate: str(loginRaw['passwordRevisionDate']),
+          autofillOnPageLoad: typeof loginRaw['autofillOnPageLoad'] === 'boolean' ? loginRaw['autofillOnPageLoad'] : null,
+          fido2Credentials,
         }
         : null,
       card: type === 'card' ? cardOf(o['card']) : null,
@@ -246,7 +284,7 @@ export function parseBitwardenJson(text: string): ImportResult {
     });
   }
 
-  return { items, skipped };
+  return { items, skipped, folderNames: [...new Set(folderName.values())] };
 }
 
 /** 1PIF 的 `typeName` → 我们的类型 */

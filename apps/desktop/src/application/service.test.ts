@@ -2,7 +2,7 @@ import type { CipherDto } from '@1warden/api';
 import { describe, expect, it, vi } from 'vitest';
 import { VaultClient, decryptCipher, emptyLogin, emptyIdentity, emptyBankAccount, emptyDriversLicense, emptyPassport,
   buildProfileItem, buildPreferencesItem, parseProfileSettings, type VaultItem } from '@1warden/vault';
-import { concatBytes, deriveMasterKey, encryptBytes, encryptString, decryptString, makeUserKey, stretchMasterKey } from '@1warden/crypto';
+import { toBase64, fromBase64, concatBytes, deriveMasterKey, encryptBytes, encryptString, decryptString, makeUserKey, stretchMasterKey } from '@1warden/crypto';
 import { createVaultService, editableDraft, mergeEditableDraft } from './service';
 import { createProfileCache } from './profile-cache';
 
@@ -33,6 +33,54 @@ function restored(items = [record()], fetchImpl: typeof fetch = async () => { th
 }
 
 describe('application display boundary', () => {
+  it('exports individual records through an explicit operation without internal keys or profile records', async () => {
+    const item = { ...record(), card: null, sshKey: null, login: { ...record().login!, fido2Credentials: [] } };
+    const { service, client } = restored([item, { ...item, id: 'trash', deletedAt: '2026-01-01' },
+      { ...buildProfileItem({ displayName: 'Private profile', avatarDataUrl: null }), id: 'profile' }]);
+    vi.spyOn(client, 'readExportData').mockResolvedValue({ items: [...client.getSession().items], folders: [], organizationItems: 0 });
+    const exported = await service.exportVault({ format: 'json' });
+    const json = JSON.parse(new TextDecoder().decode(fromBase64(exported.dataBase64)));
+    expect(exported.itemCount).toBe(1);
+    expect(json.items).toHaveLength(1);
+    expect(json.items[0].login.password).toBe('login-secret');
+    for (const secret of ['wrapped-item-key', 'test-access-token', 'attachment-key', 'Private profile']) {
+      expect(JSON.stringify(json)).not.toContain(secret);
+    }
+    await service.lock();
+    await expect(service.exportVault({ format: 'json' })).rejects.toThrow(/解锁/);
+  });
+  it('refuses exporting an unverified or syncing vault', async () => {
+    const { service, client } = restored();
+    vi.spyOn(client, 'hasVerifiedSync').mockReturnValue(false);
+    await expect(service.exportVault({ format: 'json' })).rejects.toThrow(/同步/);
+    vi.spyOn(client, 'hasVerifiedSync').mockReturnValue(true);
+    vi.spyOn(client.getSession(), 'syncing', 'get').mockReturnValue(true);
+    await expect(service.exportVault({ format: 'json' })).rejects.toThrow(/同步/);
+  });
+  it('does not write a decrypted import if lock occurs during password derivation', async () => {
+    const { service, client } = restored([{ ...record(), card: null, sshKey: null, login: { ...record().login!, fido2Credentials: [] } }]);
+    vi.spyOn(client, 'readExportData').mockResolvedValue({ items: [...client.getSession().items], folders: [], organizationItems: 0 });
+    const exported = await service.exportVault({ format: 'encrypted-json', password: 'transfer-test-password' });
+    const importItems = vi.spyOn(client, 'importItems');
+    const importing = service.importData({ name: exported.fileName, dataBase64: exported.dataBase64, format: 'auto', password: 'transfer-test-password' });
+    const rejected = expect(importing).rejects.toThrow(/锁定|解锁/);
+    await service.lock(); await rejected;
+    expect(importItems).not.toHaveBeenCalled();
+  });
+  it('returns the detected import format, and requests a password before decrypting encrypted JSON', async () => {
+    const { service, client } = restored([{ ...record(), card: null, sshKey: null, login: { ...record().login!, fido2Credentials: [] } }]);
+    vi.spyOn(client, 'readExportData').mockResolvedValue({ items: [...client.getSession().items], folders: [], organizationItems: 0 });
+    const plain = await service.parseImport({ name: 'backup.json', format: 'auto', dataBase64: toBase64(new TextEncoder().encode(JSON.stringify({
+      encrypted: false, items: [{ type: 1, name: 'Imported', login: { username: 'user', password: 'secret' } }],
+    }))) });
+    expect(plain).toMatchObject({ total: 1, format: 'bitwarden-json' });
+    const encrypted = await service.exportVault({ format: 'encrypted-json', password: 'independent-export-password' });
+    const file = { name: encrypted.fileName, dataBase64: encrypted.dataBase64, format: 'auto' as const };
+    expect(await service.parseImport(file)).toMatchObject({ needsPassword: true, format: 'bitwarden-json' });
+    expect(await service.parseImport({ ...file, password: 'independent-export-password' })).toMatchObject({ total: 1, needsPassword: false });
+    await expect(service.parseImport({ ...file, password: 'wrong' })).rejects.toThrow(/密码/);
+  });
+
   it('runs organization analysis locally and returns no credential material or hidden/deleted records', async () => {
     const one = { ...record(), attachments: [], passwordHistory: [], card: null, sshKey: null,
       login: { ...record().login!, fido2Credentials: [], uris: [{ uri: 'https://example.com', match: null }] } };

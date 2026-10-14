@@ -2,7 +2,7 @@ import type { AccountTarget } from './account-target';
 import type {
   UserProfile, ProfilePreferences, ProfileDeviceInput, ProfileSettings, AccountInfo, Attachment, CardFields, ConnectParams, IdentityFields, OrganizationReport,
   OrganizationMergeRequest, OrganizationMergePreview, OrganizationMergeCommit, OrganizationMergeResult, OrganizationMergeReveal,
-  BankAccountFields, DriversLicenseFields, PassportFields, ImportFormatId, LoginUri, SessionStatus, VaultFolder, VaultItem,
+  BankAccountFields, DriversLicenseFields, PassportFields, ExportFormat, ImportFormatId, LoginUri, SessionStatus, VaultFolder, VaultItem,
 } from '@1warden/vault';
 import type { ImportOutcome, ImportPreview, ItemSummary, ReportBrief } from '@1warden/ui';
 
@@ -74,6 +74,16 @@ export interface ImportFile {
   name: string;
   dataBase64: string;
   format: ImportFormatId;
+  password?: string;
+}
+
+export interface ExportRequest { format: ExportFormat; password?: string }
+export interface ExportFile {
+  fileName: string;
+  dataBase64: string;
+  itemCount: number;
+  folderCount: number;
+  warnings: string[];
 }
 
 export interface SiteContext {
@@ -130,6 +140,7 @@ export interface ApplicationService {
   revealMergeValue(request: OrganizationMergeReveal): Promise<string>;
   mergeItems(request: OrganizationMergeCommit): Promise<OrganizationMergeResult>;
   checkBreaches(): Promise<ReportBrief['breached']>;
+  exportVault(request: ExportRequest): Promise<ExportFile>;
   parseImport(file: ImportFile): Promise<ImportPreview>;
   importData(file: ImportFile): Promise<ImportOutcome>;
 }

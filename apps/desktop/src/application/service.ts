@@ -2,7 +2,7 @@ import { lockedAccount } from './account-target';
 import {
   buildProfileItem, isProfileItem, parseProfile, selectProfileItem, profileRevision,
   buildPreferencesItem, buildDeviceItem, parseProfileSettings, validatePreferences,
-  buildReport, buildOrganizationReport, checkBreaches, hasTotp, IMPORT_FORMATS, parseImport, searchItems, totpCode,
+  buildReport, buildOrganizationReport, checkBreaches, hasTotp, IMPORT_FORMATS, parseImport, detectImportFormat, isEncryptedJsonExport, createVaultExport, searchItems, totpCode,
   retainItemMetadata, cipherTypeToItemType, type VaultClient, type VaultItem,
 } from '@1warden/vault';
 import { fromBase64, toBase64 } from '@1warden/crypto';
@@ -310,24 +310,47 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
     async revealMergeValue(request) { activeItems(); return guarded(() => client.revealMergeValue(request)); },
     async mergeItems(request) { activeItems(); return guarded(() => client.mergeItems(request)); },
     async checkBreaches() { return guarded(() => checkBreaches(activeItems())); },
+    async exportVault(request) {
+      return guarded(async () => {
+        const session = client.getSession();
+        if (!client.hasVerifiedSync() || session.syncing || client.syncError) {
+          throw new Error('请先完成同步，再导出保险库');
+        }
+        const data = await client.readExportData();
+        const result = await createVaultExport({ items: data.items, folders: data.folders, ...request });
+        if (data.organizationItems) result.warnings.push(`已排除 ${data.organizationItems} 条组织条目；本次仅导出个人保险库。`);
+        try {
+          return { fileName: result.filename, dataBase64: toBase64(result.bytes),
+            itemCount: result.itemCount, folderCount: result.folderCount, warnings: result.warnings };
+        } finally { result.bytes.fill(0); }
+      });
+    },
     async parseImport(file) {
-      const parsed = await guarded(() => parseImport(fromBase64(file.dataBase64), file.format));
+      const bytes = fromBase64(file.dataBase64);
+      const format = file.format === 'auto' ? detectImportFormat(bytes) ?? 'auto' : file.format;
+      const needsPassword = isEncryptedJsonExport(bytes) && file.password === undefined;
+      const parsed = await guarded(() => needsPassword
+        ? Promise.resolve({ items: [], skipped: [], folderNames: [] as string[] })
+        : parseImport(bytes, file.format, file.password));
       return {
-        fileName: file.name, format: file.format,
-        formatLabel: IMPORT_FORMATS.find((f) => f.id === file.format)?.label ?? file.format,
+        fileName: file.name, format, needsPassword,
+        formatLabel: IMPORT_FORMATS.find((f) => f.id === format)?.label ?? format,
         total: parsed.items.length,
         byType: parsed.items.reduce<Record<string, number>>((counts, i) => {
           counts[i.type] = (counts[i.type] ?? 0) + 1; return counts;
         }, {}),
-        folders: new Set(parsed.items.map((i) => i.folderName).filter((n) => n !== null)).size,
+        folders: new Set([...(parsed.folderNames ?? []), ...parsed.items.map((i) => i.folderName).filter((n) => n !== null)]).size,
         skipped: parsed.skipped,
       };
     },
     async importData(file) {
+      const session = client.getSession();
+      const key = session.getKey();
       return guarded(async () => {
-        const parsed = await parseImport(fromBase64(file.dataBase64), file.format);
+        const parsed = await parseImport(fromBase64(file.dataBase64), file.format, file.password);
+        if (session.getKey() !== key || !session.isUnlocked()) throw new Error('保险库已锁定，请重新解锁');
         activeItems();
-        return client.importItems(parsed.items);
+        return client.importItems(parsed.items, undefined, parsed.folderNames);
       });
     },
   };

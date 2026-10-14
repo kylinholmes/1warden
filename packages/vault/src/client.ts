@@ -967,7 +967,7 @@ export class VaultClient {
     // 已有条目：带上服务端的 revisionDate 做乐观并发控制。
     // 不带的话，两端同时修改会静默覆盖 —— 服务端不会拦
     const opts: Parameters<typeof encryptCipher>[2] = isNew
-      ? {}
+      ? (item.archivedAt ? { archivedDate: item.archivedAt } : {})
       : { lastKnownRevisionDate: item.updatedAt };
 
     /*
@@ -1151,6 +1151,24 @@ export class VaultClient {
       assertCurrent();
       this.removeLocally(id);
     });
+  }
+
+  /** Export includes archives, which deliberately never enter the browsing session. */
+  async readExportData(): Promise<{ items: VaultItem[]; folders: VaultFolder[]; organizationItems: number }> {
+    const assertCurrent = this.currentSessionGuard();
+    const raw = await syncVia(this.http);
+    assertCurrent();
+    const { active, archived } = partitionCiphers(raw.ciphers);
+    const candidates = [...active, ...archived];
+    const organizationItems = candidates.filter(cipher => cipher.organizationId).length;
+    const data = await this.withWriteKey(async key => {
+      // A failed decryption aborts the backup instead of silently dropping a record.
+      const items = await Promise.all(candidates.filter(cipher => !cipher.organizationId).map(cipher => decryptCipher(cipher, key)));
+      const folders = await Promise.all((raw.folders ?? []).map(folder => decryptFolder(folder, key)));
+      return { items, folders, organizationItems };
+    });
+    assertCurrent();
+    return data;
   }
 
   /** Deleted data is fetched explicitly and never mixed into the active session. */
@@ -1383,7 +1401,7 @@ export class VaultClient {
   // ── 导入 ──
 
   /**
-   * 批量导入（目前来自 CSV）。
+   * 批量导入已解析的记录与文件夹。
    *
    * ## 三条设计取向
    *
@@ -1397,12 +1415,15 @@ export class VaultClient {
   async importItems(
     items: readonly ImportedItem[],
     onProgress?: (done: number, total: number) => void,
+    folderNames: readonly string[] = [],
   ): Promise<{ created: number; failed: { name: string; reason: string }[] }> {
     const assertCurrent = this.currentSessionGuard();
+    const failed: { name: string; reason: string }[] = [];
+    const failedFolders = new Set<string>();
 
     // 文件夹：已有的按名字复用，缺的建出来
     const folderIdByName = new Map(this.session.folders.map((f) => [f.name, f.id]));
-    const wanted = [...new Set(items.map((i) => i.folderName).filter((n): n is string => n !== null))];
+    const wanted = [...new Set([...folderNames, ...items.map((i) => i.folderName).filter((n): n is string => n !== null)])];
     for (const name of wanted) {
       assertCurrent();
       if (folderIdByName.has(name)) continue;
@@ -1412,18 +1433,18 @@ export class VaultClient {
         folderIdByName.set(name, created.id);
       } catch {
         assertCurrent();
-        // 建文件夹失败不该让整批停下 —— 这些条目会变成「无文件夹」，
-        // 内容还在，用户之后能自己归类
+        failedFolders.add(name);
+        failed.push({ name: `文件夹：${name}`, reason: '无法创建文件夹，其所属记录未导入，请修复后重试' });
       }
     }
 
     let created = 0;
-    const failed: { name: string; reason: string }[] = [];
 
     for (let i = 0; i < items.length; i++) {
       assertCurrent();
       const src = items[i]!;
       try {
+        if (src.folderName !== null && failedFolders.has(src.folderName)) throw new Error('所属文件夹创建失败，未导入此记录');
         const item: VaultItem = {
           ...blankImportItem(),
           name: src.name,
@@ -1431,6 +1452,10 @@ export class VaultClient {
           rawType: RAW_TYPE[src.type],
           folderId: src.folderName === null ? null : folderIdByName.get(src.folderName) ?? null,
           favorite: src.favorite,
+          reprompt: src.reprompt ?? 0,
+          archivedAt: src.archivedAt ?? null,
+          passwordHistory: src.passwordHistory ?? [],
+          secureNote: src.secureNote ?? (src.type === 'secureNote' ? { type: 0 } : null),
           notes: src.notes,
           notesFailed: false,
           login: src.login === null ? null : {
@@ -1441,9 +1466,9 @@ export class VaultClient {
             // 且各带自己的匹配方式）；只有一列的 CSV 才退回 `uri`
             uris: src.login.uris
               ?? (src.login.uri === null ? [] : [{ uri: src.login.uri, match: null }]),
-            passwordRevisionDate: null,
-            // 导出的文件里没有 passkey —— 1Password 自己的导出也是静默丢弃的
-            fido2Credentials: [],
+            passwordRevisionDate: src.login.passwordRevisionDate ?? null,
+            autofillOnPageLoad: src.login.autofillOnPageLoad ?? null,
+            fido2Credentials: src.login.fido2Credentials ?? [],
           },
           // ⚠️ 卡片与身份必须一起搬。CSV 路径上它们是 null，
           // 但 Bitwarden 的 JSON 与 1Password 的导出里是完整存在的 ——
@@ -1455,7 +1480,7 @@ export class VaultClient {
           driversLicense: src.driversLicense ?? null,
           passport: src.passport ?? null,
           customFields: src.customFields.map((f) => ({
-            name: f.name, value: f.value, type: f.type, linkedId: null,
+            name: f.name, value: f.value, type: f.type, linkedId: f.linkedId ?? null,
           })),
         };
         await this.saveItem(item);

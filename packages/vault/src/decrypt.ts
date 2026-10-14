@@ -133,9 +133,9 @@ async function decryptPasskeys(raw: unknown, ctx: DecodeContext): Promise<Stored
     const p: StoredPasskey = {
       sourceId: await rowId('passkey', c, raw.indexOf(c)),
       credentialId,
-      keyType: 'public-key',
-      keyAlgorithm: 'ECDSA',
-      keyCurve: 'P-256',
+      keyType: str(r.keyType) ?? 'public-key',
+      keyAlgorithm: str(r.keyAlgorithm) ?? 'ECDSA',
+      keyCurve: str(r.keyCurve) ?? 'P-256',
       keyValue,
       rpId: str(r.rpId) ?? '',
       counter: str(r.counter) ?? '0',
