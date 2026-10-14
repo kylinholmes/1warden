@@ -62,11 +62,11 @@ export async function deleteAttachment(http: HttpClient, cipherId: string, attac
 /** Explicit bytes work with both browser fetch and the native desktop transport. */
 export async function uploadAttachmentBytes(http: HttpClient, uploadUrl: string, encrypted: Uint8Array): Promise<void> {
   const relative = uploadUrl.startsWith('/ciphers/') ? `/api${uploadUrl}` : uploadUrl;
-  const url = /^https?:\/\//i.test(relative) ? relative : `${http.baseUrl}${relative}`;
+  const url = /^https?:\/\//i.test(relative) ? relative : http.resolveUrl(relative);
   const target = new URL(url);
-  const base = new URL(http.baseUrl);
+  const base = new URL(http.environment.api);
   if (target.origin !== base.origin || target.username || target.password ||
-      !target.pathname.startsWith(`${base.pathname.replace(/\/$/, '')}/api/ciphers/`)) {
+      !target.pathname.startsWith(`${base.pathname.replace(/\/$/, '')}/ciphers/`)) {
     throw new Error('附件上传地址不属于当前服务器');
   }
   const boundary = `1warden-${crypto.randomUUID()}`;

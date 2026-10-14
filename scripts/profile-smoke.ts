@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { selectCustomServer } from './entry-smoke-helpers';
 /** Synthetic local server + disposable, headless Edge/Zen; never reads personal vaults. */
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -300,6 +301,7 @@ try {
   await page.waitForSelector('input[type="email"]');
   check(await page.$eval('input[type="password"]', (input: HTMLInputElement) => input.value) === '', 'abandoned master password is cleared');
   rejectAuthentication = true;
+  await selectCustomServer(page);
   await text('input[type="url"]', serverUrl);
   await text('input[type="email"]', 'failed-add@example.invalid');
   await text('input[type="password"]', 'synthetic-failure-password');

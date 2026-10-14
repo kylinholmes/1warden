@@ -1,5 +1,6 @@
 import { HubConnectionBuilder, HttpTransportType, LogLevel } from '@microsoft/signalr';
 import { MessagePackHubProtocol } from '@microsoft/signalr-protocol-msgpack';
+import { serverEnvironment } from './server-environment';
 
 export interface NotificationsOptions {
   serverUrl: string;
@@ -12,7 +13,7 @@ export type NotificationsFactory = (options: NotificationsOptions) => () => void
 /** One authenticated connection per unlocked vault. No credentials or payloads are logged. */
 export function subscribeNotifications(options: NotificationsOptions, socket?: typeof WebSocket): () => void {
   const connection = new HubConnectionBuilder()
-    .withUrl(`${options.serverUrl.replace(/\/+$/, '')}/notifications/hub`, {
+    .withUrl(`${serverEnvironment(options.serverUrl).notifications}/hub`, {
       accessTokenFactory: options.accessToken,
       skipNegotiation: true,
       transport: HttpTransportType.WebSockets,

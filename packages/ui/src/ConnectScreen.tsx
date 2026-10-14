@@ -6,6 +6,7 @@ import {
 import { TwoFactorForm } from './TwoFactorForm';
 import type { SavedAccount } from './accounts';
 import { BackButton } from './PageHeader';
+import { initialServerUrl, ServerSelector } from './ServerSelector';
 
 /**
  * 连接 / 解锁这一屏 —— **两端共用这一份**。
@@ -93,7 +94,7 @@ export function ConnectScreen({
    */
   const viewStore = useLocalStore(() => {
     const view = (initialCredentials ? 'form' : null) as 'pick' | 'form' | 'quick' | null;
-    const serverUrl = initialCredentials?.serverUrl ?? '';
+    const serverUrl = initialServerUrl(initialCredentials?.serverUrl, accounts ?? []);
     const email = initialCredentials?.email ?? '';
     const password = '';
     return { view, serverUrl, email, password };
@@ -138,7 +139,7 @@ export function ConnectScreen({
   const inFlow = cert !== undefined || challenge !== null;
   function goBack() {
     returning.current = true;
-    setServerUrl(''); setEmail(''); setPassword('');
+    setServerUrl(initialServerUrl(undefined, accounts ?? [])); setEmail(''); setPassword('');
     setView(accounts?.length ? 'pick' : null);
     onBack?.();
   }
@@ -183,7 +184,7 @@ export function ConnectScreen({
               setPassword('');
               setView('quick');
             }}
-            onOther={() => { returning.current = false; setServerUrl(''); setEmail(''); setPassword(''); setView('form'); }}
+            onOther={() => { returning.current = false; setServerUrl(initialServerUrl(undefined, accounts ?? [])); setEmail(''); setPassword(''); setView('form'); }}
           />
         ) : (
           <form onSubmit={submit} className="space-y-4">
@@ -204,14 +205,8 @@ export function ConnectScreen({
                     className="field"
                   />
                 </Field>
-                <Field label="服务器地址" hint="填写注册账户时使用的 Vaultwarden / Bitwarden 地址">
-                  <input
-                    type="url" required value={serverUrl} disabled={busy} autoComplete="url"
-                    onChange={(e) => setServerUrl(e.target.value)}
-                    placeholder="https://vault.example.com"
-                    className="field"
-                  />
-                </Field>
+                <ServerSelector value={serverUrl} accounts={accounts ?? []} disabled={busy}
+                  onChange={url => { setServerUrl(url); setPassword(''); }} />
               </>
             )}
 

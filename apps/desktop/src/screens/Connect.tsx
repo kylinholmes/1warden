@@ -5,7 +5,7 @@ import type { ApplicationClient, ConnectionDraft } from '../application/types';
 import type { CertInfo } from '../trust';
 import { twoFactorChallenge } from './auth-error';
 import {
-  ConnectScreen, BrandMark, IconSpinner, apiMessageOf, rememberAccount, useAccounts,
+  ConnectScreen, BrandMark, IconSpinner, apiMessageOf, initialServerUrl, rememberAccount, useAccounts,
   type ConnectCreds, type SavedAccount,
 } from '@1warden/ui';
 
@@ -230,9 +230,9 @@ export function Connect({ client, onConnected, onHome, initialCredentials, onReg
     */
     <div className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
       <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
-        {restored === undefined ? <p className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在恢复表单…</p> : <ConnectScreen
+        {restored === undefined || accounts === null ? <p className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在恢复表单…</p> : <ConnectScreen
           accounts={accounts}
-          initialCredentials={initialCredentials ?? restored ?? (onHome ? { serverUrl: '', email: '' } : undefined)}
+          initialCredentials={initialCredentials ?? restored ?? (onHome ? { serverUrl: initialServerUrl(undefined, accounts), email: '' } : undefined)}
           onCredentialsChange={rememberFields}
           canGoBack={!!onHome || Boolean(restored?.returnAccount)}
           onBack={() => {

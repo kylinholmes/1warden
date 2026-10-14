@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { selectCustomServer } from './entry-smoke-helpers';
 
 const product = process.argv[2];
 if (product !== 'edge' && product !== 'zen') throw new Error('Usage: bun scripts/connection-smoke.ts edge|zen');
@@ -74,11 +75,15 @@ try {
     'empty account home offers login and registration');
   await page.$eval('[data-add-server]', (button: HTMLButtonElement) => button.click());
   await page.waitForSelector('input[type="email"]');
+  check(await page.$('input[type="url"]') === null
+    && await page.$eval('[role="combobox"][aria-label="服务器"]', (node: Element) => node.textContent?.includes('Vaultwarden.com（社区托管）')),
+    'fresh login defaults to the community preset without an address input');
   await page.$eval('[aria-label="返回上一级"]', (button: HTMLButtonElement) => button.click());
   await page.waitForSelector('[data-add-server]');
   check(await page.$('input[type="email"]') === null, 'login can return to the empty home');
   await page.$eval('[data-add-server]', (button: HTMLButtonElement) => button.click());
   await page.waitForSelector('input[type="email"]');
+  await selectCustomServer(page);
   await page.evaluate((values: string[]) => {
     for (const [index, type] of ['url', 'email', 'password'].entries()) {
       const input = document.querySelector(`input[type="${type}"]`) as HTMLInputElement;
@@ -122,7 +127,7 @@ try {
     'unsubmitted edits also survive closing the popup');
   check(requests === 1, 'reopening never resubmits login automatically');
   await page.evaluate(() => [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === '创建账户')!.click());
-  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '创建 Vaultwarden 账户');
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '创建账户');
   check(await page.$eval('input[type="url"]', (input: HTMLInputElement) => input.value) === serverUrl
     && await page.$eval('input[type="email"]', (input: HTMLInputElement) => input.value) === 'edited@example.invalid',
     'switching to registration preserves only server and email');
@@ -133,7 +138,7 @@ try {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   }, password);
   await page.close(); await open();
-  check(await page.$eval('h1', (node: Element) => node.textContent) === '创建 Vaultwarden 账户'
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '创建账户'
     && await page.$('input[type="password"]') === null, 'reopened registration resumes identity entry without a password or verification token');
   const registrationDraft = await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
@@ -192,7 +197,7 @@ try {
     if (firefox) await button.evaluate((node: HTMLButtonElement) => node.click());
     else await button.asElement()!.click();
     await button.dispose();
-    await page.waitForSelector('input[type="url"]');
+    await selectCustomServer(page);
   }
   await otherServer();
   await page.evaluate((values: string[]) => {

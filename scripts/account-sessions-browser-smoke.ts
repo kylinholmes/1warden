@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { selectCustomServer } from './entry-smoke-helpers';
 /** Actual extension background, two encrypted loopback vaults, disposable headless browsers. */
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -115,7 +116,7 @@ try {
     }, value);
   }
   async function connect(account: typeof a) {
-    await page.waitForSelector('input[type="url"]');
+    await selectCustomServer(page);
     await text('input[type="url"]', account.target.serverUrl);
     await text('input[type="email"]', account.target.email);
     await text('input[type="password"]', account.password);
@@ -182,7 +183,8 @@ try {
     await page.waitForSelector('.nav-trigger');
   }
 
-  await open('input[type="email"]');
+  await open('[data-add-server]');
+  await page.$eval('[data-add-server]', (button: HTMLButtonElement) => button.click());
   await connect(a); await checkVault(a, 'First login A');
   await menuAction('添加账户');
   await connect(b); await checkVault(b, 'Second login B');
@@ -194,7 +196,11 @@ try {
     await checkVault(account, `Direct return to ${account === a ? 'A' : 'B'}`);
     check(totalAuthentications() === 2 && await page.$('#unlock-password') === null, 'switching an unlocked account sends no authentication and shows no password form');
   }
-  await page.close(); await open('.nav-trigger');
+  await page.close(); await open('[data-add-server]');
+  check((await snapshot()).unlockedAccounts?.length === 2, 'reopened account home preserves both unlocked sessions');
+  await clickHandle(await page.evaluateHandle((host: string, address: string) => [...document.querySelectorAll('button')]
+    .find(button => button.textContent?.includes(host) && button.textContent?.includes(address)), new URL(b.target.serverUrl).host, email));
+  await page.waitForSelector('.nav-trigger');
   await checkVault(b, 'Popup reopen B');
   check(totalAuthentications() === 2, 'closing and reopening the popup preserves both unlocked sessions');
 

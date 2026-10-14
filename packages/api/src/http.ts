@@ -1,4 +1,5 @@
 import { ApiError, classifyStatus, messageFor, isApiErrorKind, type ApiErrorKind } from './errors';
+import { serverEnvironment, type ServerEndpoints } from './server-environment';
 
 export interface HttpOptions {
   baseUrl: string;
@@ -32,15 +33,28 @@ export const CLIENT_VERSION = '2026.10.0';
 
 export class HttpClient {
   readonly baseUrl: string;
+  readonly environment: ServerEndpoints;
   private readonly fetchImpl: typeof fetch;
   private readonly timeoutMs: number;
   private readonly headerFn: (() => Record<string, string>) | undefined;
 
   constructor(opts: HttpOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/+$/, '');
+    this.environment = serverEnvironment(this.baseUrl);
     this.fetchImpl = opts.fetchImpl ?? globalThis.fetch.bind(globalThis);
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_TIMEOUT_MS;
     this.headerFn = opts.headers;
+  }
+
+  /** Callers use the shared /api and /identity paths for both hosting models. */
+  resolveUrl(path: string): string {
+    for (const service of ['api', 'identity'] as const) {
+      const prefix = `/${service}`;
+      if (path === prefix || path.startsWith(`${prefix}/`) || path.startsWith(`${prefix}?`)) {
+        return `${this.environment[service]}${path.slice(prefix.length)}`;
+      }
+    }
+    return `${this.baseUrl}${path}`;
   }
 
   async request<T>(method: string, path: string, opts: RequestOptions = {}): Promise<T> {
@@ -83,7 +97,7 @@ export class HttpClient {
     if (opts.raw !== undefined) headers['Content-Type'] = 'application/octet-stream';
     Object.assign(headers, opts.headers);
     const target = new URL(url, this.baseUrl);
-    if (target.origin !== new URL(this.baseUrl).origin || target.username || target.password) {
+    if (target.origin !== new URL(this.environment.api).origin || target.username || target.password) {
       throw new ApiError('malformedResponse', '附件上传地址不属于当前服务器');
     }
 
@@ -181,7 +195,7 @@ export class HttpClient {
 
     let res: Response;
     try {
-      res = await this.fetchImpl(`${this.baseUrl}${path}`, {
+      res = await this.fetchImpl(this.resolveUrl(path), {
         method,
         headers,
         ...(body === undefined ? {} : { body }),

@@ -10,3 +10,4 @@ export * from './folders';
 export * from './accounts';
 export * from './notifications';
 export * from './registration';
+export * from './server-environment';

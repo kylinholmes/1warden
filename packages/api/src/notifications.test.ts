@@ -32,13 +32,18 @@ class Socket {
 }
 let stop: (() => void) | undefined;
 afterEach(async () => { stop?.(); await Promise.resolve(); vi.useRealTimers(); Socket.sockets = []; Socket.fail = false; });
-function start() {
+function start(serverUrl = 'https://vault.test/subpath/') {
   const sync = vi.fn(); const logout = vi.fn();
-  stop = subscribeNotifications({ serverUrl: 'https://vault.test/subpath/', accessToken: async () => 'secret', onSync: sync, onLogout: logout }, Socket as unknown as typeof WebSocket);
+  stop = subscribeNotifications({ serverUrl, accessToken: async () => 'secret', onSync: sync, onLogout: logout }, Socket as unknown as typeof WebSocket);
   return { sync, logout };
 }
 
 describe('Vaultwarden SignalR notifications', () => {
+  it.each(['com', 'eu'])('uses the official Bitwarden %s notifications origin', async region => {
+    vi.useFakeTimers();
+    start(`https://vault.bitwarden.${region}/`); await vi.advanceTimersByTimeAsync(0);
+    expect(Socket.sockets[0]!.url).toContain(`wss://notifications.bitwarden.${region}/hub`);
+  });
   it('uses MessagePack, preserves server subpaths and syncs on vault change messages', async () => {
     vi.useFakeTimers();
     const f = start(); await vi.advanceTimersByTimeAsync(0);

@@ -34,7 +34,7 @@ export function Home({ session, busy, onPick, onOther, onRegister }: { session: 
     <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
       <div className="mb-7 flex items-center gap-2.5"><BrandMark /><span className="text-xl font-semibold">1Warden</span></div>
       <h1 className="mb-2 text-xl font-semibold">{accounts.length ? '欢迎回来' : '你的密码，从这里开始'}</h1>
-      <p className="mb-6 text-sm leading-relaxed text-[var(--ink-secondary)]">{accounts.length ? '选择账户进入保险库，或登录其他账户。' : '登录已有保险库，或在你的 Vaultwarden 上创建账户。'}</p>
+      <p className="mb-6 text-sm leading-relaxed text-[var(--ink-secondary)]">{accounts.length ? '选择账户进入保险库，或登录其他账户。' : '登录已有保险库，或选择服务器创建账户。'}</p>
       {saved === null ? <p className="flex items-center gap-2 text-sm text-[var(--ink-tertiary)]"><IconSpinner size={16} />正在读取账户…</p> : <>
         {accounts.length > 0 ? <AccountPicker accounts={accounts} busy={busy} onPick={onPick} onOther={onOther}
         renderIdentity={account => <HomeAccountIdentity account={account}

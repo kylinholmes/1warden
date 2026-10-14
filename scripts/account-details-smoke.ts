@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { selectCustomServer } from './entry-smoke-helpers';
 /** Isolated Edge/native WebView + synthetic loopback vault. Never opens personal vault data. */
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -67,6 +68,7 @@ async function login(page: any) {
   check('home production logo decodes under the real platform CSP', true);
   await button(page, '登录');
   await page.waitForSelector('input[type="email"]');
+  await selectCustomServer(page);
   await text(page, 'input[type="url"]', serverUrl); await text(page, 'input[type="email"]', email);
   await text(page, 'input[type="password"]', masterPassword); await page.click('button[type="submit"]');
   await page.waitForSelector('[aria-label="账户菜单"]');
