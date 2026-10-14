@@ -60,7 +60,7 @@ Files: application types/service/client, extension RPC/client, import page and s
 - [x] Add source selector, default skip-existing option, partial-result retry, visible skipped counts, and vault cleanup entry.
 - [x] Test two synthetic accounts on existing local Vaultwarden, including retry and cleanup.
 - [x] Review all changes; run typecheck/unit tests, builds and relevant UI smoke.
-- [ ] Commit/push, monitor main CI and automatic release; record verification evidence.
+- [x] Commit/push, monitor main CI and automatic release; record verification evidence.
 
 ## Verification evidence
 
@@ -73,3 +73,10 @@ Files: application types/service/client, extension RPC/client, import page and s
 - Browser visual check: file drop preview, export tab, narrow layout, unsupported-file errors, no runtime errors.
 
 Limitations: migration copies supported record fields and folders; attachments require separate migration and previews explain exclusions. Server APIs do not support conditional deletion, so another client can still alter a record between the final read and deletion. Concurrent independent imports lack server-side atomic idempotency; this feature protects sequential retries.
+
+## Delivery
+
+- Feature commit: `e3458b681ca89b31865a80cd0d78acbb66c5a3dc` on main.
+- [Main CI run 38596291627](https://github.com/kylinholmes/1warden/actions/runs/38596291627): all eight jobs succeeded, including Windows native WebView2, both browser smoke suites, real Vaultwarden, platform packages, and gated release publication.
+- Automatically published [v0.2.4](https://github.com/kylinholmes/1warden/releases/tag/v0.2.4) only after the seven required checks passed; release is public and final, with ten assets including signed macOS updater, Windows installers, Chromium/Firefox archives, updater manifest and checksums.
+- Automatic version commit `c37aa54` fast-forwarded into the local workspace. No actual user vault records were modified during verification.
