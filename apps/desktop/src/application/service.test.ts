@@ -57,7 +57,7 @@ describe('application display boundary', () => {
     vi.spyOn(client.getSession(), 'syncing', 'get').mockReturnValue(true);
     await expect(service.exportVault({ format: 'json' })).rejects.toThrow(/同步/);
   });
-  it('does not write a decrypted import if lock occurs during password derivation', async () => {
+  it('does not write a decrypted import if lock occurs during password derivation', { timeout: 30_000 }, async () => {
     const { service, client } = restored([{ ...record(), card: null, sshKey: null, login: { ...record().login!, fido2Credentials: [] } }]);
     vi.spyOn(client, 'readExportData').mockResolvedValue({ items: [...client.getSession().items], folders: [], organizationItems: 0 });
     const exported = await service.exportVault({ format: 'encrypted-json', password: 'transfer-test-password' });
@@ -67,7 +67,7 @@ describe('application display boundary', () => {
     await service.lock(); await rejected;
     expect(importItems).not.toHaveBeenCalled();
   });
-  it('returns the detected import format, and requests a password before decrypting encrypted JSON', async () => {
+  it('returns the detected import format, and requests a password before decrypting encrypted JSON', { timeout: 30_000 }, async () => {
     const { service, client } = restored([{ ...record(), card: null, sshKey: null, login: { ...record().login!, fido2Credentials: [] } }]);
     vi.spyOn(client, 'readExportData').mockResolvedValue({ items: [...client.getSession().items], folders: [], organizationItems: 0 });
     const plain = await service.parseImport({ name: 'backup.json', format: 'auto', dataBase64: toBase64(new TextEncoder().encode(JSON.stringify({

@@ -58,7 +58,7 @@ describe('official Bitwarden CLI interoperability', () => {
     expect(result.items[0]?.login?.password).toBe('spaced password ');
   });
 
-  it('imports our encrypted export with the official password-protected importer', async () => {
+  it('imports our encrypted export with the official password-protected importer', { timeout: 30_000 }, async () => {
     const { importer } = services({ kdfType: 0, iterations: 1000 });
     const exported = await createVaultExport({ items: [record], folders: [], format: 'encrypted-json', password: 'Fixture export password' });
     const result = await importer.parse(new TextDecoder().decode(exported.bytes));

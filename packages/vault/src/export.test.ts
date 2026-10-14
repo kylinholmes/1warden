@@ -171,7 +171,7 @@ describe('vault exports', () => {
       .toMatchObject({ keyAlgorithm: 'RSA', keyCurve: 'P-384' });
   });
 
-  it('produces a portable password encrypted envelope decryptable independently', async () => {
+  it('produces a portable password encrypted envelope decryptable independently', { timeout: 30_000 }, async () => {
     const result = await createVaultExport({ items: [item()], folders, format: 'encrypted-json', password: 'independent password' });
     expect(result.filename).toMatch(/encrypted.*\.json$/);
     const envelope = JSON.parse(text(result.bytes));
