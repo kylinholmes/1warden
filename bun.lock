@@ -70,6 +70,7 @@
       "name": "@1warden/ui",
       "version": "0.0.0",
       "dependencies": {
+        "@1warden/api": "workspace:*",
         "@1warden/crypto": "workspace:*",
         "@1warden/state": "workspace:*",
         "@1warden/vault": "workspace:*",

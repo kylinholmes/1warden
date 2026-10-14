@@ -3,7 +3,7 @@ import { ProfileAvatar } from '../components/ProfileAvatar';
 import { useEffect, useRef, type FormEvent } from 'react';
 import type { ApplicationClient } from '../application/types';
 import type { TwoFactorChallenge } from '@1warden/vault';
-import { BackButton, IconAlert, IconGlobe, IconSpinner, TwoFactorForm } from '@1warden/ui';
+import { BackButton, IconAlert, IconGlobe, IconSpinner, ServerSpeed, TwoFactorForm } from '@1warden/ui';
 import { twoFactorChallenge } from './auth-error';
 
 interface Props {
@@ -104,6 +104,8 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
             <span className="truncate">{hostOf(account?.serverUrl ?? '')}</span>
           </p>
         </div>
+
+        {!challenge && account && <div className="mt-5"><ServerSpeed serverUrl={account.serverUrl} disabled={busy} /></div>}
 
         {challenge ? <div className="mt-7"><TwoFactorForm providers={challenge.providers} busy={busy}
           onSubmit={({ code, provider, remember }) => { void submitCode(code, provider, remember); }} /></div>

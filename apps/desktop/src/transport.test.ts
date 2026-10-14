@@ -1,7 +1,11 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import {
-  urlOf, headersOf, bodyOf, toNativeRequest, toResponse, toTransportError, TransportError,
+  urlOf, headersOf, bodyOf, toNativeRequest, toResponse, toTransportError, TransportError, tauriFetch,
+  type NativeResponse,
 } from './transport';
+
+vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn() }));
 
 describe('urlOf', () => {
   it('accepts a string, a URL and a Request', () => {
@@ -93,6 +97,26 @@ describe('toNativeRequest —— 二进制体', () => {
 });
 
 describe('toNativeRequest', () => {
+  it('forwards optional bounds while ordinary requests retain their timeout and no size limit', async () => {
+    const bounded = { timeoutMs: 1200, maxResponseBytes: 4096, redirect: 'error' as const };
+    expect(await toNativeRequest('https://a.test', bounded)).toMatchObject(bounded);
+    const ordinary = await toNativeRequest('https://a.test');
+    expect(ordinary.timeoutMs).toBe(35_000);
+    expect(ordinary).not.toHaveProperty('maxResponseBytes');
+  });
+
+  it.each([
+    ['timeoutMs', 0], ['timeoutMs', -1], ['timeoutMs', 0.5],
+    ['timeoutMs', NaN], ['timeoutMs', Infinity], ['timeoutMs', 35_001],
+    ['timeoutMs', '1000'], ['timeoutMs', null],
+    ['maxResponseBytes', 0], ['maxResponseBytes', -1], ['maxResponseBytes', 1.5],
+    ['maxResponseBytes', NaN], ['maxResponseBytes', Infinity], ['maxResponseBytes', 33_554_433],
+    ['maxResponseBytes', '4096'], ['maxResponseBytes', null],
+  ])('rejects invalid %s = %s before building a native request', async (key, value) => {
+    await expect(toNativeRequest('https://a.test', { method: 'GET', [key]: value }))
+      .rejects.toMatchObject({ kind: 'invalidRequest' });
+  });
+
   it('carries redirect mode from RequestInit and Request while retaining the fetch default', async () => {
     expect((await toNativeRequest('https://a.test', { redirect: 'error' }))).toHaveProperty('redirect', 'error');
     const request = new Request('https://a.test', { redirect: 'manual' });
@@ -117,6 +141,88 @@ describe('toNativeRequest', () => {
   it('carries the body through when there is one', async () => {
     const req = await toNativeRequest('https://a.test', { method: 'POST', body: 'x=1' });
     expect(req.body).toBe('x=1');
+  });
+});
+
+describe('tauriFetch cancellation', () => {
+  beforeEach(() => {
+    vi.stubGlobal('window', { __TAURI_INTERNALS__: {} });
+    vi.mocked(invoke).mockReset();
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
+  });
+
+  it('does not invoke native HTTP for an already aborted Request', async () => {
+    const controller = new AbortController();
+    controller.abort();
+    vi.mocked(invoke).mockResolvedValue({ status: 200, headers: {}, body: 'late' });
+    const request = new Request('https://a.test', { signal: controller.signal });
+    await expect(tauriFetch(request)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it('rejects during body preparation and never invokes the cancelled request', async () => {
+    const controller = new AbortController();
+    const body = new Blob(['payload']);
+    let finishBody!: (value: ArrayBuffer) => void;
+    vi.spyOn(body, 'arrayBuffer').mockImplementation(() => new Promise(resolve => { finishBody = resolve; }));
+    vi.mocked(invoke).mockResolvedValue({ status: 200, headers: {}, body: 'late' });
+    const result = tauriFetch('https://a.test', { method: 'POST', body, signal: controller.signal })
+      .then(() => 'resolved', error => error.name);
+    controller.abort();
+    await expect(Promise.race([result, new Promise(resolve => setTimeout(() => resolve('still waiting'), 20))]))
+      .resolves.toBe('AbortError');
+    finishBody(new ArrayBuffer(0));
+    await new Promise(resolve => setTimeout(resolve, 0));
+    expect(invoke).not.toHaveBeenCalled();
+  });
+
+  it.each(['resolve', 'reject'] as const)('rejects in flight promptly and handles a late native %s', async outcome => {
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+    let complete!: (value: NativeResponse) => void;
+    let fail!: (error: unknown) => void;
+    let started!: () => void;
+    const invoked = new Promise<void>(resolve => { started = resolve; });
+    vi.mocked(invoke).mockImplementation(() => {
+      started();
+      return new Promise((resolve, reject) => { complete = resolve; fail = reject; });
+    });
+    const result = tauriFetch('https://a.test', { signal: controller.signal })
+      .then(() => 'resolved', error => error.name);
+    await invoked;
+    controller.abort();
+    await expect(Promise.race([result, new Promise(resolve => setTimeout(() => resolve('still waiting'), 20))]))
+      .resolves.toBe('AbortError');
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+    if (outcome === 'resolve') complete({ status: 200, headers: {}, body: 'late' });
+    else fail({ kind: 'network', message: 'late failure' });
+    await new Promise(resolve => setTimeout(resolve, 0));
+    await expect(result).resolves.toBe('AbortError');
+  });
+
+  it('passes the bounds through invoke and removes listeners after success', async () => {
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+    vi.mocked(invoke).mockResolvedValue({ status: 200, headers: {}, body: 'ok' });
+    const options = { timeoutMs: 1500, maxResponseBytes: 1024, signal: controller.signal };
+    expect(await (await tauriFetch('https://a.test', options)).text()).toBe('ok');
+    expect(invoke).toHaveBeenCalledWith('http_request', {
+      req: expect.objectContaining({ timeoutMs: 1500, maxResponseBytes: 1024 }),
+    });
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
+  });
+
+  it('preserves native error kinds and removes listeners after failure', async () => {
+    const controller = new AbortController();
+    const removeListener = vi.spyOn(controller.signal, 'removeEventListener');
+    vi.mocked(invoke).mockRejectedValue({ kind: 'responseTooLarge', message: '服务器响应超过大小限制' });
+    await expect(tauriFetch('https://a.test', { signal: controller.signal }))
+      .rejects.toMatchObject({ kind: 'responseTooLarge' });
+    expect(removeListener).toHaveBeenCalledWith('abort', expect.any(Function));
   });
 });
 

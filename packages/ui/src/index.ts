@@ -62,6 +62,7 @@ export * from './ConnectScreen';
 export * from './Segmented';
 export * from './Select';
 export * from './ServerSelector';
+export * from './ServerSpeed';
 export * from './Generator';
 export * from './ImportView';
 export * from './FloatingPanel';

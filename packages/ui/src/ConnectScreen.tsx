@@ -7,6 +7,7 @@ import { TwoFactorForm } from './TwoFactorForm';
 import type { SavedAccount } from './accounts';
 import { BackButton } from './PageHeader';
 import { initialServerUrl, ServerSelector } from './ServerSelector';
+import { ServerSpeed } from './ServerSpeed';
 
 /**
  * 连接 / 解锁这一屏 —— **两端共用这一份**。
@@ -209,6 +210,8 @@ export function ConnectScreen({
                   onChange={url => { setServerUrl(url); setPassword(''); }} />
               </>
             )}
+
+            {view === 'quick' && <ServerSpeed serverUrl={serverUrl} disabled={busy} />}
 
             <Field label="主密码">
               <input

@@ -9,6 +9,7 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { VaultClient, createVaultExport, parseImport, emptyLogin, buildProfileItem, type VaultItem } from '../packages/vault/src/index';
 import { createAccountSessions } from '../apps/desktop/src/application/account-sessions';
+import { probeServer } from '../packages/api/src/server-probe';
 import { localVaultwardenUrl, registerLocalVaultwardenAccount } from './vaultwarden-registration';
 
 const serverUrl = localVaultwardenUrl(process.env.VW_TEST_URL ?? 'http://127.0.0.1:18083');
@@ -67,6 +68,13 @@ try {
   // Local source builds can report an empty version; CI always uses the pinned default.
   const expectedVersion = process.env.VW_TEST_EXPECT_VERSION ?? '1.37.4';
   check(serverVersion === expectedVersion, expectedVersion ? `real server reports Vaultwarden ${expectedVersion}` : 'local development server reports an unversioned build');
+  phase = 'site-probe';
+  const siteLatency = await probeServer(serverUrl, { mode: 'latency', fetchImpl: localFetch });
+  check(siteLatency.samples === 3 && siteLatency.latencyMs >= 0 && siteLatency.download === null,
+    'anonymous site probe measures latency without downloading static resources');
+  const siteSpeed = await probeServer(serverUrl, { mode: 'full', fetchImpl: localFetch });
+  check(siteSpeed.samples === 3 && (siteSpeed.download ? siteSpeed.download.bytesPerSecond > 0 : Boolean(siteSpeed.downloadNote)),
+    'full site probe reports a public download reference or explains an insufficient sample');
   phase = 'register';
   await registerLocalVaultwardenAccount({ serverUrl, email, password: masterPassword, fetchImpl: localFetch });
   check(true, 'verification-token registration completes without SMTP');

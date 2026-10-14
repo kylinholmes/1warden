@@ -10,6 +10,7 @@
     "./clipboard": "./src/clipboard.ts"
   },
   "dependencies": {
+    "@1warden/api": "workspace:*",
     "@1warden/state": "workspace:*",
     "react": "^19.0.0",
     "@1warden/vault": "workspace:*",

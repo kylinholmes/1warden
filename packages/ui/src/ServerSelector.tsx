@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import type { SavedAccount } from './accounts';
 import { Select } from './Select';
+import { ServerSpeed } from './ServerSpeed';
 
 export const DEFAULT_SERVER_URL = 'https://vault.vaultwarden.com';
 const presets = [
@@ -18,7 +19,7 @@ export function initialServerUrl(value: string | undefined, accounts: SavedAccou
   return value ?? accounts[0]?.serverUrl ?? DEFAULT_SERVER_URL;
 }
 
-/** The public URL remains the account identity; selection never makes a request. */
+/** Keep the public URL as account identity; measurements use public endpoints only. */
 export function ServerSelector({ value, accounts, disabled, onChange }: {
   value: string; accounts: SavedAccount[]; disabled: boolean; onChange: (url: string) => void;
 }) {
@@ -57,5 +58,6 @@ export function ServerSelector({ value, accounts, disabled, onChange }: {
         onChange={event => { custom.current = event.target.value; update(event.target.value); }} />
       <span className="mt-1.5 block text-xs text-[var(--ink-tertiary)]">填写你的 Vaultwarden 或 Bitwarden 服务器地址。</span>
     </label> : <p className="break-all text-xs text-[var(--ink-tertiary)]">{value}</p>}
+    <ServerSpeed serverUrl={value} disabled={disabled} />
   </div>;
 }

@@ -49,11 +49,19 @@ export interface NativeRequest {
   /** 二进制体（base64）。附件上传走这条 —— Rust 侧解回字节 */
   bodyBase64?: string;
   timeoutMs?: number;
+  maxResponseBytes?: number;
   redirect?: RequestRedirect;
+}
+
+/** 原生 fetch 的可选资源限制；未指定大小时保留普通附件下载行为。 */
+export interface NativeRequestInit extends RequestInit {
+  timeoutMs?: number;
+  maxResponseBytes?: number;
 }
 
 /** 桌面端默认超时。比 api 层的 30s 略长 —— 让 api 层先超时，报错信息更准确。 */
 const DEFAULT_TIMEOUT_MS = 35_000;
+const MAX_RESPONSE_BYTES = 32 * 1024 * 1024;
 
 /** 这些状态码按规范不允许带响应体，`new Response(body, ...)` 会直接抛错 */
 const NULL_BODY_STATUS = new Set([101, 103, 204, 205, 304]);
@@ -146,8 +154,18 @@ function decodeIfUtf8(bytes: Uint8Array): string | undefined {
 
 
 export async function toNativeRequest(
-  input: RequestInfo | URL, init?: RequestInit, timeoutMs = DEFAULT_TIMEOUT_MS,
+  input: RequestInfo | URL, init?: NativeRequestInit, timeoutMs = DEFAULT_TIMEOUT_MS,
 ): Promise<NativeRequest> {
+  const timeout = init?.timeoutMs === undefined ? timeoutMs : init.timeoutMs;
+  const maxResponseBytes = init?.maxResponseBytes;
+  if (!Number.isSafeInteger(timeout) || timeout < 1 || timeout > DEFAULT_TIMEOUT_MS) {
+    throw new TransportError('invalidRequest', '请求超时时间必须为 1 至 35000 毫秒');
+  }
+  if (maxResponseBytes !== undefined && (
+    !Number.isSafeInteger(maxResponseBytes) || maxResponseBytes < 1 || maxResponseBytes > MAX_RESPONSE_BYTES
+  )) {
+    throw new TransportError('invalidRequest', '响应大小限制必须为 1 字节至 32 MiB');
+  }
   const method = (init?.method ?? (typeof input === 'object' && 'method' in input ? input.method : 'GET') ?? 'GET')
     .toUpperCase();
   const parts = await bodyPartsOf(input, init);
@@ -159,7 +177,8 @@ export async function toNativeRequest(
     // 无 body 时不要传 `body: undefined` —— serde 的 Option 收到 null 与收到
     // 缺失字段行为不同，少传更干净
     ...parts,
-    timeoutMs,
+    timeoutMs: timeout,
+    ...(maxResponseBytes === undefined ? {} : { maxResponseBytes }),
   };
 }
 
@@ -212,27 +231,43 @@ export function isTauri(): boolean {
 /**
  * 符合 `fetch` 签名的传输实现，直接交给 `new HttpClient({ fetchImpl: tauriFetch })`。
  */
-export const tauriFetch: typeof fetch = async (input, init) => {
+export const tauriFetch = async (input: RequestInfo | URL, init?: NativeRequestInit): Promise<Response> => {
   if (!isTauri()) {
     // 在纯浏览器里跑（`bun run dev` 直接开页面）时没有 Rust 侧可调，
     // 明确报错而不是抛一个看不懂的 invoke 失败
     throw new TransportError('network', '当前不在 1Warden 桌面端中运行，无法发起请求');
   }
 
-  if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+  const signal = init?.signal === undefined ? (input instanceof Request ? input.signal : undefined) : init.signal;
+  if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
 
-  const req = await toNativeRequest(input, init);
+  return new Promise<Response>((resolve, reject) => {
+    const cleanup = () => signal?.removeEventListener('abort', onAbort);
+    const onAbort = () => {
+      cleanup();
+      reject(new DOMException('Aborted', 'AbortError'));
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
 
-  let native: NativeResponse;
-  try {
-    native = await invoke<NativeResponse>('http_request', { req });
-  } catch (e) {
-    throw toTransportError(e);
-  }
+    const send = async () => {
+      const req = await toNativeRequest(input, init);
+      // 读 Blob 也可能等待；在此期间取消后不能再发出请求。
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      let native: NativeResponse;
+      try {
+        native = await invoke<NativeResponse>('http_request', { req });
+      } catch (e) {
+        throw toTransportError(e);
+      }
+      if (signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+      return toResponse(native);
+    };
 
-  // 请求在 Rust 侧已经回来了，但调用方可能已经放弃等它 —— 仍然按中止处理，
-  // 否则上层会拿着一个它已经不想要的响应继续走
-  if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
-
-  return toResponse(native);
+    // invoke 本身不能取消。调用方立即结束等待，Rust 仍受请求资源限制；
+    // 两条完成路径都接住，迟到的错误不会成为未处理的 Promise rejection。
+    void send().then(
+      response => { cleanup(); resolve(response); },
+      error => { cleanup(); reject(error); },
+    );
+  });
 };

@@ -67,6 +67,9 @@ pub struct HttpRequest {
     pub body_base64: Option<String>,
     #[serde(default)]
     pub timeout_ms: Option<u64>,
+    /// 可选的响应体上限；未指定时保留普通附件下载的行为。
+    #[serde(default)]
+    pub max_response_bytes: Option<u64>,
     #[serde(default)]
     pub redirect: RedirectMode,
 }
@@ -110,7 +113,7 @@ impl HttpResponse {
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpError {
-    /// network | timeout | certUntrusted | invalidRequest | tls
+    /// network | timeout | certUntrusted | invalidRequest | tls | responseTooLarge
     pub kind: String,
     pub message: String,
     /// 仅 certUntrusted：被拒证书的 SHA-256 指纹（大写十六进制，冒号分隔）
@@ -446,6 +449,12 @@ pub async fn http_request(
 
 /// 命令体本体。抽出来是为了能在测试里直接调 —— `tauri::State` 没法在测试里构造。
 pub async fn execute(state: &HttpState, req: HttpRequest) -> Result<HttpResponse, HttpError> {
+    if req.timeout_ms.is_some_and(|timeout| timeout == 0 || timeout > 35_000) {
+        return Err(HttpError::new("invalidRequest", "请求超时时间必须为 1 至 35000 毫秒"));
+    }
+    if req.max_response_bytes.is_some_and(|limit| limit == 0 || limit > 32 * 1024 * 1024) {
+        return Err(HttpError::new("invalidRequest", "响应大小限制必须为 1 字节至 32 MiB"));
+    }
     let method = reqwest::Method::from_bytes(req.method.to_uppercase().as_bytes())
         .map_err(|_| HttpError::new("invalidRequest", format!("不支持的 HTTP 方法：{}", req.method)))?;
 
@@ -472,7 +481,7 @@ pub async fn execute(state: &HttpState, req: HttpRequest) -> Result<HttpResponse
         builder = builder.body(body);
     }
 
-    let res = match builder.send().await {
+    let mut res = match builder.send().await {
         Ok(r) => r,
         Err(e) => return Err(classify(&state, &req.url, e)),
     };
@@ -489,9 +498,38 @@ pub async fn execute(state: &HttpState, req: HttpRequest) -> Result<HttpResponse
 
     // ⚠️ 取**字节**，不能取 `res.text()`。后者是有损 UTF-8 解码：非法序列
     // 变成 U+FFFD 且不报错，下载的附件与图标会静默损坏。
-    let bytes = res.bytes().await
-        .map_err(|e| HttpError::new("network", format!("读取响应失败：{e}")))?
-        .to_vec();
+    let bytes = if let Some(limit) = req.max_response_bytes {
+        if res.content_length().is_some_and(|length| length > limit) {
+            return Err(HttpError::new("responseTooLarge", "服务器响应超过大小限制"));
+        }
+        let limit = limit as usize;
+        let mut bytes = Vec::new();
+        while let Some(chunk) = res.chunk().await
+            .map_err(|e| if e.is_timeout() {
+                HttpError::new("timeout", "服务器响应超时")
+            } else {
+                HttpError::new("network", format!("读取响应失败：{e}"))
+            })?
+        {
+            // Content-Length may be absent (chunked) or untrustworthy. Check
+            // every chunk before extending the buffer, and stop immediately.
+            if chunk.len() > limit - bytes.len() {
+                return Err(HttpError::new("responseTooLarge", "服务器响应超过大小限制"));
+            }
+            // Grow geometrically while keeping our allocation within the cap.
+            let needed = bytes.len() + chunk.len();
+            if needed > bytes.capacity() {
+                let capacity = needed.max(bytes.capacity().saturating_mul(2)).min(limit);
+                bytes.reserve_exact(capacity - bytes.len());
+            }
+            bytes.extend_from_slice(&chunk);
+        }
+        bytes
+    } else {
+        res.bytes().await
+            .map_err(|e| HttpError::new("network", format!("读取响应失败：{e}")))?
+            .to_vec()
+    };
 
     Ok(HttpResponse::from_body(status, headers, bytes))
 }
@@ -801,6 +839,7 @@ mod tests {
                 body: None,
                 body_base64: None,
                 timeout_ms: Some(10_000),
+                max_response_bytes: None,
                 redirect: RedirectMode::Follow,
             }
         }
@@ -941,6 +980,122 @@ mod tests {
             "reader must wait for the request, not return WouldBlock: {early:?}");
         let request = request_rx.recv_timeout(Duration::from_secs(2)).unwrap().unwrap();
         assert_eq!(request, expected, "the delayed request must arrive intact");
+    }
+
+    /// Incomplete responses stay open until the client rejects or times out, so
+    /// limits must be enforced during reading rather than after buffering EOF.
+    fn fetch_loopback_response(
+        response: &'static [u8],
+        max_response_bytes: Option<u64>,
+        keep_open: bool,
+    ) -> Result<HttpResponse, HttpError> {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::time::{Duration, Instant};
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let address = listener.local_addr().unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let path = std::env::temp_dir().join(format!("onewarden-body-pins-{}-{}.json", std::process::id(), address.port()));
+        let state = HttpState::new(path).unwrap();
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(2);
+            let mut socket = loop {
+                match listener.accept() {
+                    Ok((socket, _)) => break socket,
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock && Instant::now() < deadline => {
+                        std::thread::sleep(Duration::from_millis(5));
+                    }
+                    Err(error) => panic!("local HTTP accept failed: {error}"),
+                }
+            };
+            read_loopback_http_request(&mut socket).unwrap();
+            socket.write_all(response).unwrap();
+            if keep_open {
+                let _ = socket.read(&mut [0_u8; 1]);
+            }
+        });
+        let mut payload = serde_json::json!({
+            "method": "GET", "url": format!("http://{address}/body"), "timeoutMs": 250,
+        });
+        if let Some(limit) = max_response_bytes {
+            payload["maxResponseBytes"] = limit.into();
+        }
+        let request: HttpRequest = serde_json::from_value(payload).unwrap();
+        let result = tauri::async_runtime::block_on(execute(&state, request));
+        server.join().unwrap();
+        result
+    }
+
+    #[test]
+    fn bounded_body_rejects_content_length_before_waiting_for_the_body() {
+        let result = fetch_loopback_response(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 1000000000\r\nConnection: close\r\n\r\n",
+            Some(4), true,
+        );
+        assert_eq!(result.expect_err("oversized declared body must be rejected").kind, "responseTooLarge");
+    }
+
+    #[test]
+    fn bounded_body_rejects_chunked_overflow_without_waiting_for_eof() {
+        let result = fetch_loopback_response(
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n3\r\nabc\r\n2\r\nde\r\n",
+            Some(4), true,
+        );
+        assert_eq!(result.expect_err("actual chunk bytes must be bounded").kind, "responseTooLarge");
+    }
+
+    #[test]
+    fn bounded_body_reports_timeout_when_a_small_body_stalls() {
+        let result = fetch_loopback_response(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n",
+            Some(4), true,
+        );
+        assert_eq!(result.expect_err("bounded reads must retain their deadline").kind, "timeout");
+    }
+
+    #[test]
+    fn bounded_body_allows_the_exact_limit_for_chunked_and_length_responses() {
+        for response in [
+            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\nbody".as_slice(),
+            b"HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n2\r\nbo\r\n2\r\ndy\r\n0\r\n\r\n".as_slice(),
+        ] {
+            let result = fetch_loopback_response(response, Some(4), false).unwrap();
+            assert_eq!(result.body.as_deref(), Some("body"));
+        }
+    }
+
+    #[test]
+    fn bounded_body_keeps_binary_bytes_intact() {
+        let result = fetch_loopback_response(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 4\r\nConnection: close\r\n\r\n\x89PNG",
+            Some(4), false,
+        ).unwrap();
+        assert_eq!(B64.decode(result.body_base64.unwrap()).unwrap(), b"\x89PNG");
+    }
+
+    #[test]
+    fn bounded_body_option_can_be_omitted_by_existing_serialized_requests() {
+        let result = fetch_loopback_response(
+            b"HTTP/1.1 200 OK\r\nContent-Length: 5\r\nConnection: close\r\n\r\nhello",
+            None, false,
+        ).unwrap();
+        assert_eq!(result.body.as_deref(), Some("hello"));
+    }
+
+    #[test]
+    fn bounded_body_rejects_invalid_resource_limits_before_connecting() {
+        let state = HttpState::new(std::env::temp_dir().join("onewarden-bounds-pins.json")).unwrap();
+        for (field, value) in [
+            ("maxResponseBytes", 0), ("maxResponseBytes", 33_554_433),
+            ("timeoutMs", 0), ("timeoutMs", 35_001),
+        ] {
+            let mut payload = serde_json::json!({ "method": "GET", "url": "http://127.0.0.1:0/" });
+            payload[field] = value.into();
+            let request: HttpRequest = serde_json::from_value(payload).unwrap();
+            let error = tauri::async_runtime::block_on(execute(&state, request)).unwrap_err();
+            assert_eq!(error.kind, "invalidRequest", "invalid {field}={value} must fail before connecting");
+        }
     }
 
     #[test]

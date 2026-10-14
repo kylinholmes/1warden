@@ -175,10 +175,19 @@ if (which === 'vault' && ['identity-partial', 'identity-complete', 'identity-sho
  *
  * 装的是和桌面端等价的一份（都是 localStorage），**不走
  * `installDesktopHost()`** —— 那个会把 Rust 侧的 `tauriFetch` 也带进来，
- * 而预览里没有 Rust。预览的连接屏不联网，一个直连的 fetch 就够。
+ * 而预览里没有 Rust。站点测速使用固定公开资源样本，避免预览向真实站点发请求。
  */
 installHost({
-  fetch: (...args) => fetch(...args),
+  fetch: async (input, init) => {
+    const url = new URL(input instanceof Request ? input.url : String(input), location.href);
+    if (!url.searchParams.has('_1warden_probe')) return fetch(input, init);
+    await new Promise(resolve => setTimeout(resolve, 40));
+    if (init?.signal?.aborted) throw new DOMException('Aborted', 'AbortError');
+    if (url.pathname.endsWith('/api/config') || url.pathname === '/config') {
+      return Response.json({ object: 'config', version: 'preview', server: { name: 'Vaultwarden' } });
+    }
+    return new Response('/* preview site speed sample */'.padEnd(128 * 1024, ' '), { headers: { 'Content-Type': 'text/css' } });
+  },
   storage: {
     get: async (k) => localStorage.getItem(k),
     set: async (k, v) => localStorage.setItem(k, v),
