@@ -11,7 +11,7 @@ The user chose automatic latency measurement and manual full measurement. Keep l
 - [x] Add real Vaultwarden probe checks before account registration in the existing isolated protocol smoke.
 - [x] Review desktop/narrow entrance and saved-account unlock screenshots. Preview uses synthetic probe responses instead of contacting public sites.
 - [x] Independent code review: no critical or important findings remain.
-- [ ] Complete browser regression, push main, and verify that main CI alone triggers the automatic patch release.
+- [x] Complete browser regression, push main, and verify that main CI alone triggers the automatic patch release.
 
 ## Verification
 
@@ -30,3 +30,9 @@ The user chose automatic latency measurement and manual full measurement. Keep l
 Latency includes HTTP request/response and native bridge overhead. Download reference includes full request time; it is not peak link bandwidth or vault synchronization speed. CDN responses are valid network samples; unique query strings and `cache: no-store` prevent browser cache reuse. Complete compressed responses use a validated Content-Length when available, while decoded buffers also remain bounded.
 
 Native cancellation immediately stops JavaScript waiting and discards late results. An already dispatched Rust request finishes or reaches its configured deadline and size limit.
+
+## Delivery
+
+- Feature commit: `0c8cacb41081ac61f81cb4c560e1ec2d1919b8ee`.
+- [Main CI](https://github.com/kylinholmes/1warden/actions/runs/38601225911): all eight jobs passed, including Windows WebView2, macOS packaging, browser UI/extension regression, real Vaultwarden, and the release gate.
+- [v0.2.5](https://github.com/kylinholmes/1warden/releases/tag/v0.2.5): automatically published only after all seven required main checks succeeded. Verified a non-draft, non-prerelease release with ten assets, including the updater signature/manifest and checksums.
