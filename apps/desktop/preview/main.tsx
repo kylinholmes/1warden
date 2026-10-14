@@ -104,7 +104,12 @@ const previewVault = new VaultClient({ fetchImpl: async () => { throw new Error(
 const previewAccount = { email: 'me@example.com', serverUrl: 'https://vault.example.com', userId: 'u', kdf: { kdf: 0 as const, iterations: 1 } };
 const previewItems = MESSY.map((i, n) => ({ ...i, folderId: n % 3 === 0 ? 'f1' : null }));
 previewVault.restore({ syncVerified: true, account: previewAccount, userKey: makeUserKey(), token: null, items: previewItems, folders: FOLDERS });
-const fakeClient = createApplicationClient(createVaultService(previewVault), {
+const fakeClient = createApplicationClient({
+  ...createVaultService(previewVault),
+  // This preview has no server session. Focus/manual sync retains its fixed
+  // fixture instead of introducing an unrelated authentication error overlay.
+  async sync() {},
+}, {
   capabilities: { native: false, browser: false, saveAttachments: false },
   saveFile: async () => ({ path: null }),
 });

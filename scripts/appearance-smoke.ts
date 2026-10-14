@@ -50,6 +50,7 @@ try {
   await page.reload({ waitUntil: 'networkidle0' });
   check('mode and palette survive reload', await page.evaluate(() => document.documentElement.dataset.palette === 'graphite' && document.documentElement.dataset.theme === 'dark'));
   const second = await browser.newPage(); second.setDefaultTimeout(5000);
+  second.on('pageerror', (e: Error) => errors.push(`second window: ${e.message}`));
   await second.goto(base + '?screen=quick', { waitUntil: 'domcontentloaded', timeout: 5000 });
   await page.bringToFront();
   await page.click('#settings-tab-appearance'); await page.click('.appearance-mode:has(.mode-light)');
