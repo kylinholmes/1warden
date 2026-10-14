@@ -453,7 +453,7 @@ try {
     check('profile shared back restores devices source focus', await page.evaluate(() => document.activeElement?.id === 'profile-link-devices'));
     await crumb('保险库'); await page.waitForSelector('.vault-list li > button');
 
-    for (const [key, title] of [['security', '安全报告'], ['organization', '整理与分析'], ['import', '导入']] as const) {
+    for (const [key, title] of [['security', '安全报告'], ['organization', '整理与分析'], ['import', '导入 / 导出']] as const) {
       await navigation(); await page.click(`[data-key="${key}"]`); await settle();
       await header(title, title, width);
       // Exercise the layout with translated/long labels without changing the rendered component structure.
