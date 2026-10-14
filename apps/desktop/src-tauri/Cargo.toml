@@ -1,7 +1,7 @@
 [package]
 name = "onewarden"
 default-run = "1warden"
-version = "0.2.3"
+version = "0.2.4"
 description = "1Warden —— 个人密码管理器"
 edition = "2021"
 rust-version = "1.90"
