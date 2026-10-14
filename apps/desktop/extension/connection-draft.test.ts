@@ -1,6 +1,20 @@
 import { expect, it } from 'vitest';
 import { createConnectionDraftStore } from './connection-draft';
 
+it('restores registration intent but never stores a registration token or password', async () => {
+  const data: Record<string, unknown> = {};
+  const area = {
+    async get(key: string) { return { [key]: structuredClone(data[key]) }; },
+    async set(value: Record<string, unknown>) { Object.assign(data, structuredClone(value)); },
+    async remove(key: string) { delete data[key]; },
+  };
+  const store = createConnectionDraftStore(area);
+  await store.save({ serverUrl: 'https://vault.test', email: 'person@example.test', error: null, intent: 'register',
+    emailVerificationToken: 'token-must-not-persist', masterPassword: 'password-must-not-persist' } as Parameters<typeof store.save>[0]);
+  expect(await createConnectionDraftStore(area).load()).toEqual({ serverUrl: 'https://vault.test', email: 'person@example.test', error: null, intent: 'register' });
+  expect(JSON.stringify(data)).not.toContain('must-not-persist');
+});
+
 it('restores a failed connection after the popup is recreated, without retaining the password', async () => {
   const data: Record<string, unknown> = {};
   const area = {

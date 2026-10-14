@@ -321,6 +321,8 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
       onOpenSettings={() => setSettingsOpen(true)}
       onOpenProfile={() => { setCategory({ kind: 'profile' }); setSelectedId(null); closeEditor(); }}
       syncing={session.syncing}
+      onSync={() => client.sync()}
+      lastSyncedAt={session.lastSyncedAt}
       typeCounts={typeCounts}
       showTypes={showTypes}
       generatorOpen={generatorOpen}

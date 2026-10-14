@@ -13,9 +13,26 @@ const { default: puppeteer } = await import(process.env.ONEWARDEN_PUPPETEER
 const profile = mkdtempSync(join(tmpdir(), `onewarden-connection-${product}-`));
 const uuid = '3791a0b1-2d30-4794-b5d0-b87bd6725ce6';
 let requests = 0;
+let registrationStarts = 0;
+let registrationFinishes = 0;
 let holdFailure = false;
 let releaseFailure: (() => void) | null = null;
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
+  const path = new URL(request.url).pathname;
+  if (path === '/identity/accounts/register/send-verification-email') {
+    registrationStarts++;
+    return Response.json('header.payload.signature');
+  }
+  if (path === '/identity/accounts/register/finish') {
+    const body = await request.json() as Record<string, unknown>;
+    if (body.emailVerificationToken !== 'header.payload.signature' || body.kdfIterations !== 600_000
+      || typeof body.key !== 'string' || !body.key.startsWith('2.')
+      || typeof body.masterPasswordHash !== 'string' || body.masterPasswordHash === password) {
+      return Response.json({ message: 'Invalid synthetic registration payload' }, { status: 400 });
+    }
+    registrationFinishes++;
+    return Response.json({ object: 'registerFinish' });
+  }
   if (new URL(request.url).pathname === '/identity/accounts/prelogin') {
     requests++;
     if (holdFailure) await new Promise<void>((resolve) => { releaseFailure = resolve; });
@@ -51,14 +68,15 @@ try {
     await page.waitForSelector(selector, { timeout: 10_000 });
   }
   await open('[data-add-server]');
-  check(await page.$eval('h1', (node: Element) => node.textContent) === '添加服务器，开始使用'
-    && await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim()) === '添加第一个服务器',
-    'empty account home invites adding the first server, not another server');
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '你的密码，从这里开始'
+    && await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim()) === '登录'
+    && await page.evaluate(() => [...document.querySelectorAll('button')].some(button => button.textContent?.trim() === '注册')),
+    'empty account home offers login and registration');
   await page.$eval('[data-add-server]', (button: HTMLButtonElement) => button.click());
   await page.waitForSelector('input[type="email"]');
   await page.$eval('[aria-label="返回上一级"]', (button: HTMLButtonElement) => button.click());
   await page.waitForSelector('[data-add-server]');
-  check(await page.$('input[type="email"]') === null, 'first-server setup can return to the empty home');
+  check(await page.$('input[type="email"]') === null, 'login can return to the empty home');
   await page.$eval('[data-add-server]', (button: HTMLButtonElement) => button.click());
   await page.waitForSelector('input[type="email"]');
   await page.evaluate((values: string[]) => {
@@ -103,6 +121,43 @@ try {
   check(await page.$eval('input[type="email"]', (input: HTMLInputElement) => input.value) === 'edited@example.invalid',
     'unsubmitted edits also survive closing the popup');
   check(requests === 1, 'reopening never resubmits login automatically');
+  await page.evaluate(() => [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === '创建账户')!.click());
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '创建 Vaultwarden 账户');
+  check(await page.$eval('input[type="url"]', (input: HTMLInputElement) => input.value) === serverUrl
+    && await page.$eval('input[type="email"]', (input: HTMLInputElement) => input.value) === 'edited@example.invalid',
+    'switching to registration preserves only server and email');
+  await page.$eval('button[type="submit"]', (button: HTMLButtonElement) => button.click());
+  await page.waitForSelector('input[autocomplete="new-password"]');
+  await page.$eval('input[autocomplete="new-password"]', (input: HTMLInputElement, value: string) => {
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, password);
+  await page.close(); await open();
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '创建 Vaultwarden 账户'
+    && await page.$('input[type="password"]') === null, 'reopened registration resumes identity entry without a password or verification token');
+  const registrationDraft = await page.evaluate(async () => {
+    const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    return JSON.stringify(await api.storage.session.get('1warden.connectionDraft'));
+  });
+  check(registrationDraft.includes('register') && !registrationDraft.includes(password)
+    && !registrationDraft.includes('header.payload.signature'), 'registration draft persists public intent without secrets');
+  await page.$eval('button[type="submit"]', (button: HTMLButtonElement) => button.click());
+  await page.waitForSelector('input[autocomplete="new-password"]');
+  await page.evaluate((value: string) => {
+    for (const input of document.querySelectorAll<HTMLInputElement>('input[type="password"]')) {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(input, value);
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+  }, password);
+  await page.$eval('button[type="submit"]', (button: HTMLButtonElement) => button.click());
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '账户已创建');
+  check(registrationStarts === 2 && registrationFinishes === 1 && requests === 1,
+    'real extension cryptography completes registration without automatically logging in');
+  await page.evaluate(() => [...document.querySelectorAll('button')].find(button => button.textContent?.trim() === '登录新账户')!.click());
+  await page.waitForSelector('input[type="password"]');
+  check(await page.$eval('input[type="password"]', (input: HTMLInputElement) => input.value) === ''
+    && await page.$eval('input[type="email"]', (input: HTMLInputElement) => input.value) === 'edited@example.invalid',
+    'registration completion returns to prefilled login with an empty password');
   await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
     await api.storage.session.remove('1warden.connectionDraft');
@@ -113,9 +168,9 @@ try {
   });
   await page.close();
   await open('h1');
-  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '选择要连接的账户');
-  check(await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim()) === '连接其他服务器',
-    'remembered accounts use the existing-account heading and other-server action');
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '欢迎回来');
+  check(await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim()) === '登录其他账户',
+    'remembered accounts offer another-account login');
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)));
   check(await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
@@ -123,7 +178,7 @@ try {
   }), 'opening the account picker does not silently select or save its first account');
   await page.close();
   await open('h1');
-  check(await page.$eval('h1', (node: Element) => node.textContent) === '选择要连接的账户',
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '欢迎回来',
     'reopening keeps the account picker until an account is chosen');
   async function back() {
     const button = await page.evaluateHandle(() => document.querySelector('[aria-label="返回上一级"]'));
@@ -150,7 +205,7 @@ try {
   await page.evaluate(() => (document.querySelector('button[type="submit"]') as HTMLButtonElement).click());
   await page.waitForSelector('[role="alert"]');
   await back();
-  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '选择要连接的账户');
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '欢迎回来');
   check(await page.$('[role="alert"]') === null, 'Back removes the abandoned login error');
   await page.waitForFunction(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
@@ -163,12 +218,12 @@ try {
   await page.close();
   await open('h1');
   const afterBackHeading = await page.$eval('h1', (node: Element) => node.textContent);
-  if (afterBackHeading !== '选择要连接的账户') console.error(await page.evaluate(async () => {
+  if (afterBackHeading !== '欢迎回来') console.error(await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
     return { heading: document.querySelector('h1')?.textContent,
       draft: (await api.storage.session.get('1warden.connectionDraft'))['1warden.connectionDraft'] };
   }));
-  check(afterBackHeading === '选择要连接的账户',
+  check(afterBackHeading === '欢迎回来',
     'Back clears the draft so a reopened popup returns to the picker');
 
   await otherServer();
@@ -185,7 +240,7 @@ try {
   while (!releaseFailure && Date.now() < heldRequestDeadline) await Bun.sleep(10);
   check(Boolean(releaseFailure), 'login request is still pending when Back is pressed');
   await back();
-  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '选择要连接的账户'
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '欢迎回来'
     && [...document.querySelectorAll('button')].every(button => !button.disabled));
   holdFailure = false;
   (releaseFailure as unknown as () => void)();
@@ -207,7 +262,7 @@ try {
   await open();
   await back();
   await page.waitForSelector('main li button');
-  check(await page.$eval('h1', (node: Element) => node.textContent) === '选择要连接的账户',
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '欢迎回来',
     'Back from a resumed Add Account draft returns to the common account home');
   await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('main li button')]
     .find(button => button.textContent?.includes('first@example.invalid'))!.click());

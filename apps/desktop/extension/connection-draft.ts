@@ -29,12 +29,14 @@ export function createConnectionDraftStore(area: Pick<StorageArea, 'get' | 'set'
       const returnAccount = publicReturnAccount(draft['returnAccount']);
       return { serverUrl: draft['serverUrl'], email: draft['email'],
         error: typeof draft['error'] === 'string' ? draft['error'] : null,
+        ...(draft['intent'] === 'register' ? { intent: 'register' as const } : {}),
         ...(returnAccount ? { returnAccount } : {}) };
     },
-    save({ serverUrl, email, error, returnAccount: rawReturnAccount }) {
+    save({ serverUrl, email, error, intent, returnAccount: rawReturnAccount }) {
       // Whitelist fields: credentials passed by a caller must never persist here.
       const returnAccount = publicReturnAccount(rawReturnAccount);
       return write(() => area.set({ [CONNECTION_DRAFT_KEY]: { serverUrl, email, error,
+        ...(intent === 'register' ? { intent } : {}),
         ...(returnAccount ? { returnAccount } : {}) } }));
     },
     clear() { return write(() => area.remove(CONNECTION_DRAFT_KEY)); },

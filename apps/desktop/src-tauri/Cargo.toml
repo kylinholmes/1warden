@@ -54,6 +54,9 @@ rustls-native-certs = "0.8"
 sha2 = "0.10"
 # 解析证书的签发者/有效期 —— 只给指纹的话，普通用户没法判断该不该信任
 x509-parser = "0.16"
+tokio = { version = "1", features = ["net", "sync", "time", "macros"] }
+tokio-tungstenite = { version = "0.28", default-features = false, features = ["connect", "rustls-tls-native-roots"] }
+futures-util = { version = "0.3", features = ["sink"] }
 
 # ══ 桌面端专属的依赖 ══════════════════════════════════════════════════
 #

@@ -4,6 +4,7 @@ import { createPortal } from 'react-dom';
 import type { UserProfile, VaultFolder } from '@1warden/vault';
 import { FloatingPanel, IconDice, IconFolder, IconImport, IconItems, IconMore, IconPencil, IconPlus, IconSearch, IconShield, IconStar, IconTrash, NavDrawer, TypeIcon } from '@1warden/ui';
 import { ProfileAccountMenu } from './ProfileAccountMenu';
+import { IconSpinner } from '@1warden/ui';
 import type { VaultCategory as Category } from '../screens/vault-presentation';
 
 export interface SidebarProps {
@@ -24,6 +25,8 @@ export interface SidebarProps {
   onOpenGenerator: () => void;
   /** 后台正在同步 —— 列表已可用，只是在更新 */
   syncing: boolean;
+  onSync: () => Promise<void>;
+  lastSyncedAt: number | null;
   /** 各类别的条目数，**只含 count > 0 的**（侧栏不渲染空类别） */
   /** 有内容的类型。`label` 来自共享词表 —— 不要再在这里查 `TYPE_LABEL` */
   typeCounts: { type: string; label: string; count: number }[];
@@ -96,6 +99,14 @@ function SidebarContent(props: SidebarProps) {
         onProfile={props.onOpenProfile} onSettings={props.onOpenSettings}
         onLogout={props.onLogout} onSwitch={props.onSwitchAccount} />}
       current={currentKey} onSelect={onNavSelect}
+      footer={<div className="space-y-1">
+        <button type="button" className="btn btn-quiet w-full justify-center" disabled={props.syncing}
+          onClick={() => { void props.onSync().catch(() => {}); }}>
+          {props.syncing && <IconSpinner size={14} />}{props.syncing ? '同步中…' : '立即同步'}
+        </button>
+        {props.lastSyncedAt !== null && <p className="text-center text-[10px] text-[var(--ink-tertiary)]"
+          title={new Date(props.lastSyncedAt).toLocaleString()}>上次同步 {new Date(props.lastSyncedAt).toLocaleTimeString()}</p>}
+      </div>}
       groups={[
         { key: 'main', entries: [
           { key: 'all', label: '全部', icon: <IconItems size={16} />, count: props.counts.all },

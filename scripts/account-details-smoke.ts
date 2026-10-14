@@ -61,11 +61,11 @@ async function closeSettings(page: any) {
 }
 async function login(page: any) {
   await page.waitForSelector('[data-add-server]');
-  check('fresh installation has a first-server empty state', await page.$eval('h1', (node: Element) => node.textContent === '添加服务器，开始使用')
-    && await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '添加第一个服务器'));
+  check('fresh installation offers login', await page.$eval('h1', (node: Element) => node.textContent === '你的密码，从这里开始')
+    && await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录'));
   await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('[data-brand-mark]')].some(img => img.complete && img.naturalWidth > 0));
   check('home production logo decodes under the real platform CSP', true);
-  await button(page, '添加第一个服务器');
+  await button(page, '登录');
   await page.waitForSelector('input[type="email"]');
   await text(page, 'input[type="url"]', serverUrl); await text(page, 'input[type="email"]', email);
   await text(page, 'input[type="password"]', masterPassword); await page.click('button[type="submit"]');
@@ -106,8 +106,8 @@ async function home(page: any) {
   check('account menu has no redundant account-home action', await page.$eval('#profile-account-menu', (node: Element) => !node.textContent?.includes('返回账户首页')));
   await button(page, '添加账户');
   await page.waitForSelector('input[type="email"]'); await page.click('[aria-label="返回上一级"]');
-  await page.waitForFunction(() => document.body.textContent?.includes('选择要连接的账户'));
-  check('saved-account home offers connecting another server', await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '连接其他服务器'));
+  await page.waitForFunction(() => document.body.textContent?.includes('欢迎回来'));
+  check('saved-account home offers another-account login', await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录其他账户'));
 }
 async function pickAccount(page: any) {
   await page.waitForFunction((email: string) => [...document.querySelectorAll<HTMLButtonElement>('main button')].some(b => b.textContent?.includes(email) && !b.disabled), {}, email);
@@ -267,9 +267,9 @@ try {
     await button(page, '返回首页'); await homeProfile(page, saved, 'locked account returning home');
     await pickAccount(page); await page.waitForSelector('#unlock-password');
     check('unlock has a home return path without deleting the account', (await rpc(page, 'snapshot')).result.account?.email === email);
-    await button(page, '返回首页'); await button(page, '连接其他服务器');
+    await button(page, '返回首页'); await button(page, '登录其他账户');
     await page.waitForSelector('input[type="email"]'); await page.click('[aria-label="返回上一级"]');
-    await page.waitForFunction(() => document.body.textContent?.includes('选择要连接的账户'));
+    await page.waitForFunction(() => document.body.textContent?.includes('欢迎回来'));
     check('connection form can return home without logging in', true);
   }
   rejectWrite = true;

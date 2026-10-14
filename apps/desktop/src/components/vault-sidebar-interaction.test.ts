@@ -25,7 +25,7 @@ const base: SidebarProps = {
   folders: [{ id: 'a', name: '旅行资料', nameFailed: false, updatedAt: '2026-10-09T00:00:00Z' }], category: { kind: 'folder', id: 'a' } as const,
   onSelect() {}, counts: { all: 1, favorites: 0 }, onLogout: async () => {}, onSwitchAccount: async () => {},
   account: 'person@example.test', profile: null, serverUrl: 'https://vault.example.test', onOpenSettings() {}, onOpenProfile() {},
-  generatorOpen: false, onOpenGenerator() {}, syncing: false,
+  generatorOpen: false, onOpenGenerator() {}, syncing: false, onSync: async () => {}, lastSyncedAt: null,
   typeCounts: [{ type: 'login', label: '登录', count: 1 }], showTypes: true,
   onCreateFolder: async (_name: string) => {}, onRenameFolder: async (_id: string, _name: string) => {}, onDeleteFolder: async (_id: string) => {},
 };
@@ -35,6 +35,16 @@ async function mount(overrides: Partial<SidebarProps> = {}) {
 }
 
 describe('vault sidebar folder interactions', () => {
+  it('offers manual sync and disables it while synchronization is running', async () => {
+    const onSync = vi.fn().mockResolvedValue(undefined);
+    await mount({ onSync });
+    await click(button('立即同步'));
+    expect(onSync).toHaveBeenCalledOnce();
+    await act(() => root.render(createElement(Sidebar, { ...base, onSync, syncing: true })));
+    expect(button('同步中…').disabled).toBe(true);
+    await click(button('同步中…'));
+    expect(onSync).toHaveBeenCalledOnce();
+  });
   it('offers one organization report destination separate from security and import', async () => {
     const onSelect = vi.fn();
     await mount({ onSelect });

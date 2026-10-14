@@ -20,6 +20,7 @@ import {
 } from '@1warden/crypto';
 import { VaultSession, restoreSession } from './session';
 import { SyncEngine, type SyncCache, type KdfCache } from './sync-engine';
+import type { NotificationsFactory } from '@1warden/api';
 import { decryptCipher, decryptFolder } from './decrypt';
 import { unwrapAttachmentKey, decryptAttachmentContent, encryptAttachmentContent } from './attachments';
 import { encryptBytes } from '@1warden/crypto';
@@ -144,7 +145,10 @@ export class VaultClient {
   private syncVerified = false;
   private _syncError: string | null = null;
   private _lastSyncedAt: number | null = null;
-  private syncRequest: { key: SymmetricKey; promise: Promise<void> } | null = null;
+  private syncRequest: { key: SymmetricKey; promise: Promise<void>; again: boolean } | null = null;
+  private readonly notifications: NotificationsFactory | undefined;
+  private stopNotifications: (() => void) | null = null;
+  private tokenRefresh: Promise<string> | null = null;
   private readonly itemWrites = new Map<string, Promise<void>>();
   /** Owner-memory only; never included in exported session state or persistence. */
   private readonly mergePreviews = new Map<string, { ids: string[]; snapshots: string[]; reveals: Record<string, string[]>;
@@ -184,6 +188,7 @@ export class VaultClient {
      * 给一个「默认用全局 fetch」的兜底只会让桌面端在运行时才炸。
      */
     fetchImpl: typeof fetch;
+    notifications?: NotificationsFactory;
     /** 设备标识的持久化。桌面端用 localStorage，扩展用 chrome.storage。 */
     deviceStore?: DeviceIdStore;
     /**
@@ -201,6 +206,7 @@ export class VaultClient {
     onPhase?: (label: string, ms: number) => void;
   }) {
     this.fetchImpl = opts.fetchImpl;
+    this.notifications = opts.notifications;
     this.syncCache = opts.syncCache;
     this.kdfCache = opts.kdfCache;
     this.onPhase = opts.onPhase;
@@ -294,6 +300,9 @@ export class VaultClient {
   }
 
   private invalidateAuthentication(): void {
+    this.stopNotifications?.();
+    this.stopNotifications = null;
+    this.tokenRefresh = null;
     this.mergePreviews.clear();
     this.authenticationGeneration++;
     this.itemWrites.clear();
@@ -446,6 +455,7 @@ export class VaultClient {
     // Publish an unlocked-but-loading state, never a transient confirmed-empty vault.
     this.session.setSyncing(true);
     this.session.completeUnlock(userKey);
+    this.startNotifications();
     this.clearPendingAuthentication();
 
     // 只缓存非敏感 KDF 参数；下次解锁仍须服务端验证主密码。
@@ -567,6 +577,43 @@ export class VaultClient {
     if (state.token === null) return;
     this.token = state.token;
     this.http = this.makeHttp(state.account.serverUrl, this.authHeaders());
+    this.startNotifications();
+  }
+
+  private startNotifications(): void {
+    const account = this.session.account;
+    if (!this.notifications || !account || !this.token || !this.session.isUnlocked()) return;
+    const generation = this.authenticationGeneration;
+    const current = () => generation === this.authenticationGeneration && this.session.isUnlocked();
+    this.stopNotifications = this.notifications({
+      serverUrl: account.serverUrl,
+      accessToken: async () => { if (!current()) throw new Error('保险库已锁定'); return this.accessToken(); },
+      onSync: async () => { if (current()) await this.refresh().catch(() => {}); },
+      onLogout: () => { if (current()) this.lock(); },
+    });
+  }
+
+  private async accessToken(): Promise<string> {
+    const token = this.token;
+    if (!token || !this.session.isUnlocked()) throw new Error('保险库未解锁');
+    let expires: unknown;
+    try { expires = (JSON.parse(atob(token.accessToken.split('.')[1]!.replace(/-/g, '+').replace(/_/g, '/'))) as { exp?: unknown }).exp; }
+    catch { /* Opaque tokens have no client-readable expiry. */ }
+    if (typeof expires !== 'number' || expires * 1000 > Date.now() + 60_000) return token.accessToken;
+    if (!token.refreshToken) throw new Error('登录已过期，请重新解锁');
+    if (this.tokenRefresh) return this.tokenRefresh;
+    const generation = this.authenticationGeneration;
+    const http = this.makeHttp(this.session.account!.serverUrl);
+    const request = (async () => {
+      const identifier = await this.deviceIdentity();
+      this.assertAuthentication(generation);
+      const renewed = await refreshToken(http, { refreshToken: token.refreshToken!, device: { ...this.device, identifier } });
+      this.assertAuthentication(generation);
+      this.token = { ...renewed, refreshToken: renewed.refreshToken ?? token.refreshToken };
+      return renewed.accessToken;
+    })().finally(() => { if (this.tokenRefresh === request) this.tokenRefresh = null; });
+    this.tokenRefresh = request;
+    return request;
   }
 
   /**
@@ -755,6 +802,7 @@ export class VaultClient {
   async refresh(): Promise<void> {
     const key = this.session.getKey();
     if (!key || !this.session.isUnlocked()) return;
+    if (this.syncRequest?.key === key) this.syncRequest.again = true;
     await this.doSync(key);
   }
 
@@ -784,17 +832,30 @@ export class VaultClient {
     this.syncEngine ??= this.makeSyncEngine();
     this.syncVerified = false;
     this.session.setSyncing(true);
-    const request = { key: unlockedKey, promise: Promise.resolve() };
-    request.promise = this.syncEngine.sync({ unlockedKey, force: true }).then(outcome => {
-      if (!current()) return;
-      this.syncVerified = !outcome.skipped && outcome.failedCount === 0;
-      if (outcome.failedCount > 0) {
-        this._syncError = '部分记录无法解密，同步尚未完成。请重试；若问题持续，请检查服务器数据。';
-      } else if (!outcome.skipped) {
-        this._syncError = null;
-        this._lastSyncedAt = Date.now();
-      }
-    }).catch(error => {
+    const engine = this.syncEngine;
+    const request = { key: unlockedKey, promise: Promise.resolve(), again: false };
+    request.promise = (async () => {
+      do {
+        request.again = false;
+        try {
+          await this.accessToken();
+          if (!current()) return;
+          const outcome = await engine.sync({ unlockedKey, force: true });
+          if (!current()) return;
+          this.syncVerified = !outcome.skipped && outcome.failedCount === 0;
+          if (outcome.failedCount > 0) {
+            this._syncError = '部分记录无法解密，同步尚未完成。请重试；若问题持续，请检查服务器数据。';
+          } else if (!outcome.skipped) {
+            this._syncError = null;
+            this._lastSyncedAt = Date.now();
+          }
+        } catch (error) {
+          // A push received during a failed request still owns a follow-up.
+          // No pending trigger means no automatic retry loop.
+          if (!current() || !request.again) throw error;
+        }
+      } while (request.again && current());
+    })().catch(error => {
       if (!current()) throw new Error('同步已取消，保险库已锁定或账户已变更');
       this._syncError = '同步失败，请检查网络或服务器后重试。';
       throw new Error(this._syncError, { cause: error });

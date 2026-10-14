@@ -215,7 +215,7 @@ try {
   check(a.authenticationRequests === 1 && b.authenticationRequests === 3, 'locked B requires fresh authentication with its own password');
 
   await menuAction('登出');
-  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '选择要连接的账户');
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '欢迎回来');
   const loggedOutB = await snapshot();
   check(loggedOutB.status === 'loggedOut' && loggedOutB.unlockedAccounts?.includes(a.key)
     && !loggedOutB.unlockedAccounts?.includes(b.key), 'logging out B preserves the unlocked A session');

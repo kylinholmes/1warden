@@ -28,13 +28,15 @@ interface Props {
   client: ApplicationClient;
   onConnected: () => void;
   onHome?: () => Promise<void>;
+  initialCredentials?: Pick<ConnectCreds, 'serverUrl' | 'email'> | undefined;
+  onRegister?: ((draft: ConnectionDraft) => Promise<void>) | undefined;
 }
 
 function isCertUntrusted(e: unknown): e is { kind: 'certUntrusted'; fingerprint?: string } {
   return (e as { kind?: string } | null)?.kind === 'certUntrusted';
 }
 
-export function Connect({ client, onConnected, onHome }: Props) {
+export function Connect({ client, onConnected, onHome, initialCredentials, onRegister }: Props) {
   const accounts = useAccounts();
 
   const viewStore = useLocalStore(() => {
@@ -230,7 +232,7 @@ export function Connect({ client, onConnected, onHome }: Props) {
       <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
         {restored === undefined ? <p className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在恢复表单…</p> : <ConnectScreen
           accounts={accounts}
-          initialCredentials={restored ?? (onHome ? { serverUrl: '', email: '' } : undefined)}
+          initialCredentials={initialCredentials ?? restored ?? (onHome ? { serverUrl: '', email: '' } : undefined)}
           onCredentialsChange={rememberFields}
           canGoBack={!!onHome || Boolean(restored?.returnAccount)}
           onBack={() => {
@@ -260,6 +262,19 @@ export function Connect({ client, onConnected, onHome }: Props) {
             </>
           }
           onSubmit={(c) => { void doConnect(c); }}
+          onRegister={onRegister ? fields => {
+            if (busy || leaving.current) return;
+            const version = ++operation.current;
+            leaving.current = true;
+            setBusy(true);
+            void draftWrites.current.then(() => {
+              if (!mounted.current || version !== operation.current) return;
+              return onRegister({ ...currentDraft.current, ...fields, error: null, intent: 'register' });
+            }).catch(cause => {
+              if (!mounted.current || version !== operation.current) return;
+              leaving.current = false; setBusy(false); setError(apiMessageOf(cause));
+            });
+          } : undefined}
           onTwoFactor={({ code, provider, remember }) => { void submitCode(code, provider, remember); }}
         />}
       </div>
@@ -273,7 +288,7 @@ export function Connect({ client, onConnected, onHome }: Props) {
  * 设计取向：**危险的那个动作不做成默认按钮**。这里默认、显眼的选项是「取消」，
  * 「信任并继续」要用户主动去点。一排按钮里最顺手的那个不该是不可逆的选择。
  */
-function CertificatePrompt(props: {
+export function CertificatePrompt(props: {
   cert: CertInfo;
   host: string;
   busy: boolean;

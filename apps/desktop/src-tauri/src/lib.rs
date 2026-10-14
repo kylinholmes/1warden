@@ -39,6 +39,7 @@
  * 这和 Cargo.toml 里**不能**用它们是同一件事的两面 —— 那边只有 target triple。
  */
 mod http;
+mod websocket;
 mod autotype;
 #[cfg(desktop)]
 mod save;
@@ -175,6 +176,9 @@ pub fn run() {
             #[cfg(desktop)]
             restart_app,
             http::http_request,
+            websocket::websocket_open,
+            websocket::websocket_send,
+            websocket::websocket_close,
             http::probe_certificate,
             http::trust_certificate,
             http::forget_certificate,
@@ -210,6 +214,7 @@ pub fn run() {
             let state = http::HttpState::new(dir.join("trusted-certs.json"))
                 .map_err(|e| -> Box<dyn std::error::Error> { e.into() })?;
             app.manage(state);
+            app.manage(websocket::WebSocketState::default());
             #[cfg(desktop)]
             {
                 app.manage(quick::QuickState::new(dir.join("quick-search.json")));

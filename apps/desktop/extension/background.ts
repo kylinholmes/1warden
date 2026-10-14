@@ -27,6 +27,7 @@ import {
   totpCode,
 } from '@1warden/vault';
 import { host } from '@1warden/ui';
+import { subscribeNotifications } from '@1warden/api';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
 import { syncCache, kdfCache, summarise } from '@1warden/ui';
 import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
@@ -127,6 +128,18 @@ function newClient(): VaultClient {
      * 桌面端走 Rust —— 差异只在这一行，见 `@1warden/ui/host`。
      */
     fetchImpl: host().fetch,
+    notifications: options => subscribeNotifications({ ...options,
+      onSync: async () => {
+        await options.onSync();
+        // Automatic sync owns no RPC completion hook. Persist its latest snapshot
+        // without renewing the absolute lock deadline or touching a different account.
+        if (c === client && c.isUnlocked() && !authenticating.has(c)) await persistState().catch(reportFailure);
+      },
+      onLogout: () => {
+        if (c === client) void retireClient(c, false).then(notifyChanged).catch(reportFailure);
+        else options.onLogout();
+      },
+    }),
     deviceStore,
     // Browser alarms own the absolute deadline; an in-memory timer would reset on every worker restore.
     autoLockMs: 0,

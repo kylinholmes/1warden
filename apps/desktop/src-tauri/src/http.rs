@@ -369,6 +369,7 @@ impl rustls::client::danger::ServerCertVerifier for CaptureOnlyVerifier {
 // ── 状态 ──
 
 pub struct HttpState {
+    pub(crate) tls: Arc<rustls::ClientConfig>,
     client: reqwest::Client,
     no_redirect_client: reqwest::Client,
     pins: Arc<Mutex<CertPins>>,
@@ -420,12 +421,12 @@ impl HttpState {
         // Restricted redirects retain exactly the same system roots, pinning
         // verifier, and captured certificate state as ordinary requests.
         let no_redirect_client = reqwest::Client::builder()
-            .use_preconfigured_tls(tls)
+            .use_preconfigured_tls(tls.clone())
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| format!("无法建立 HTTP 客户端：{e}"))?;
 
-        Ok(Self { client, no_redirect_client, pins, pins_path, rejected })
+        Ok(Self { tls: Arc::new(tls), client, no_redirect_client, pins, pins_path, rejected })
     }
 
     fn take_rejected(&self) -> Option<CapturedCert> {

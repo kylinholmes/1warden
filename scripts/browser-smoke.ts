@@ -299,8 +299,9 @@ try {
   await openPopup();
   await popup.waitForSelector('main button');
   await popup.waitForSelector('[data-add-server]');
-  check('empty home invites adding the first server', await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '添加第一个服务器')
-    && await popup.$eval('h1', (node: Element) => node.textContent === '添加服务器，开始使用'));
+  check('empty home offers login and registration', await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录')
+    && await popup.$eval('h1', (node: Element) => node.textContent === '你的密码，从这里开始')
+    && await popup.evaluate(() => [...document.querySelectorAll('button')].some(button => button.textContent?.trim() === '注册')));
   await popup.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('[data-brand-mark]')].every(node => node.complete && node.naturalWidth > 0));
   check('production brand asset loads inside extension CSP', await popup.$eval('[data-brand-mark]', (node: HTMLImageElement) => node.complete && node.naturalWidth > 0));
   await screenshot('empty-home-brand');
@@ -316,8 +317,8 @@ try {
   }, seed);
   await openPopup(true);
   await popup.waitForSelector('main li button');
-  check('populated home retains account selection and other-server wording', await popup.$eval('h1', (node: Element) => node.textContent === '选择要连接的账户')
-    && await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '连接其他服务器'));
+  check('populated home retains account selection and another-account login', await popup.$eval('h1', (node: Element) => node.textContent === '欢迎回来')
+    && await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录其他账户'));
   await enterHome();
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   check('shared vault renders from background session', true);

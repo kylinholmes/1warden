@@ -58,6 +58,7 @@ export function ConnectScreen({
   onPickAccount,
   onBack,
   canGoBack = false,
+  onRegister,
 }: {
   /** `null` = 还在读（见 `accounts.ts` 对 `null` 和 `[]` 区别的说明） */
   accounts: SavedAccount[] | null;
@@ -78,6 +79,7 @@ export function ConnectScreen({
   onPickAccount?: (account: SavedAccount) => void;
   onBack?: () => void;
   canGoBack?: boolean;
+  onRegister?: ((fields: Pick<ConnectCreds, 'serverUrl' | 'email'>) => void) | undefined;
 }) {
   /*
    * 三档视图：
@@ -147,7 +149,7 @@ export function ConnectScreen({
 
       {!inFlow && view !== null && (
         <h1 className="text-md font-medium text-[var(--ink-secondary)]">
-          {view === 'pick' ? '选择要连接的账户' : '连接到你的 Vaultwarden'}
+          {view === 'pick' ? '选择要登录的账户' : '登录你的保险库'}
         </h1>
       )}
 
@@ -195,18 +197,18 @@ export function ConnectScreen({
 
             {view === 'form' && (
               <>
-                <Field label="服务器地址" hint="例如 https://vault.example.com">
+                <Field label="邮箱">
                   <input
-                    type="url" required value={serverUrl} autoFocus
-                    onChange={(e) => setServerUrl(e.target.value)}
-                    placeholder="https://vault.example.com"
+                    type="email" required value={email} autoFocus disabled={busy} autoComplete="username"
+                    onChange={(e) => setEmail(e.target.value)}
                     className="field"
                   />
                 </Field>
-                <Field label="邮箱">
+                <Field label="服务器地址" hint="填写注册账户时使用的 Vaultwarden / Bitwarden 地址">
                   <input
-                    type="email" required value={email} autoFocus={Boolean(serverUrl)}
-                    onChange={(e) => setEmail(e.target.value)}
+                    type="url" required value={serverUrl} disabled={busy} autoComplete="url"
+                    onChange={(e) => setServerUrl(e.target.value)}
+                    placeholder="https://vault.example.com"
                     className="field"
                   />
                 </Field>
@@ -216,7 +218,7 @@ export function ConnectScreen({
             <Field label="主密码">
               <input
                 ref={passwordRef}
-                type="password" required value={password} disabled={busy}
+                type="password" required value={password} disabled={busy} autoComplete="current-password"
                 onChange={(e) => setPassword(e.target.value)}
                 className="field secret"
               />
@@ -224,7 +226,7 @@ export function ConnectScreen({
 
             <button type="submit" disabled={busy} className="btn btn-primary w-full py-2.5">
               {busy && <IconSpinner size={15} />}
-              {busy ? '正在解锁…' : '解锁'}
+              {busy ? '正在登录…' : '登录'}
             </button>
 
             {view === 'quick' && (
@@ -239,6 +241,11 @@ export function ConnectScreen({
           </form>
         )}
       </div>
+
+      {!inFlow && view !== null && onRegister && <p className="mt-5 text-center text-sm text-[var(--ink-secondary)]">
+        还没有账户？<button type="button" disabled={busy} className="btn btn-ghost ml-1 px-2 text-[var(--accent)]"
+          onClick={() => { setPassword(''); onRegister({ serverUrl, email }); }}>创建账户</button>
+      </p>}
 
       {error && (
         <p role="alert" className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-sm text-[var(--risk)]">
@@ -293,7 +300,7 @@ export function AccountPicker({ accounts, busy = false, onPick, onOther, renderI
 
       <button type="button" data-add-server onClick={onOther} disabled={busy} className="btn btn-quiet mt-3 w-full gap-2 py-2.5">
         <IconPlus size={14} />
-        {accounts.length ? '连接其他服务器' : '添加第一个服务器'}
+        {accounts.length ? '登录其他账户' : '登录'}
       </button>
     </div>
   );

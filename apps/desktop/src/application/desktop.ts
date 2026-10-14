@@ -1,4 +1,6 @@
 import { VaultClient } from '@1warden/vault';
+import { subscribeNotifications } from '@1warden/api';
+import { NativeWebSocket } from '../native-websocket';
 import { host, IS_DESKTOP, kdfCache, syncCache } from '@1warden/ui';
 import { fromBase64 } from '@1warden/crypto';
 import { canSaveFiles, saveFile } from '../save';
@@ -14,6 +16,7 @@ export function createDesktopApplication() {
   const changed = () => { for (const listener of listeners) listener(); };
   const sessions = createAccountSessions(() => new VaultClient({
     fetchImpl: host().fetch,
+    notifications: options => subscribeNotifications(options, tauriAvailable() ? NativeWebSocket : globalThis.WebSocket),
     autoLockMs: 15 * 60 * 1000,
     onLock: changed, onStatus: changed, onSync: changed,
     syncCache, kdfCache,

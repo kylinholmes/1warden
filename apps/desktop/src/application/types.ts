@@ -146,6 +146,8 @@ export interface ConnectionDraft {
   serverUrl: string;
   email: string;
   error: string | null;
+  /** Public navigation intent only; registration tokens and passwords stay in memory. */
+  intent?: 'register';
   /** Public origin identity, so cancelling Add Account can return to it. */
   returnAccount?: AccountTarget;
 }

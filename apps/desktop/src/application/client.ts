@@ -1,4 +1,5 @@
 import { createStore } from '@1warden/state';
+import { subscribeFocusSync } from './focus-sync';
 import {
   EMPTY_SNAPSHOT, type ApplicationCapabilities, type ApplicationClient,
   type ApplicationMethod, type ApplicationService, type ApplicationSnapshot, type BrowserActions,
@@ -34,6 +35,7 @@ export function createApplicationClient(service: ApplicationService, options: Op
   let disposed = false;
   let locking = 0;
   let unsubscribeRemote: (() => void) | null = null;
+  let unsubscribeFocus: (() => void) | null = null;
   const subscriptions = new Set<() => void>();
 
   function publish(snapshot: ApplicationSnapshot) {
@@ -93,6 +95,9 @@ export function createApplicationClient(service: ApplicationService, options: Op
     },
     async initialize() {
       disposed = false;
+      if (!unsubscribeFocus && typeof window !== 'undefined') {
+        unsubscribeFocus = subscribeFocusSync({ getSnapshot: state.getState, sync: operations.sync }, window);
+      }
       if (!unsubscribeRemote && options.subscribeRemote) {
         unsubscribeRemote = options.subscribeRemote(() => { void refresh().catch(() => {}); });
       }
@@ -105,6 +110,7 @@ export function createApplicationClient(service: ApplicationService, options: Op
       request++;
       unsubscribeRemote?.();
       unsubscribeRemote = null;
+      unsubscribeFocus?.(); unsubscribeFocus = null;
       for (const stop of subscriptions) stop(); subscriptions.clear();
       state.setState({ ...EMPTY_SNAPSHOT }, true);
     },

@@ -8,3 +8,5 @@ export * from './ciphers';
 export * from './attachments';
 export * from './folders';
 export * from './accounts';
+export * from './notifications';
+export * from './registration';

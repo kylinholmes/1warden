@@ -1,6 +1,6 @@
 import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
 import { useCallback, useEffect, useRef, Component, type ErrorInfo } from 'react';
-import type { ApplicationClient } from './application/types';
+import type { ApplicationClient, ConnectionDraft } from './application/types';
 import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
@@ -10,6 +10,7 @@ import { ToastProvider } from './components/Toast';
 import { AccountMetadataProvider } from './components/AccountMetadata';
 import { ProfileAutosaveProvider, useProfileAutosave } from './components/ProfileAutosave';
 import { Home } from './screens/Home';
+import { Register } from './screens/Register';
 import { accountKey, type AccountTarget } from './application/account-target';
 import { createStore } from '@1warden/state';
 import { UNSAVED_PROFILE_MESSAGE } from './profile-autosave';
@@ -26,16 +27,20 @@ function AppContent({ client }: { client: ApplicationClient }) {
     const ready = false;
     const error = (null) as string | null;
     const attempt = 0;
-    const route = ('home') as 'home' | 'work';
+    const route = ('home') as 'home' | 'work' | 'register';
+    const entryDraft = undefined as ConnectionDraft | undefined;
     const navigating = false;
-    return { ready, error, attempt, route, navigating };
+    return { ready, error, attempt, route, navigating, entryDraft };
   });
   const [ready, setReady] = useStoreField(viewStore, 'ready');
   const [error, setError] = useStoreField(viewStore, 'error');
   const [attempt, setAttempt] = useStoreField(viewStore, 'attempt');
   const [route, setRoute] = useStoreField(viewStore, 'route');
   const [navigating, setNavigating] = useStoreField(viewStore, 'navigating');
+  const [entryDraft, setEntryDraft] = useStoreField(viewStore, 'entryDraft');
   const navigation = useRef(false);
+  const entryOperation = useRef(0);
+  const entryWrites = useRef<Promise<void>>(Promise.resolve());
   const autosave = useProfileAutosave();
 
   useEffect(() => {
@@ -44,11 +49,11 @@ function AppContent({ client }: { client: ApplicationClient }) {
     setError(null);
     void client.initialize().then(async () => {
       const draft = await client.connectionDraft?.load().catch(() => null);
-      if (alive) { if (draft) setRoute('work'); setReady(true); }
+      if (alive) { if (draft) { setEntryDraft(draft); setRoute(draft.intent === 'register' ? 'register' : 'work'); } setReady(true); }
     }).catch((e: unknown) => {
       if (alive) setError(e instanceof Error ? e.message : '无法载入保险库');
     });
-    return () => { alive = false; };
+    return () => { alive = false; entryOperation.current++; };
   }, [client, attempt]);
 
   const handleLock = useCallback(() => {
@@ -57,16 +62,21 @@ function AppContent({ client }: { client: ApplicationClient }) {
   const screen = screenFor(session.status);
   async function goHome() {
     if (navigation.current) return;
-    navigation.current = true; setNavigating(true); setError(null); setRoute('home');
+    entryOperation.current++;
+    navigation.current = true; setNavigating(true); setError(null); setEntryDraft(undefined); setRoute('home');
     try {
       if (client.getSnapshot().status !== 'unlocked') await client.switchAccount(null);
+      // A mode change may already be persisting its draft. Clear after that
+      // write settles so an abandoned registration cannot resurrect its route.
+      await entryWrites.current.catch(() => {});
       await client.connectionDraft?.clear();
       void autosave?.flush();
     } catch (e) { setError(e instanceof Error ? e.message : '返回首页失败'); }
     finally { navigation.current = false; setNavigating(false); }
   }
-  async function switchAccount(account: AccountTarget | null) {
+  async function switchAccount(account: AccountTarget | null, nextRoute: 'work' | 'register' = 'work') {
     if (navigation.current) return;
+    entryOperation.current++;
     navigation.current = true; setError(null);
     try {
       const active = client.getSnapshot();
@@ -75,9 +85,32 @@ function AppContent({ client }: { client: ApplicationClient }) {
         setNavigating(true);
         await client.switchAccount(account);
       }
-      setRoute('work');
+      setEntryDraft(undefined); setRoute(nextRoute);
     } catch (e) { setError(e instanceof Error ? e.message : '切换账户失败'); throw e; }
     finally { navigation.current = false; setNavigating(false); }
+  }
+  async function showRegistration(draft: ConnectionDraft) {
+    const version = ++entryOperation.current;
+    const registration = { ...draft, error: null, intent: 'register' as const };
+    entryWrites.current = entryWrites.current.catch(() => {}).then(async () => {
+      if (version === entryOperation.current) await client.connectionDraft?.save(registration);
+    });
+    await entryWrites.current;
+    if (version !== entryOperation.current) return;
+    setEntryDraft(registration); setError(null); setRoute('register');
+  }
+  async function showLogin(fields: Pick<ConnectionDraft, 'serverUrl' | 'email'>) {
+    const version = ++entryOperation.current;
+    const previous = await client.connectionDraft?.load();
+    if (version !== entryOperation.current) return;
+    const draft: ConnectionDraft = { ...fields, error: null,
+      ...(previous?.returnAccount ? { returnAccount: previous.returnAccount } : {}) };
+    entryWrites.current = entryWrites.current.catch(() => {}).then(async () => {
+      if (version === entryOperation.current) await client.connectionDraft?.save(draft);
+    });
+    await entryWrites.current;
+    if (version !== entryOperation.current) return;
+    setEntryDraft(draft); setError(null); setRoute('work');
   }
   async function saveBeforeLeaving() {
     const result = await autosave?.flush();
@@ -85,6 +118,7 @@ function AppContent({ client }: { client: ApplicationClient }) {
   }
   async function logout() {
     if (navigation.current) return;
+    entryOperation.current++;
     navigation.current = true; setError(null);
     try {
       const account = client.getSnapshot().account;
@@ -107,15 +141,15 @@ function AppContent({ client }: { client: ApplicationClient }) {
         </div>
       ) : <>
         {error && <div role="alert" className="fixed bottom-4 left-4 z-50 rounded-[var(--radius-sm)] bg-[var(--surface-overlay)] p-3 text-sm text-[var(--risk)]">{error}</div>}
-        {route === 'home' ? <Home session={session} busy={navigating} onPick={account => { void switchAccount(account).catch(() => {}); }} onOther={() => { void switchAccount(null).catch(() => {}); }} /> : navigating ? (
+        {route === 'home' ? <Home session={session} busy={navigating} onPick={account => { void switchAccount(account).catch(() => {}); }} onOther={() => { void switchAccount(null).catch(() => {}); }} onRegister={() => { void switchAccount(null, 'register').catch(() => {}); }} /> : navigating ? (
           // A switch immediately clears the session. Do not mount Connect during
           // that intermediate snapshot: its field effect would create a false draft.
           <div role="status" className="flex h-full items-center justify-center gap-2 bg-[var(--surface-canvas)] text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在切换账户…</div>
-        ) : screen === 'vault' ? (
+        ) : route === 'register' ? <Register client={client} initialDraft={entryDraft} onHome={goHome} onLogin={showLogin} /> : screen === 'vault' ? (
           <VaultView key={`${session.account?.serverUrl}:${session.account?.email}`} client={client} onLock={handleLock} onSwitchAccount={switchAccount} onLogout={logout} />
         ) : screen === 'unlock' ? (
           <Unlock client={client} onUnlocked={() => setError(null)} onDisconnect={() => { void goHome(); }} />
-        ) : <Connect client={client} onConnected={() => setError(null)} onHome={goHome} />}
+        ) : <Connect client={client} onConnected={() => setError(null)} onHome={goHome} initialCredentials={entryDraft} onRegister={showRegistration} />}
       </>}
     </>
   );
