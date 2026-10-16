@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const fixture = vi.hoisted(() => ({ desktop: true, native: true, label: 'main', supported: true,
+  os: 'mac', manual: vi.fn(),
   version: vi.fn(async () => '0.1.0'), check: vi.fn(async (): Promise<unknown> => null), invoke: vi.fn() }));
 vi.mock('@1warden/ui', () => ({ get IS_DESKTOP() { return fixture.desktop; } }));
 vi.mock('../capabilities', () => ({ tauriAvailable: () => fixture.native }));
@@ -8,15 +9,45 @@ vi.mock('@tauri-apps/api/window', () => ({ getCurrentWindow: () => ({ label: fix
 vi.mock('@tauri-apps/api/app', () => ({ getVersion: fixture.version }));
 vi.mock('@tauri-apps/plugin-updater', () => ({ check: fixture.check }));
 vi.mock('@tauri-apps/api/core', () => ({ invoke: fixture.invoke }));
+vi.mock('./manual', () => ({ checkManualUpdate: fixture.manual }));
 
 beforeEach(() => {
   vi.resetModules(); vi.clearAllMocks(); vi.useFakeTimers();
   fixture.desktop = true; fixture.native = true; fixture.label = 'main'; fixture.supported = true;
-  fixture.invoke.mockImplementation(async (command: string) => command === 'app_updates_supported' ? fixture.supported : undefined);
+  fixture.os = 'mac';
+  fixture.invoke.mockImplementation(async (command: string) => command === 'app_update_platform'
+    ? fixture.supported ? fixture.os === 'win' ? 'windows' : 'macos' : null : undefined);
 });
 afterEach(() => { vi.useRealTimers(); });
 
 describe('native updater boundary', () => {
+  it('only downloads on Windows until the user explicitly installs and restarts', async () => {
+    fixture.os = 'win';
+    const release = { version: '0.2.0', download: vi.fn(async () => {}), install: vi.fn(async () => {}),
+      downloadAndInstall: vi.fn(), close: vi.fn(async () => {}) };
+    fixture.check.mockResolvedValueOnce(release);
+    const { desktopUpdater } = await import('./desktop');
+    await desktopUpdater.check();
+    expect(release.download).toHaveBeenCalledWith(expect.any(Function), { timeout: 300_000 });
+    expect(release.install).not.toHaveBeenCalled();
+    expect(release.downloadAndInstall).not.toHaveBeenCalled();
+    expect(release.close).not.toHaveBeenCalled();
+    await desktopUpdater.restart();
+    expect(release.install).toHaveBeenCalledWith({ restartAfterInstall: true });
+    expect(fixture.invoke).not.toHaveBeenCalledWith('restart_app');
+    desktopUpdater.dispose();
+  });
+
+  it('falls back to a manual release notice when native metadata is missing for this platform', async () => {
+    fixture.check.mockRejectedValueOnce(Error('missing platform'));
+    fixture.manual.mockResolvedValueOnce({ version: '0.2.0', manual: '手动更新', close: vi.fn() });
+    const { desktopUpdater } = await import('./desktop');
+    await desktopUpdater.check();
+    expect(desktopUpdater.getSnapshot()).toMatchObject({ phase: 'available', targetVersion: '0.2.0' });
+    expect(fixture.manual).toHaveBeenCalledWith('0.1.0');
+    desktopUpdater.dispose();
+  });
+
   it.each([
     ['browser build', { desktop: false }],
     ['browser preview', { native: false }],
@@ -37,7 +68,7 @@ describe('native updater boundary', () => {
   it('uses the actual native support command once and starts only one main-window schedule', async () => {
     const { desktopUpdater, startDesktopUpdater } = await import('./desktop');
     expect(await Promise.all([startDesktopUpdater(), startDesktopUpdater()])).toEqual([true, true]);
-    expect(fixture.invoke.mock.calls.filter(([command]) => command === 'app_updates_supported')).toEqual([['app_updates_supported']]);
+    expect(fixture.invoke.mock.calls.filter(([command]) => command === 'app_update_platform')).toEqual([['app_update_platform']]);
     await vi.advanceTimersByTimeAsync(10_000);
     expect(fixture.check).toHaveBeenCalledTimes(1);
     expect(fixture.version).toHaveBeenCalledTimes(1);

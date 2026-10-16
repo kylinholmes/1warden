@@ -4,23 +4,29 @@ import { createUpdaterManifest } from './updater-manifest';
 const input = {
   version: '0.1.0', repository: 'kylinholmes/1warden',
   signature: 'dGVzdC1zaWduYXR1cmU=', pubDate: '2026-10-08T00:00:00.000Z',
+  windowsSignature: 'd2luZG93cy1zaWduYXR1cmU=',
 };
 
 describe('public updater manifest', () => {
   it('points Apple Silicon at its versioned signed archive, with the signature text', () => {
     const result = createUpdaterManifest(input);
     expect(result.version).toBe('0.1.0');
-    expect(Object.keys(result.platforms)).toEqual(['darwin-aarch64']);
+    expect(Object.keys(result.platforms)).toEqual(['darwin-aarch64', 'windows-x86_64']);
     expect(result.platforms['darwin-aarch64']).toEqual({
       url: 'https://github.com/kylinholmes/1warden/releases/download/v0.1.0/1Warden-0.1.0-macos-apple-silicon.app.tar.gz',
       signature: input.signature,
     });
     expect(result.pub_date).toBe(input.pubDate);
+    expect(result.platforms['windows-x86_64']).toEqual({
+      url: 'https://github.com/kylinholmes/1warden/releases/download/v0.1.0/1Warden-0.1.0-windows-x64-setup.exe',
+      signature: input.windowsSignature,
+    });
   });
 
   it('rejects empty or invalid signature data instead of publishing a broken updater', () => {
     for (const signature of ['', '  ', 'unsigned archive']) {
       expect(() => createUpdaterManifest({ ...input, signature })).toThrow(/signature/i);
+      expect(() => createUpdaterManifest({ ...input, windowsSignature: signature })).toThrow(/signature/i);
     }
   });
 

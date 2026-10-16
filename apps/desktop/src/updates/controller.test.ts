@@ -17,6 +17,46 @@ function update(overrides: Partial<AppUpdate> = {}): AppUpdate {
 afterEach(() => { vi.useRealTimers(); });
 
 describe('desktop app update controller', () => {
+  it('announces manual releases without downloading, installing or restarting', async () => {
+    const release = update({ manual: '请通过原安装渠道更新。' });
+    const service = backend({ check: vi.fn(async () => release) });
+    const updater = createAppUpdater(service, 0);
+    await updater.check(); await updater.restart();
+    expect(updater.getSnapshot()).toMatchObject({ phase: 'available', targetVersion: '0.2.0', manual: release.manual });
+    expect(release.downloadAndInstall).not.toHaveBeenCalled();
+    expect(service.restart).not.toHaveBeenCalled();
+    expect(release.close).toHaveBeenCalledTimes(1);
+    updater.dispose();
+  });
+
+  it('retains a Windows download until explicit installation and permits retry after installer failure', async () => {
+    const install = vi.fn().mockRejectedValueOnce(Error('installer unavailable')).mockResolvedValueOnce(undefined);
+    const release = update({ installOnRestart: install });
+    const service = backend({ check: vi.fn(async () => release) });
+    const updater = createAppUpdater(service);
+    await updater.check();
+    expect(updater.getSnapshot()).toMatchObject({ phase: 'ready', installOnRestart: true });
+    expect(install).not.toHaveBeenCalled();
+    expect(release.close).not.toHaveBeenCalled();
+    await updater.restart();
+    expect(updater.getSnapshot()).toMatchObject({ phase: 'ready', targetVersion: release.version, error: expect.any(String) });
+    await updater.restart();
+    expect(install).toHaveBeenCalledTimes(2);
+    expect(service.restart).not.toHaveBeenCalled();
+    updater.dispose();
+    expect(release.close).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the known newer version available for fallback if retrying the check fails', async () => {
+    const release = update({ downloadAndInstall: vi.fn(async () => { throw Error('invalid signature'); }) });
+    const service = backend({ check: vi.fn().mockResolvedValueOnce(release).mockRejectedValueOnce(Error('offline')) });
+    const updater = createAppUpdater(service);
+    await updater.check(); await updater.check();
+    expect(updater.getSnapshot()).toMatchObject({ phase: 'error', targetVersion: '0.2.0' });
+    expect(service.restart).not.toHaveBeenCalled();
+    updater.dispose();
+  });
+
   it('checks after a startup delay and every six hours, and releases its timers on disposal', async () => {
     vi.useFakeTimers();
     const service = backend();

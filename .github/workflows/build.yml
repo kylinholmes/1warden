@@ -407,6 +407,16 @@ jobs:
           pattern: 1Warden-*
           merge-multiple: true
           path: release-artifacts
+      - name: Install the pinned signing CLI
+        run: bun install --frozen-lockfile
+      - name: Sign the verified Windows installer
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ''
+        run: |
+          set -euo pipefail
+          test -n "$TAURI_SIGNING_PRIVATE_KEY"
+          bun run --cwd apps/desktop tauri signer sign --app-version "$APP_VERSION" "$GITHUB_WORKSPACE/release-artifacts/1Warden-$APP_VERSION-windows-x64-setup.exe"
       - name: Create signed update manifest
         run: bun run scripts/updater-manifest.ts release-artifacts
       - name: Validate complete release assets
@@ -430,7 +440,7 @@ jobs:
           printf '%s\n' \
             'Includes Chromium and Firefox extensions, Apple Silicon macOS app/DMG, and Windows x64 installer/portable executables.' \
             'These are testing packages: the macOS app is ad-hoc signed, without Developer ID signing or notarization; browser extensions require manual installation.' \
-            'macOS prepares signed updates and prompts for an explicit restart. Windows updates use the downloaded installer; Windows packages are not Authenticode signed.' \
+            'macOS prepares signed updates and prompts for restart. Windows installations download signed updates and install only after confirmation; portable, extension and mobile clients show update notices. Windows packages are not Authenticode signed.' \
             "Installation and build instructions: https://github.com/$GH_REPO/blob/$RELEASE_TAG/docs/builds.md" > release-notes.md
           release_state=$(mktemp)
           release_error=$(mktemp)

@@ -7,6 +7,10 @@ export type DownloadEvent =
 
 export interface AppUpdate {
   version: string;
+  /** A release that must be installed through its original distribution channel. */
+  manual?: string;
+  /** Windows downloads first; invoking its installer can terminate this process. */
+  installOnRestart?(): Promise<void>;
   downloadAndInstall(onEvent: (event: DownloadEvent) => void): Promise<void>;
   close(): Promise<void>;
 }
@@ -16,7 +20,9 @@ export interface UpdateBackend {
   restart(): Promise<void>;
 }
 export interface UpdateState {
-  phase: 'idle' | 'checking' | 'downloading' | 'installing' | 'ready' | 'restarting' | 'error';
+  phase: 'idle' | 'checking' | 'available' | 'downloading' | 'installing' | 'ready' | 'restarting' | 'error';
+  manual: string | null;
+  installOnRestart: boolean;
   currentVersion: string | null;
   targetVersion: string | null;
   downloadedBytes: number;
@@ -36,10 +42,10 @@ export interface AppUpdater {
 const STARTUP_DELAY_MS = 10_000;
 const CHECK_INTERVAL_MS = 6 * 60 * 60 * 1000;
 
-/** One owner per main window; a prepared bundle stays ready until a normal or explicit restart. */
-export function createAppUpdater(backend: UpdateBackend): AppUpdater {
+/** One owner per window; a prepared download stays ready until installation or disposal. */
+export function createAppUpdater(backend: UpdateBackend, startupDelay = STARTUP_DELAY_MS): AppUpdater {
   const store = createStore<Readonly<UpdateState>>(() => ({ phase: 'idle', currentVersion: null, targetVersion: null,
-    downloadedBytes: 0, totalBytes: null, checkedAt: null, error: null }));
+    downloadedBytes: 0, totalBytes: null, checkedAt: null, error: null, manual: null, installOnRestart: false }));
   const subscriptions = new Set<() => void>();
   let started = false;
   let disposed = false;
@@ -49,6 +55,7 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
   let versionRequest: Promise<void> | null = null;
   let startup: ReturnType<typeof setTimeout> | undefined;
   let interval: ReturnType<typeof setInterval> | undefined;
+  let prepared: AppUpdate | null = null;
 
   function publish(patch: Partial<UpdateState>) {
     if (disposed) return;
@@ -68,13 +75,15 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
     let downloading = false;
     try {
       if (!current(version)) return;
-      publish({ phase: 'checking', error: null, targetVersion: null, downloadedBytes: 0, totalBytes: null });
+      publish({ phase: 'checking', error: null, downloadedBytes: 0, totalBytes: null });
       await loadVersion();
       if (!current(version)) return;
       release = await backend.check();
       if (!current(version)) return;
       publish({ checkedAt: Date.now() });
-      if (!release) { publish({ phase: 'idle' }); return; }
+      if (!release) { publish({ phase: 'idle', targetVersion: null, manual: null, installOnRestart: false }); return; }
+      publish({ targetVersion: release.version, manual: release.manual ?? null, installOnRestart: !!release.installOnRestart });
+      if (release.manual) { publish({ phase: 'available' }); return; }
       downloading = true;
       publish({ phase: 'downloading', targetVersion: release.version });
       await release.downloadAndInstall((event) => {
@@ -88,8 +97,12 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
           if (Number.isFinite(chunk) && chunk >= 0) publish({ downloadedBytes: store.getState().downloadedBytes + chunk });
         } else publish({ phase: 'installing' });
       });
-      // Finished is a download event. Verification and installation must also succeed.
-      if (current(version)) publish({ phase: 'ready', error: null });
+      // Finished precedes signature verification. On macOS installation must also
+      // complete; on Windows the verified bytes stay owned until explicit install.
+      if (current(version)) {
+        if (release.installOnRestart) { prepared = release; release = null; }
+        publish({ phase: 'ready', error: null });
+      }
     } catch {
       if (current(version)) publish({ phase: 'error', error: downloading
         ? '更新准备失败，请重试。' : '暂时无法检查更新，请稍后重试。' });
@@ -113,8 +126,9 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
     if (pendingRestart) return pendingRestart;
     if (disposed || store.getState().phase !== 'ready') return Promise.resolve();
     publish({ phase: 'restarting', error: null });
-    const request = backend.restart().catch(() => {
-      publish({ phase: 'ready', error: '无法重启，请稍后再试。' });
+    const request = (prepared?.installOnRestart
+      ? prepared.installOnRestart() : backend.restart()).catch(() => {
+      publish({ phase: 'ready', error: prepared ? '无法安装更新，请重试或手动更新。' : '无法重启，请稍后再试。' });
     }).finally(() => { if (pendingRestart === request) pendingRestart = null; });
     pendingRestart = request;
     return request;
@@ -130,7 +144,7 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
       if (started || disposed) return;
       started = true;
       void loadVersion().catch(() => {});
-      startup = setTimeout(() => { void check(); }, STARTUP_DELAY_MS);
+      startup = setTimeout(() => { void check(); }, startupDelay);
       interval = setInterval(() => { void check(); }, CHECK_INTERVAL_MS);
     },
     check,
@@ -138,6 +152,7 @@ export function createAppUpdater(backend: UpdateBackend): AppUpdater {
     dispose() {
       disposed = true; generation++;
       clearTimeout(startup); clearInterval(interval);
+      if (prepared) { void prepared.close().catch(() => {}); prepared = null; }
       for (const stop of subscriptions) stop(); subscriptions.clear();
     },
   };

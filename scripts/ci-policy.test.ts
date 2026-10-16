@@ -40,7 +40,7 @@ describe('CI workflow and synthetic smoke contract', () => {
   });
   it('keeps browser-engine, width, navigation, native focus and real CSP regressions in the suites', () => {
     const all = smokePlan('all').map(step => step.name);
-    expect(all).toEqual(expect.arrayContaining(['layout', 'navigation', 'motion', 'appearance', 'select', 'edge-extension', 'firefox-extension', 'connection', 'profile', 'account-details']));
+    expect(all).toEqual(expect.arrayContaining(['layout', 'navigation', 'motion', 'appearance', 'select', 'updater', 'edge-extension', 'firefox-extension', 'connection', 'profile', 'account-details']));
     expect(smokePlan('native').map(step => step.name)).toEqual(['build-native-companion-extension', 'native-quick', 'native-account-details']);
     expect(smokePlan('all').every(step => step.timeoutMs > 0 && step.timeoutMs <= 300_000)).toBe(true);
   });

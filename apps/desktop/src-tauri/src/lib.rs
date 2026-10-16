@@ -70,8 +70,17 @@ fn app_version() -> String {
 }
 
 #[tauri::command]
-fn app_updates_supported(window: tauri::WebviewWindow) -> bool {
-    cfg!(target_os = "macos") && window.label() == "main"
+fn app_update_platform(window: tauri::WebviewWindow) -> Option<&'static str> {
+    if window.label() != "main" { return None; }
+    #[cfg(target_os = "windows")]
+    {
+        // Portable executables must not silently turn into NSIS installations.
+        // The official per-user installer writes this alongside the application.
+        return std::env::current_exe().ok().and_then(|exe| exe.parent()
+            .and_then(|directory| directory.join("uninstall.exe").is_file().then_some("windows")));
+    }
+    #[cfg(not(target_os = "windows"))]
+    { cfg!(target_os = "macos").then_some("macos") }
 }
 
 /// 已验证的更新安装到原应用路径后，由用户选择重启来运行新版本。
@@ -163,7 +172,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             app_version,
-            app_updates_supported,
+            app_update_platform,
             #[cfg(target_os = "windows")]
             clipboard::clipboard_copy,
             #[cfg(desktop)]

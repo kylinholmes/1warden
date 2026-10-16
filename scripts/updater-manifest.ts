@@ -5,17 +5,21 @@ interface ManifestInput {
   version: string;
   repository: string;
   signature: string;
+  windowsSignature: string;
   pubDate: string;
 }
 
-export function createUpdaterManifest({ version, repository, signature, pubDate }: ManifestInput) {
+export function createUpdaterManifest({ version, repository, signature, windowsSignature, pubDate }: ManifestInput) {
   if (!/^\d+\.\d+\.\d+$/.test(version)) throw new Error('Invalid updater version');
   if (!/^[a-zA-Z0-9][a-zA-Z0-9_.-]*\/[a-zA-Z0-9][a-zA-Z0-9_.-]*$/.test(repository)) {
     throw new Error('Invalid GitHub repository');
   }
-  signature = signature.trim();
-  if (!signature || !/^[A-Za-z0-9+/]+={0,2}$/.test(signature) || signature.length % 4 !== 0) {
-    throw new Error('Missing or invalid updater signature');
+  function validatedSignature(value: string): string {
+    value = value.trim();
+    if (!value || !/^[A-Za-z0-9+/]+={0,2}$/.test(value) || value.length % 4 !== 0) {
+      throw new Error('Missing or invalid updater signature');
+    }
+    return value;
   }
   return {
     version,
@@ -24,7 +28,11 @@ export function createUpdaterManifest({ version, repository, signature, pubDate 
     platforms: {
       'darwin-aarch64': {
         url: `https://github.com/${repository}/releases/download/v${version}/1Warden-${version}-macos-apple-silicon.app.tar.gz`,
-        signature,
+        signature: validatedSignature(signature),
+      },
+      'windows-x86_64': {
+        url: `https://github.com/${repository}/releases/download/v${version}/1Warden-${version}-windows-x64-setup.exe`,
+        signature: validatedSignature(windowsSignature),
       },
     },
   };
@@ -40,7 +48,10 @@ if (import.meta.main) {
   const archive = join(directory, `1Warden-${version}-macos-apple-silicon.app.tar.gz`);
   if (!statSync(archive).isFile() || statSync(archive).size === 0) throw new Error('Missing updater archive');
   const signature = readFileSync(`${archive}.sig`, 'utf8');
-  const manifest = createUpdaterManifest({ version, repository, signature, pubDate: new Date().toISOString() });
+  const installer = join(directory, `1Warden-${version}-windows-x64-setup.exe`);
+  if (!statSync(installer).isFile() || statSync(installer).size === 0) throw new Error('Missing Windows updater installer');
+  const windowsSignature = readFileSync(`${installer}.sig`, 'utf8');
+  const manifest = createUpdaterManifest({ version, repository, signature, windowsSignature, pubDate: new Date().toISOString() });
   writeFileSync(join(directory, 'latest.json'), `${JSON.stringify(manifest, null, 2)}\n`);
-  console.log(`Created latest.json for ${version} (darwin-aarch64)`);
+  console.log(`Created latest.json for ${version} (darwin-aarch64, windows-x86_64)`);
 }

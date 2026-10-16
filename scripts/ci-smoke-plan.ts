@@ -15,6 +15,7 @@ export function smokePlan(suite: SmokeSuite): SmokeStep[] {
     smoke('motion', 'panel-motion-smoke.ts'),
     smoke('appearance', 'appearance-smoke.ts'),
     smoke('select', 'select-smoke.ts'),
+    smoke('updater', 'updater-ui-smoke.ts'),
     smoke('account-menu', 'profile-account-menu-smoke.ts'),
     smoke('zustand', 'zustand-state-smoke.ts'),
   ];

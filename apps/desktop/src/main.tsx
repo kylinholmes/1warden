@@ -14,8 +14,6 @@ import { useQuickBridge } from './use-quick-bridge';
 import { createDesktopApplication } from './application/desktop';
 import './styles.css';
 
-declare const __PLATFORM__: 'desktop' | 'extension' | 'mobile' | undefined;
-
 // 宿主要**最先**装：后面所有代码都可能用到它（发请求、读存储）
 installDesktopHost();
 if (IS_DESKTOP) installDesktopClipboard();
@@ -32,13 +30,7 @@ initNativeFeel();
 initTheme();
 
 const runtime = createDesktopApplication();
-const DesktopUpdateNotice = typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop'
-  ? lazy(() => import('./components/AppUpdateNotice')) : null;
-
-// The main entry owns updates; quick.html, mobile and extension entries never start them.
-if (typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop' && tauriAvailable()) {
-  void import('./updates/desktop').then(({ startDesktopUpdater }) => startDesktopUpdater()).catch(() => {});
-}
+const AppUpdateHost = lazy(() => import('./components/AppUpdateHost'));
 
 function DesktopEvents() {
   useQuickBridge(runtime.getActiveVault, runtime.subscribeVaultChanges);
@@ -61,7 +53,7 @@ createRoot(root).render(
       <ErrorBoundary>
         {IS_DESKTOP && <DesktopEvents />}
         <App client={runtime.client} />
-        {DesktopUpdateNotice && tauriAvailable() && <Suspense fallback={null}><DesktopUpdateNotice /></Suspense>}
+        {tauriAvailable() && <Suspense fallback={null}><AppUpdateHost /></Suspense>}
       </ErrorBoundary>
     ) : (
       <Unsupported />

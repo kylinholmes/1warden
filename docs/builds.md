@@ -1,6 +1,6 @@
 # 构建与下载
 
-GitHub Actions 在每次代码 push、Pull Request 和手动运行时执行类型检查、单元测试、跨端界面和真实扩展回归，并生成浏览器扩展、macOS 和 Windows 安装包/免安装程序（仅文档修改不触发）。Windows 构建还会运行真实 WebView2 回归。打开 [Actions](https://github.com/kylinholmes/1warden/actions)，选择成功的 `1Warden builds` 运行，在页面底部下载 Artifacts；构建产物保留 30 天，测试截图与日志保留 14 天。`main` 的 push 只有在全部 CI 检查和平台构建成功后，才会自动递增补丁版本、提交版本号、创建 `v` 标签，并把本次验证过的安装包和 SHA-256 校验文件发布到 [Releases](https://github.com/kylinholmes/1warden/releases)。PR、其他分支和手动运行只验证并生成 artifacts。代码与发布包已按用户选择设为公开；macOS 自动更新无需 GitHub 登录。
+GitHub Actions 在每次代码 push、Pull Request 和手动运行时执行类型检查、单元测试、跨端界面和真实扩展回归，并生成浏览器扩展、macOS 和 Windows 安装包/免安装程序（仅文档修改不触发）。Windows 构建还会运行真实 WebView2 回归。打开 [Actions](https://github.com/kylinholmes/1warden/actions)，选择成功的 `1Warden builds` 运行，在页面底部下载 Artifacts；构建产物保留 30 天，测试截图与日志保留 14 天。`main` 的 push 只有在全部 CI 检查和平台构建成功后，才会自动递增补丁版本、提交版本号、创建 `v` 标签，并把本次验证过的安装包和 SHA-256 校验文件发布到 [Releases](https://github.com/kylinholmes/1warden/releases)。PR、其他分支和手动运行只验证并生成 artifacts。代码与发布包已按用户选择设为公开；macOS / Windows 自动更新及跨端版本提示无需 GitHub 登录。
 
 | 产物 | 用途 |
 | --- | --- |
@@ -46,7 +46,7 @@ bun run test:windows                    # 原生 EXE 已构建时运行
 
 CI 固定 `windows-2022`，使用其预装浏览器并在启动原生测试前检查 WebView2 Runtime。浏览器与运行时仍随 runner 镜像更新，日志保留版本信息用于排查。[Runner 软件清单](https://github.com/actions/runner-images/blob/main/images/windows/Windows2022-Readme.md)、[Puppeteer 自行管理浏览器说明](https://pptr.dev/guides/installation)、[WebView2 运行时检测](https://learn.microsoft.com/en-us/microsoft-edge/webview2/concepts/distribution#detect-if-a-webview2-runtime-is-already-installed)。
 
-工作流使用 `pull_request`（不是 `pull_request_target`），默认只有 `contents: read`，checkout 不保留凭据；新增 UI/原生测试不引用 secrets，所有 actions 固定完整提交 SHA。`main` push 的 macOS 打包步骤才可读取更新签名 secret；PR、其他分支和手动运行不读取它。只有最终发布 job 具有 `contents: write`，用于版本提交、标签和 Release。[GitHub 权限规则](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)、[失败时保留日志](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#always)。
+工作流使用 `pull_request`（不是 `pull_request_target`），默认只有 `contents: read`，checkout 不保留凭据；新增 UI/原生测试不引用 secrets，所有 actions 固定完整提交 SHA。`main` push 的 macOS 打包步骤及最终发布 job 可读取更新签名 secret；PR、其他分支和手动运行不读取它。只有最终发布 job 具有 `contents: write`，用于版本提交、标签和 Release。[GitHub 权限规则](https://docs.github.com/en/actions/reference/workflows-and-actions/workflow-syntax#permissions)、[失败时保留日志](https://docs.github.com/en/actions/reference/workflows-and-actions/expressions#always)。
 
 本轮只修改构建/测试配置，不迁移任何生产数据。若 CI 环境发生兼容问题，先看 `test-results-*` 和 runner 版本；可回退该 CI 提交恢复原流水线，不能用忽略失败或关闭安全限制代替修复。首次托管运行结果以 Actions 实际运行记录为准，本机通过不等于所有托管平台已经验证。
 
@@ -60,7 +60,7 @@ macOS：打开 DMG，把 `1Warden.app` 拖到“应用程序”。也可以解�
 
 ## 本地构建
 
-Windows 使用每用户 NSIS 安装，不要求管理员权限；缺少 WebView2 时安装程序会下载运行时。当前 Windows 安装包未做 Authenticode 签名；Windows Hello 和应用内自动更新尚未接入，升级使用新版本安装程序。原生窗口关闭后保留托盘入口；从托盘菜单“退出”结束进程。快速面板为 `Ctrl+Shift+\`；自动输入使用 Win32 Unicode 按键事件，不支持向更高权限的管理员窗口输入。
+Windows 使用每用户 NSIS 安装，不要求管理员权限；缺少 WebView2 时安装程序会下载运行时。当前 Windows 安装包未做 Authenticode 签名；Windows Hello 尚未接入；安装版会后台下载签名更新，用户点击“安装并重启”后才启动安装器。免安装版会弹出新版本提示，继续按原方式手动替换。原生窗口关闭后保留托盘入口；从托盘菜单“退出”结束进程。快速面板为 `Ctrl+Shift+\`；自动输入使用 Win32 Unicode 按键事件，不支持向更高权限的管理员窗口输入。
 
 Windows 主窗口在创建前按系统版本选择背景：Windows 10（1809+）使用 Blur，Windows 11 使用 Mica，避开 Acrylic 在 Windows 10 上的拖动卡顿；无法识别的系统不启用原生模糊。半透明侧栏和一体化标题栏保留，窗口按钮在右上角，支持拖动、双击最大化、最小化和关闭至托盘。所有平台按可用窗口宽度布局：小于 900 CSS px 使用逐级页面，900px 起使用分栏，不依据横竖方向、设备类型或操作系统判断。
 
@@ -142,7 +142,7 @@ CI=true APPLE_SIGNING_IDENTITY=- \
 
 其他分支、PR 和手动构建生成测试用安装包；只有 `main` push 构建会读取 GitHub Secret `TAURI_SIGNING_PRIVATE_KEY`，启用 `createUpdaterArtifacts` 并生成签名的 `.app.tar.gz` / `.sig`。签名私钥留在开发机的仓库外目录与 GitHub Secret，不能提交到代码或写入构建日志。应用内只有公钥。
 
-主分支自动发布同时生成 `latest.json`，其中 `darwin-aarch64` 指向本版本的签名 archive。新 Release 先作为 draft 上传完整产物，成功后才公开；未完成的 draft 重试时先上传包和签名，再更新 manifest；已公开版本保持不变。应用使用公开的 `releases/latest/download/latest.json` 检查更新，不需要 GitHub token。下载校验通过且安装完成后显示重启提示；源码中的签名版本校验和禁止降级设置不能关闭。
+主分支自动发布同时生成 `latest.json`，其中 `darwin-aarch64` 指向签名 macOS archive，`windows-x86_64` 指向签名 NSIS 安装程序。Windows 安装程序在全部验证通过后，由最终发布 job 使用固定版本 Tauri CLI 的 `signer sign --app-version` 签名；Windows 构建/测试 job 不引用 secrets。新 Release 先作为 draft 上传完整产物，成功后才公开；未完成的 draft 重试时先上传包和签名，再更新 manifest；已公开版本保持不变。应用使用公开的 `releases/latest/download/latest.json` 检查更新，不需要 GitHub token。macOS 下载校验及安装完成后显示重启提示；Windows 下载校验后显示“安装并重启”，用户确认后安装；源码中的签名版本校验和禁止降级设置不能关闭。
 
 Updater archive 供应用自动更新，DMG / `.app.zip` 供首次手动安装，两者用途不同。自动更新的交互及本地签名测试见 [桌面更新说明](updates.md)。
 # 用户详情、资料同步与头像裁剪

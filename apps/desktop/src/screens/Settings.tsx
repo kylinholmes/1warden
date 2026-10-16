@@ -47,9 +47,7 @@ const SECTIONS: Array<{ id: SectionId; label: string; icon: ReactNode }> = [
 ];
 
 declare const __PLATFORM__: 'desktop' | 'extension' | 'mobile' | undefined;
-// Keep this import behind the literal build define so other targets emit no updater chunk.
-const DesktopAppUpdates = typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop'
-  ? lazy(() => import('../components/AppUpdates')) : null;
+const AppUpdateHost = lazy(() => import('../components/AppUpdateHost'));
 const DesktopQuickSearchSettings = typeof __PLATFORM__ !== 'undefined' && __PLATFORM__ === 'desktop'
   ? lazy(() => import('../components/QuickSearchSettings')) : null;
 
@@ -259,7 +257,7 @@ export function Settings({ client, open, onClose, initialSection, capabilities =
           {section === 'about' && (
             <Group title="关于" hint="1Warden">
               <div className="flex items-center gap-3 py-4"><BrandMark size={48} /><span className="text-lg font-semibold">1Warden</span></div>
-              {DesktopAppUpdates && capabilities.native && <Suspense fallback={null}><DesktopAppUpdates /></Suspense>}
+              <Suspense fallback={null}><AppUpdateHost settings /></Suspense>
               <Row label="数据在哪里" hint="条目在服务端加密，主密码与本机派生的密钥永不发送" />
               <Row label="许可" hint="自有实现，未使用禁止用于 Vaultwarden 的官方 SDK" />
               {!compact && <Shortcuts native={capabilities.native} />}
