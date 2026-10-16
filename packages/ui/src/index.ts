@@ -63,6 +63,7 @@ export * from './Segmented';
 export * from './Select';
 export * from './ServerSelector';
 export * from './ServerSpeed';
+export * from './server-latency';
 export * from './Generator';
 export * from './ImportView';
 export * from './FloatingPanel';

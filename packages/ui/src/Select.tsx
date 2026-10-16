@@ -1,8 +1,8 @@
-import { useId, useLayoutEffect, useRef, type ButtonHTMLAttributes, type KeyboardEvent } from 'react';
+import { useId, useLayoutEffect, useRef, type ButtonHTMLAttributes, type KeyboardEvent, type ReactNode } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { IconCheck, IconChevronDown } from './icons';
 
-export interface SelectOption { value: string; label: string; disabled?: boolean }
+export interface SelectOption { value: string; label: string; disabled?: boolean; suffix?: ReactNode }
 export interface SelectProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'value' | 'onChange' | 'children'> {
   value: string;
   options: readonly SelectOption[];
@@ -177,6 +177,7 @@ export function Select({ value, options, onChange, placeholder = '请选择', cl
       onBlur={event => { onBlur?.(event); if (event.relatedTarget && !popup.current?.contains(event.relatedTarget)) close(); }}
       onClick={() => { if (open) close(); else show(); }}>
       <span className="select-value">{selected?.label ?? (value ? `已保存：${value}` : placeholder)}</span>
+      {selected?.suffix}
       <IconChevronDown size={15} className="select-chevron" />
     </button>
     {open && <div ref={popup} id={popupId} role="listbox" popover="manual" className="select-popup"
@@ -188,7 +189,7 @@ export function Select({ value, options, onChange, placeholder = '请选择', cl
         onMouseDown={event => event.preventDefault()}
         onPointerMove={() => { if (!option.disabled) setActive(index); }}
         onClick={event => { event.preventDefault(); choose(index); }}>
-        <span>{option.label}</span><span className="select-check" aria-hidden="true">{option.value === value && <IconCheck size={15} />}</span>
+        <span className="min-w-0 flex-1 truncate">{option.label}</span>{option.suffix}<span className="select-check" aria-hidden="true">{option.value === value && <IconCheck size={15} />}</span>
       </div>)}
       {options.length === 0 && <div className="select-empty">暂无可选项</div>}
     </div>}

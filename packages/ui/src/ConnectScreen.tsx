@@ -199,6 +199,8 @@ export function ConnectScreen({
 
             {view === 'form' && (
               <>
+                <ServerSelector value={serverUrl} accounts={accounts ?? []} disabled={busy}
+                  onChange={url => { setServerUrl(url); setPassword(''); }} />
                 <Field label="邮箱">
                   <input
                     type="email" required value={email} autoFocus disabled={busy} autoComplete="username"
@@ -206,8 +208,6 @@ export function ConnectScreen({
                     className="field"
                   />
                 </Field>
-                <ServerSelector value={serverUrl} accounts={accounts ?? []} disabled={busy}
-                  onChange={url => { setServerUrl(url); setPassword(''); }} />
               </>
             )}
 

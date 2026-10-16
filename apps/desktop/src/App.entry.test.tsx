@@ -1,10 +1,14 @@
 // @vitest-environment jsdom
-import { act, createElement, type ReactNode } from 'react';
+import { act, createElement, StrictMode, type ReactNode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installHost, resetHost } from '@1warden/ui';
 import { EMPTY_SNAPSHOT, type ApplicationClient, type ConnectionDraft } from './application/types';
 import { App } from './App';
+
+const { probe } = vi.hoisted(() => ({ probe: vi.fn() }));
+// Keep public prefetch observable without consuming the registration HTTP fixtures.
+vi.mock('@1warden/api', async original => ({ ...await original<object>(), probeServer: probe }));
 
 vi.mock('./components/AccountMetadata', () => ({ AccountMetadataProvider: ({ children }: { children: ReactNode }) => children }));
 vi.mock('./components/Toast', () => ({ ToastProvider: ({ children }: { children: ReactNode }) => children }));
@@ -25,6 +29,8 @@ let request: ReturnType<typeof vi.fn>;
 let saved: string | null;
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 beforeEach(() => {
+  probe.mockReset();
+  probe.mockImplementation(async (serverUrl: string) => ({ serverUrl, latencyMs: 42, samples: 3, download: null, downloadNote: null }));
   request = vi.fn();
   saved = null;
   installHost({ fetch: request as typeof fetch, storage: { get: async key => key === '1warden.accounts' ? saved : null, set: async () => {}, remove: async () => {} } });
@@ -67,6 +73,59 @@ async function chooseServer(choice: string) {
 }
 
 describe('login and registration entry', () => {
+  it('prefetches every unique public destination on welcome and reuses results across entry routes', async () => {
+    saved = JSON.stringify([{ serverUrl: 'https://VAULT.VAULTWARDEN.COM:443/', email: 'a@example.test' },
+      { serverUrl: 'https://saved.example/team/', email: 'b@example.test' },
+      { serverUrl: 'https://saved.example:443/team', email: 'c@example.test' }]);
+    const test = client(); await mount(test.value);
+    expect(probe.mock.calls.map(call => call[0]).sort()).toEqual([
+      'https://saved.example/team', 'https://vault.bitwarden.com', 'https://vault.bitwarden.eu', 'https://vault.vaultwarden.com',
+    ]);
+    expect(probe.mock.calls.every(call => call[1].mode === 'latency')).toBe(true);
+    await click('登录其他账户');
+    const labels = [...node.querySelectorAll('form > *')].map(item => item.textContent);
+    expect(labels.findIndex(text => text?.startsWith('服务器'))).toBeLessThan(labels.findIndex(text => text?.startsWith('邮箱')));
+    await act(() => (node.querySelector('[role="combobox"]') as HTMLButtonElement).click());
+    const options = [...node.querySelectorAll('[role="option"]')];
+    expect(options).toHaveLength(5);
+    expect(options.filter(item => item.textContent?.includes('Vaultwarden.com'))).toHaveLength(1);
+    expect(options.find(item => item.getAttribute('data-value') === 'custom')?.textContent).toContain('待输入');
+    for (const option of options.filter(item => item.getAttribute('data-value') !== 'custom')) {
+      expect(option.textContent).toContain('42 ms');
+      expect(option.querySelector('[data-latency-light]')).not.toBeNull();
+    }
+    await act(() => (node.querySelector('[role="combobox"]') as HTMLButtonElement).click());
+    expect(node.querySelector('[role="combobox"]')?.textContent).toContain('42 ms');
+    expect(node.textContent).not.toContain('4 MiB');
+    await click('创建账户');
+    expect(node.querySelector('[role="combobox"]')?.textContent).toContain('42 ms');
+    const registrationFields = [...node.querySelectorAll('form > *')].map(item => item.textContent);
+    expect(registrationFields.findIndex(text => text?.startsWith('服务器'))).toBeLessThan(registrationFields.findIndex(text => text?.startsWith('邮箱')));
+    await click('已有账户？登录');
+    expect(probe).toHaveBeenCalledTimes(4);
+    expect(request).not.toHaveBeenCalled(); expect(test.value.connect).not.toHaveBeenCalled();
+  });
+  it('keeps welcome probes alive through StrictMode and navigation while displaying measuring rows', async () => {
+    const finishes: (() => void)[] = [];
+    probe.mockImplementation((serverUrl: string) => new Promise(resolve => finishes.push(() => resolve({ serverUrl, latencyMs: 90, samples: 3 }))));
+    const test = client();
+    await act(() => root.render(createElement(StrictMode, null, createElement(App, { client: test.value }))));
+    expect(probe).toHaveBeenCalledTimes(3);
+    await click('注册');
+    expect(node.querySelector('[role="combobox"]')?.textContent).toContain('测量中');
+    await click('已有账户？登录');
+    await act(() => (node.querySelector('[role="combobox"]') as HTMLButtonElement).click());
+    const known = [...node.querySelectorAll('[role="option"]')].filter(option => option.getAttribute('data-value') !== 'custom');
+    expect(known).toHaveLength(3);
+    known.forEach(option => {
+      expect(option.textContent).toContain('测量中');
+      expect(option.querySelector('[data-latency-light="grey"]')).not.toBeNull();
+    });
+    expect(probe.mock.calls.every(call => !call[1].signal.aborted)).toBe(true);
+    await act(async () => finishes.forEach(finish => finish()));
+    known.forEach(option => expect(option.textContent).toContain('90 ms'));
+    expect(probe).toHaveBeenCalledTimes(3); expect(request).not.toHaveBeenCalled();
+  });
   it('defaults to the community service, only shows an address for custom, and preserves custom text when switching', async () => {
     const test = client(); await mount(test.value); await click('登录');
     expect(node.querySelector('[role="combobox"]')?.textContent).toContain('Vaultwarden.com（社区托管）');
@@ -80,7 +139,7 @@ describe('login and registration entry', () => {
     await chooseServer('custom'); expect(value('服务器地址')).toBe('https://vault.example.com/team');
     expect(request).not.toHaveBeenCalled(); expect(test.value.connect).not.toHaveBeenCalled();
   });
-  it('uses the community preset for a new registration and sends nothing until Continue', async () => {
+  it('uses the community preset for a new registration and submits registration only after Continue', async () => {
     const test = client(); await mount(test.value); await click('注册');
     expect(node.querySelector('[role="combobox"]')?.textContent).toContain('Vaultwarden.com（社区托管）');
     expect(node.querySelector('input[type="url"]')).toBeNull();

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { AccountIdentity, AccountPicker, BrandMark, host, IconSpinner, useAccounts, type SavedAccount } from '@1warden/ui';
+import { AccountIdentity, AccountPicker, BrandMark, host, IconSpinner, knownServers, useServerLatencies, useAccounts, type SavedAccount } from '@1warden/ui';
 import type { UserProfile } from '@1warden/vault';
 import type { ApplicationSnapshot } from '../application/types';
 import { accountKey } from '../application/account-target';
@@ -30,6 +30,7 @@ export function Home({ session, busy, onPick, onOther, onRegister }: { session: 
   const saved = useAccounts();
   const accounts = [...(saved ?? [])];
   if (session.account && !accounts.some(a => accountKey(a) === accountKey(session.account!))) accounts.unshift(session.account);
+  useServerLatencies(knownServers(accounts).map(server => server.url));
   return <main aria-label="账户首页" className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
     <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
       <div className="mb-7 flex items-center gap-2.5"><BrandMark /><span className="text-xl font-semibold">1Warden</span></div>
