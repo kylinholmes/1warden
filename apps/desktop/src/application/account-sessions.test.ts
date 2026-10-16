@@ -229,14 +229,14 @@ describe('desktop retained account sessions', () => {
     const newKeyB = vaultB.getSession().getKey()!;
     await app.logout();
     expect([...newKeyB.encKey, ...newKeyB.macKey].every((byte) => byte === 0)).toBe(true);
-    expect(storage.has('profile.v1.["https://two.example","same@example.com"]')).toBe(false);
+    expect(storage.get('profile.v1.["https://two.example","same@example.com"]')).toBe(JSON.stringify(profileB));
     expect(storage.has('profile.v1.["https://one.example","same@example.com"]')).toBe(true);
     await app.switchAccount(a);
     expect(app.getSnapshot().status).toBe('unlocked');
     expect(vaultA.getSession().getKey()).toBe(keyA);
     await app.switchAccount(b);
     expect(app.getSnapshot().status).toBe('locked');
-    expect(app.getSnapshot().profile).toBeNull();
+    expect(app.getSnapshot().profile).toEqual(profileB);
     const afterLogout = authentications.length;
     await app.unlock(password);
     expect(authentications).toHaveLength(afterLogout + 1);

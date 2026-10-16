@@ -378,14 +378,19 @@ describe('Profile service', () => {
     await expect(service.saveProfile(profile, null)).rejects.toThrow('offline');
     expect(cache.save).not.toHaveBeenCalled();
   });
-  it('caches after unlock, retains display on lock and clears it on logout', async () => {
-    const { client } = restored([{ ...buildProfileItem(profile), id: 'profile' }]);
+  it('retains remembered name and avatar after lock and logout while clearing the authenticated session', async () => {
+    const presentation = { ...profile, avatarDataUrl: 'data:image/png;base64,AQID' };
+    const { client } = restored([{ ...buildProfileItem(presentation), id: 'profile' }]);
     let saved: { displayName: string; avatarDataUrl: string | null } | null = null;
     const cache = { load: async () => saved, save: async (_a: unknown, p: { displayName: string; avatarDataUrl: string | null }) => { saved = p; }, clear: async () => { saved = null; } };
     const service = createVaultService(client, cache);
-    expect((await service.snapshot()).profile).toEqual(profile);
-    await service.lock(); expect((await service.snapshot()).profile).toEqual(profile);
-    await service.logout(); expect(saved).toBeNull(); expect((await service.snapshot()).profile).toBeNull();
+    expect((await service.snapshot()).profile).toEqual(presentation);
+    await service.lock(); expect((await service.snapshot()).profile).toEqual(presentation);
+    await service.logout(); expect(saved).toEqual(presentation);
+    expect(await service.snapshot()).toMatchObject({ status: 'loggedOut', account: null, profile: null, items: [] });
+    expect(client.getSession().getKey()).toBeNull();
+    await service.switchAccount({ serverUrl: 'https://vault.example', email: 'test@example.com' });
+    expect(await service.snapshot()).toMatchObject({ status: 'locked', profile: presentation, items: [] });
   });
 
   it.each([503, 200])('preserves presentation until an authoritative sync proves absence (HTTP %s)', async (syncStatus) => {

@@ -1,7 +1,6 @@
 import { useEffect, useRef } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { probeServer, type SiteProbeResult } from '@1warden/api';
-import { host } from './host';
+import { type SiteProbeResult } from '@1warden/api';
 import { normalizeServerUrl, useServerLatencies, type LatencyState } from './server-latency';
 
 /** Color is supplementary: every light has readable latency or connection text. */
@@ -37,15 +36,14 @@ export function ServerSpeed({ serverUrl, disabled = false }: { serverUrl: string
     const controller = new AbortController(); request.current.controller = controller;
     setFull({ url, busy: true });
     try {
-      const result = await probeServer(url, { mode: 'full', fetchImpl: host().fetch, signal: controller.signal });
+      const result = await latency.measureFull(url, controller.signal);
       if (version === request.current.version) setFull({ url, busy: false, result });
     } catch {
       if (version === request.current.version) setFull({ url, busy: false, error: '测速失败，请重试' });
     } finally { if (version === request.current.version) request.current.controller = null; }
   }
   const current = full.url === url ? full : { url, busy: false };
-  const shownLatency: LatencyState = current.busy ? { status: 'measuring' }
-    : current.result ? { status: 'ready', latencyMs: current.result.latencyMs } : latency.get(url);
+  const shownLatency = latency.get(url);
   const download = current.busy ? '测速中…' : current.result?.download
     ? `${(current.result.download.bytesPerSecond / 1_000_000).toFixed(2)} MB/s`
     : current.result ? '暂不可用' : '未测试';

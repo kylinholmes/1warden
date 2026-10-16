@@ -3,6 +3,7 @@ import { act, createElement, StrictMode } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 import { ServerSpeed } from '../../../../packages/ui/src/ServerSpeed';
+import { serverLatency } from '../../../../packages/ui/src/server-latency';
 import { installHost, resetHost } from '../../../../packages/ui/src/host';
 
 const { probe } = vi.hoisted(() => ({ probe: vi.fn() }));
@@ -68,8 +69,10 @@ it('cancel discards an in-flight full result', async () => {
   expect(node.querySelector('[data-server-speed-metrics]')!.textContent).toContain('测速中…');
   const signal = probe.mock.calls[0]![1].signal as AbortSignal;
   await act(() => button('取消测速').click()); expect(signal.aborted).toBe(true);
+  expect(serverLatency().get(first).status).toBe('idle');
   await act(() => complete(result(first, 999)));
   expect(node.textContent).not.toContain('999');
+  expect(serverLatency().get(first).status).toBe('idle');
 });
 it.each(['', 'ftp://example.com', 'https://user:secret@example.com', 'https://example.com/?token=secret'])('shows pending input without probing invalid address %s', async url => {
   await render(url); await advance(); expect(button('测速').disabled).toBe(true);
@@ -88,6 +91,39 @@ it('distinguishes failures from slow responses and lets the user retry', async (
   probe.mockResolvedValue(result()); await act(() => button('测速').click());
   expect(probe.mock.calls.at(-1)![1].mode).toBe('full');
   expect(node.textContent).toContain('24 ms');
+});
+it('does not let a late welcome failure overwrite a successful manual measurement', async () => {
+  let fail!: (reason: Error) => void;
+  probe.mockImplementationOnce(() => new Promise((_resolve, reject) => { fail = reject; }));
+  await render(); await advance();
+  probe.mockResolvedValue(result(first, 76)); await act(() => button('测速').click());
+  await act(() => fail(new Error('late offline')));
+  expect(serverLatency().get(first)).toEqual({ status: 'ready', latencyMs: 76 });
+  await render(second); await render(first);
+  expect(node.textContent).toContain('76 ms'); expect(node.textContent).not.toContain('未连通');
+});
+it('keeps the shared manual measurement pending when an older automatic result arrives', async () => {
+  let auto!: (value: ReturnType<typeof result>) => void;
+  let manual!: (value: ReturnType<typeof result>) => void;
+  probe.mockImplementationOnce(() => new Promise(resolve => { auto = resolve; }));
+  await render(); await advance();
+  probe.mockImplementationOnce(() => new Promise(resolve => { manual = resolve; }));
+  await act(() => button('测速').click());
+  await act(() => auto(result(first, 999)));
+  expect(serverLatency().get(first).status).toBe('measuring');
+  await act(() => manual(result(first, 76)));
+  expect(serverLatency().get(first)).toEqual({ status: 'ready', latencyMs: 76 });
+});
+it('restores the last settled shared result on cancel and ignores a late full result', async () => {
+  await render(); await advance();
+  let finish!: (value: ReturnType<typeof result>) => void;
+  probe.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+  await act(() => button('测速').click());
+  expect(serverLatency().get(first).status).toBe('measuring');
+  await act(() => button('取消测速').click());
+  expect(serverLatency().get(first)).toEqual({ status: 'ready', latencyMs: 24 });
+  await act(() => finish(result(first, 999)));
+  expect(serverLatency().get(first)).toEqual({ status: 'ready', latencyMs: 24 });
 });
 it('full measurement aborts on URL change, busy and unmount', async () => {
   probe.mockImplementation(() => new Promise(() => {}));

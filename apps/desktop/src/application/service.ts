@@ -230,9 +230,9 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
     unlock: (password) => client.unlock(password),
     async lock() { client.lock(); },
     async logout() {
-      const account = client.getSession().account;
+      // Remembered identities keep their authorized display name/avatar, like the
+      // email and server shown on Home. VaultClient still clears keys and tokens.
       client.logout(); lastCached = '';
-      if (account) await profileCache?.clear(account);
     },
     async switchAccount(target) {
       const account = target ? lockedAccount(target) : null;

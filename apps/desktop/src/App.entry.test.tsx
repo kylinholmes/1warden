@@ -193,6 +193,29 @@ describe('login and registration entry', () => {
     known.forEach(option => expect(option.textContent).toContain('90 ms'));
     expect(probe).toHaveBeenCalledTimes(3); expect(request).not.toHaveBeenCalled();
   });
+  it('replaces a failed welcome probe everywhere after a manual retry, including registration and another retry', async () => {
+    probe.mockRejectedValue(new Error('offline'));
+    const test = client(); await mount(test.value); await click('登录');
+    const selected = () => node.querySelector('[role="combobox"]')!;
+    expect(selected().textContent).toContain('未连通');
+    let finish!: (value: object) => void;
+    probe.mockImplementationOnce(() => new Promise(resolve => { finish = resolve; }));
+    await click('测速');
+    expect(selected().textContent).toContain('测量中');
+    await act(() => finish({ serverUrl: 'https://vault.vaultwarden.com', latencyMs: 76, samples: 3, download: null, downloadNote: null }));
+    expect(selected().textContent).toContain('76 ms');
+    await act(() => (selected() as HTMLButtonElement).click());
+    expect(node.querySelector('[role="option"][data-value="vaultwarden"]')?.textContent).toContain('76 ms');
+    expect(node.querySelector('[role="option"][data-value="bitwarden-us"]')?.textContent).toContain('未连通');
+    await act(() => (selected() as HTMLButtonElement).click());
+    await click('创建账户'); expect(selected().textContent).toContain('76 ms');
+    await click('已有账户？登录'); expect(selected().textContent).toContain('76 ms');
+    await click('测速'); expect(selected().textContent).toContain('未连通');
+    await click('创建账户'); expect(selected().textContent).toContain('未连通');
+    probe.mockResolvedValueOnce({ serverUrl: 'https://vault.vaultwarden.com', latencyMs: 88, samples: 3, download: null, downloadNote: null });
+    await click('测速'); expect(selected().textContent).toContain('88 ms');
+    await click('已有账户？登录'); expect(selected().textContent).toContain('88 ms');
+  });
   it('defaults to the community service, only shows an address for custom, and preserves custom text when switching', async () => {
     const test = client(); await mount(test.value); await click('登录');
     expect(node.querySelector('[role="combobox"]')?.textContent).toContain('Vaultwarden.com（社区托管）');

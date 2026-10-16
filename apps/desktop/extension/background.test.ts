@@ -216,7 +216,7 @@ describe('background application boundary', () => {
       expect(data['1warden.session']).toBeUndefined();
       expect(Object.keys(data['1warden.sessions'] as object)).toEqual(['["https://other.test","a@b.com"]']);
       const profiles = await chrome.storage.local.get([profileKey, otherProfileKey]);
-      expect(profiles[profileKey] === undefined).toBe(method === 'logout');
+      expect(profiles[profileKey]).toBe(JSON.stringify({ displayName: 'Account A', avatarDataUrl: null }));
       expect(profiles[otherProfileKey]).toContain('Account B');
       expect(await send({ type: '1warden:application', method: 'snapshot', args: [] })).toMatchObject({
         ok: true, result: { status: method === 'lock' ? 'locked' : 'loggedOut' },

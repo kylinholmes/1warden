@@ -29,10 +29,17 @@ let ciphers: any[] = [];
 const writes: any[] = [];
 let rejectWrite = false;
 let rejectAuthentication = false;
+let rejectProbe = true;
+let probeGate: Promise<void> | null = null;
 let authenticationRequests = 0;
 let fake: ReturnType<typeof createFakeServer>;
 const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) {
   const path = new URL(request.url).pathname;
+  if (!realUpstream && path === '/api/config') {
+    if (probeGate) await probeGate;
+    return rejectProbe ? Response.json({ message: 'Synthetic probe failure' }, { status: 503 })
+      : Response.json({ object: 'config', version: 'test' });
+  }
   if (path === '/identity/connect/token') authenticationRequests++;
   if (rejectAuthentication && path === '/identity/accounts/prelogin') return Response.json({ message: 'Synthetic connection failure' }, { status: 503 });
   if (realUpstream) {
@@ -82,7 +89,12 @@ try {
   async function open(selector: string) {
     page = await browser.newPage(); await page.setViewport({ width: 440, height: 600 });
     if (firefox) await page.mainFrame().browsingContext.navigate(url, 'interactive'); else await page.goto(url);
-    await page.waitForFunction(() => !!document.querySelector('main button, input[type="email"], .nav-trigger'));
+    await page.waitForFunction(() => !!document.querySelector('main button, input[type="email"], input[type="password"], .nav-trigger'));
+    // Popups now resume the selected account; explicitly navigate when testing Home.
+    if (selector === 'main li button' && !await page.$('main')) {
+      if (await page.$('.nav-trigger')) { await menuAction('添加账户'); await back(); }
+      else await back();
+    }
     if (await page.$('main')) {
       if (selector === 'input[type="email"]') await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-add-server]')?.click());
       else if (selector !== 'main li button') await pickHome();
@@ -321,9 +333,40 @@ try {
   check(await page.evaluate(async (account: { serverUrl: string; email: string }, remote: { serverUrl: string; email: string }) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
     const values = await api.storage.local.get(null);
-    return !values[`profile.v1.${JSON.stringify([account.serverUrl, account.email])}`]
+    return !!values[`profile.v1.${JSON.stringify([account.serverUrl, account.email])}`]
       && !!values[`profile.v1.${JSON.stringify([remote.serverUrl, remote.email])}`];
-  }, { serverUrl, email }, remote), 'logout removes only this account presentation cache and preserves another server identity');
+  }, { serverUrl, email }, remote), 'logout retains display-only caches for remembered accounts on both servers');
+  await page.close(); await open('main li button');
+  await homeProfile('更新后的用户', saved.profile.avatarDataUrl, 'after logout and popup reopen');
+  if (!realUpstream) {
+    const clickText = (text: string) => page.evaluate((text: string) => {
+      const button = [...document.querySelectorAll<HTMLButtonElement>('button')].find(button => button.textContent?.trim() === text);
+      if (!button) throw Error(`Missing button: ${text}`);
+      button.click();
+    }, text);
+    const selectedStatus = (text: string) => page.waitForFunction((text: string) =>
+      document.querySelector('[role="combobox"][aria-label="服务器"]')?.textContent?.includes(text), { timeout: 10000 }, text);
+    await clickText('登录其他账户'); await selectedStatus('未连通');
+    let releaseProbe!: () => void;
+    probeGate = new Promise(resolve => { releaseProbe = resolve; }); rejectProbe = false;
+    await clickText('测速'); await selectedStatus('测量中');
+    check(true, 'manual retry immediately replaces failed welcome status in the selector');
+    probeGate = null; releaseProbe(); await selectedStatus(' ms');
+    await page.click('[role="combobox"][aria-label="服务器"]');
+    check(await page.evaluate(() => [...document.querySelectorAll('[role="option"]')]
+      .some(option => option.getAttribute('aria-selected') === 'true' && option.textContent?.includes(' ms'))), 'open dropdown receives the manual latency result');
+    await page.click('[role="combobox"][aria-label="服务器"]');
+    await clickText('创建账户'); await selectedStatus(' ms');
+    check(true, 'registration reuses manual latency without the failed welcome cache');
+    rejectProbe = true; await clickText('测速'); await selectedStatus('未连通');
+    rejectProbe = false; await clickText('测速'); await selectedStatus(' ms');
+    await clickText('已有账户？登录'); await selectedStatus(' ms');
+    check(true, 'another failure and recovery replace shared latency across registration and login');
+    await back(); await homeProfile('更新后的用户', saved.profile.avatarDataUrl, 'after entry retries');
+    if (!firefox) await page.screenshot({ path: join(output, 'home-avatar-after-logout-and-retries.png') });
+  }
+  await pickHome(); await page.waitForSelector('input[type="password"]');
+  check((await rpc('snapshot')).result.status === 'locked', 'cached avatar does not restore an authenticated session');
   console.log(`${checks} checks passed. Artifacts: ${output}`);
 } catch (error) {
   if (page && !page.isClosed()) {

@@ -1,6 +1,6 @@
 import { useEffect } from 'react';
 import { useStoreSnapshot } from '@1warden/state/react';
-import { probeServer, registrationServerUrl } from '@1warden/api';
+import { probeServer, registrationServerUrl, type SiteProbeResult } from '@1warden/api';
 import { host } from './host';
 
 export type LatencyState = { status: 'idle' | 'measuring' | 'error'; latencyMs?: never }
@@ -42,11 +42,46 @@ function createService(fetchImpl: typeof fetch) {
           entry.state = { status: 'ready', latencyMs: result.latencyMs };
         }, () => { entry.state = { status: 'error' }; }).finally(() => {
           entry.at = Date.now(); entry.pending = undefined;
-          active--; notify(); drain(); finish();
+          active--; if (entries.get(url) === entry) notify(); drain(); finish();
         });
       });
       drain();
       return pending;
+    },
+    /** An explicit retry supersedes welcome's cache and any older automatic probe. */
+    async measureFull(value: string, signal: AbortSignal): Promise<SiteProbeResult> {
+      const url = normalizeServerUrl(value);
+      if (!url) throw new Error('服务器地址无效');
+      if (signal.aborted) throw new DOMException('测速已取消', 'AbortError');
+      const previous = entries.get(url);
+      // Cancellation can restore a settled result, never an orphaned measuring state.
+      const fallback = previous && !previous.pending ? previous : undefined;
+      let finish!: () => void;
+      const pending = new Promise<void>(resolve => { finish = resolve; });
+      const entry = { state: { status: 'measuring' } as LatencyState, at: 0, pending: pending as Promise<void> | undefined };
+      const cancel = () => {
+        if (entries.get(url) === entry) {
+          if (fallback) entries.set(url, fallback); else entries.delete(url);
+          notify();
+        }
+        finish();
+      };
+      entries.set(url, entry);
+      signal.addEventListener('abort', cancel, { once: true });
+      notify();
+      try {
+        const result = await probeServer(url, { mode: 'full', fetchImpl, signal });
+        if (!signal.aborted) entry.state = { status: 'ready', latencyMs: result.latencyMs };
+        return result;
+      } catch (error) {
+        if (!signal.aborted) entry.state = { status: 'error' };
+        throw error;
+      } finally {
+        signal.removeEventListener('abort', cancel);
+        entry.at = Date.now(); entry.pending = undefined;
+        if (entries.get(url) === entry) notify();
+        finish();
+      }
     },
   };
 }

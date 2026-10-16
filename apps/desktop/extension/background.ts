@@ -313,17 +313,13 @@ function serviceFor(c: VaultClient) {
 }
 
 /** Pending network/authentication continuations retain only this retired client. */
-function retireClient(c: VaultClient, forgetAccount: boolean, clearPresentation = forgetAccount): Promise<void> {
+function retireClient(c: VaultClient, forgetAccount: boolean): Promise<void> {
   const previousAccount = c.getSession().account;
   const resolved = previousAccount !== null || resolvedClients.has(c);
   // Undefined asks storage to identify its active slot; null deliberately preserves all parked slots.
   const owner = resolved ? previousAccount : undefined;
   const account = forgetAccount ? null : previousAccount;
-  let clearProfile: Promise<void | undefined> | undefined;
-  if (clearPresentation) {
-    if (previousAccount) clearProfile = profileCache?.clear(previousAccount);
-    else if (!resolved) clearProfile = sessions.loadAccount().then((stored) => stored ? profileCache?.clear(stored) : undefined);
-  }
+  // Display-only cache belongs to remembered identities, not authenticated sessions.
   if (forgetAccount) c.logout(); else c.lock();
   if (c !== client) return lockCleanup;
   client = newClient();
@@ -335,7 +331,7 @@ function retireClient(c: VaultClient, forgetAccount: boolean, clearPresentation 
     ? (previousAccount ? credentialController.clearAccount(accountKey(previousAccount))
       : !resolved ? sessions.loadAccount().then(stored => stored ? credentialController.clearAccount(accountKey(stored)) : undefined) : undefined)
     : undefined;
-  lockCleanup = Promise.all([clearSession(forgetAccount, owner), clearProfile, clearHistory]).then(() => {});
+  lockCleanup = Promise.all([clearSession(forgetAccount, owner), clearHistory]).then(() => {});
   return lockCleanup;
 }
 
