@@ -11,8 +11,9 @@ afterEach(() => vi.unstubAllGlobals());
 
 function fixture(engine: 'chrome' | 'firefox', replaceWhileWaiting = false) {
   const domClick = vi.fn();
+  const focus = vi.fn();
   const scrollIntoView = vi.fn();
-  const node = { click: domClick, scrollIntoView, textContent: 'Alpha smoke login',
+  const node = { click: domClick, focus, scrollIntoView, textContent: 'Alpha smoke login',
     closest: () => null, contains: (hit: unknown) => hit === node,
     getBoundingClientRect: () => ({ x: 20, y: 20, left: 20, top: 20, right: 120, bottom: 60, width: 100, height: 40 }) };
   const previous = { ...node, getBoundingClientRect: () => ({ ...node.getBoundingClientRect(), left: -200 }) };
@@ -38,7 +39,7 @@ function fixture(engine: 'chrome' | 'firefox', replaceWhileWaiting = false) {
   // Exercise the actual script helper without launching its top-level browser workflow.
   const javascript = ts.transpile(clickFunction.getText(tree), { target: ts.ScriptTarget.ES2022 });
   const click = new Function('popup', 'name', `${javascript}; return click;`)(popup, engine) as (selector: string) => Promise<void>;
-  return { click, popup, handle, domClick, scrollIntoView, querySelector };
+  return { click, popup, handle, domClick, focus, scrollIntoView, querySelector };
 }
 
 describe('production extension smoke input routing', () => {
@@ -59,6 +60,8 @@ describe('production extension smoke input routing', () => {
     const f = fixture('firefox');
     await f.click('[data-add-server]');
     expect(f.domClick).toHaveBeenCalledOnce();
+    expect(f.focus).toHaveBeenCalledWith({ preventScroll: true });
+    expect(f.focus.mock.invocationCallOrder[0]).toBeLessThan(f.domClick.mock.invocationCallOrder[0]!);
     expect(f.handle.click).not.toHaveBeenCalled();
     expect(f.scrollIntoView).toHaveBeenCalledWith({ block: 'center' });
     expect(f.handle.dispose).toHaveBeenCalledOnce();
