@@ -14,7 +14,7 @@
     },
     "apps/desktop": {
       "name": "@1warden/desktop",
-      "version": "0.2.6",
+      "version": "0.2.7",
       "dependencies": {
         "@1warden/api": "workspace:*",
         "@1warden/crypto": "workspace:*",
