@@ -46,6 +46,16 @@ beforeEach(async () => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('background application boundary', () => {
+  it('does not broadcast another session clear for every locked document refresh', async () => {
+    delete data['1warden.session'];
+    const request = { type: '1warden:application', method: 'snapshot', args: [] };
+    expect(await send(request)).toMatchObject({ ok: true, result: { status: 'locked' } });
+    const initialNotices = notices.length;
+    expect(initialNotices).toBeGreaterThan(0);
+    for (let i = 0; i < 3; i++) expect(await send(request)).toMatchObject({ ok: true, result: { status: 'locked' } });
+    expect(notices).toHaveLength(initialNotices);
+  });
+
   it('discards expired-session capture grants before the same account can unlock again', async () => {
     (data['1warden.session'] as { expiresAt: number }).expiresAt = Date.now() - 1;
     data['1warden.credential-captures'] = { records: [{ password: 'retired-secret' }], documents: [{ token: 'retired-grant' }] };

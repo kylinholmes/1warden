@@ -1,5 +1,6 @@
 import { focusedPlan, type InlineField, type InlineTarget } from './inline-fields';
 import { ext } from './ext-api';
+import { withReadTimeout } from './read-timeout';
 import type { InlineAccounts, InlineOtp, InlineReply } from './inline-accounts';
 
 /** The chooser displays short-lived codes; passwords and TOTP seeds never enter it. */
@@ -271,14 +272,14 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
   }
 
   async function refresh(quiet = false): Promise<void> {
-    if (!host || busy) return;
+    if (!host || busy || pendingRefresh !== null) return;
     const version = ++request;
     pendingRefresh = version;
     nextOtpRefresh = Date.now() + 1000;
     if (!quiet) message(target?.kind === 'totp' ? '正在查找验证码…' : '正在查找账号…');
     try {
-      const reply = await ext.runtime.sendMessage({ type: '1warden:inline-accounts', target,
-        nonce: credentials?.nonce, documentUrl: pageUrl }) as InlineAccounts | { error: string };
+      const reply = await withReadTimeout(ext.runtime.sendMessage({ type: '1warden:inline-accounts', target,
+        nonce: credentials?.nonce, documentUrl: pageUrl }), 6000, '读取账号超时，请重试') as InlineAccounts | { error: string };
       if (version !== request || !host) return;
       if (!reply || 'error' in reply) throw new Error(reply && 'error' in reply ? reply.error : '扩展没有响应，请重试');
       if (!reply.unlocked && quiet && awaitingUnlock && host.dataset['state'] === 'locked') { scheduleRefresh(); return; }

@@ -105,8 +105,17 @@ try {
     check('click opens navigation', await page.$eval('[aria-label="导航"]', (node: HTMLElement) => node.getAttribute('aria-expanded') === 'true'));
     await page.mouse.move(700,900);
     check('moving away keeps navigation open', await page.$eval('.nav-drawer-panel', (node: HTMLElement) => !node.inert));
-    await page.click('[aria-label="导航"]');
-    check('second click closes navigation', await page.$eval('.nav-drawer-panel', (node: HTMLElement) => node.inert));
+    check('drawer covers the underlying navigation trigger', await page.$eval('.nav-trigger', (node: HTMLElement) => {
+      const r = node.getBoundingClientRect();
+      return !!document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2)?.closest('.nav-drawer-panel');
+    }));
+    await page.evaluate(() => document.querySelector<HTMLButtonElement>('.nav-drawer-panel button')!.focus());
+    await page.keyboard.down('Shift'); await page.keyboard.press('Tab'); await page.keyboard.up('Shift');
+    check('drawer keyboard navigation stays inside the visible panel', await page.evaluate(() =>
+      !!document.activeElement?.closest('.nav-drawer-panel')));
+    await page.click('[aria-label="关闭导航"]');
+    check('drawer close button restores navigation trigger', await page.$eval('.nav-drawer-panel', (node: HTMLElement) => node.inert)
+      && await page.evaluate(() => document.activeElement?.getAttribute('aria-label') === '导航'));
     await page.click('[aria-label="导航"]');
     await settle();
     await page.mouse.click(700,900);

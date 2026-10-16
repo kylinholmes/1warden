@@ -85,6 +85,22 @@ const site = Bun.serve({
   hostname: '127.0.0.1', port: 0,
   async fetch(request) {
     const url = new URL(request.url);
+    if (url.pathname === '/api/accounts/revision-date') return Response.json(1);
+    if (url.pathname === '/api/sync') {
+      // Returning from another tab triggers focus sync. Serve the same synthetic
+      // vault instead of treating that legitimate request as a network failure.
+      return Response.json({ profile: { id: account.userId }, collections: [],
+        folders: seed.folders.map(folder => ({ id: folder.id, name: encryptFixture(Buffer.from(folder.name), 17, 23),
+          revisionDate: folder.updatedAt })),
+        ciphers: await Promise.all(seed.items.map(async record => ({
+          ...await encryptCipher(record, { encKey: Buffer.alloc(32, 17), macKey: Buffer.alloc(32, 23) }, {}),
+          id: record.id, creationDate: record.createdAt, revisionDate: record.updatedAt,
+          deletedDate: record.deletedAt, archivedDate: record.archivedAt,
+          attachments: record.attachments.map(attachment => ({ ...attachment,
+            fileName: encryptFixture(Buffer.from(attachment.fileName), 17, 23) })),
+        }))),
+      });
+    }
     if (url.pathname === '/api/ciphers' && request.method === 'POST') {
       const body = await request.json() as CipherDto;
       // Request-only concurrency/owner fields are not part of CipherDto responses.
@@ -230,8 +246,11 @@ async function click(selector: string): Promise<void> {
     return node;
   }, {}, textSelector?.[1] ?? selector, textSelector?.[2] ?? null, name === 'chrome');
   try {
-    // Gecko BiDi rejects native input on privileged pages; activate its real DOM.
-    if (name === 'firefox') await element.evaluate((button: HTMLElement) => button.click());
+    // Gecko BiDi rejects native input on privileged pages. Model pointer focus
+    // before DOM activation so scrolling cannot leave focus on an old control.
+    if (name === 'firefox') await element.evaluate((button: HTMLElement) => {
+      button.focus({ preventScroll: true }); button.click();
+    });
     else await element.click();
   } finally { await element.dispose(); }
 }
@@ -255,6 +274,12 @@ async function openNavigation(): Promise<void> {
   if (!open) {
     await click('button[aria-label="导航"]');
     await popup.waitForFunction(() => document.querySelector('.nav-drawer-panel')!.getBoundingClientRect().left >= 0);
+    check('drawer covers the list navigation trigger and has its own reachable close button', await popup.evaluate(() => {
+      const trigger = document.querySelector('.nav-trigger')!.getBoundingClientRect();
+      const close = document.querySelector('[aria-label="关闭导航"]')?.getBoundingClientRect();
+      const covered = document.elementFromPoint(trigger.x + trigger.width / 2, trigger.y + trigger.height / 2)?.closest('.nav-drawer-panel');
+      return !!covered && !!close && !!document.elementFromPoint(close.x + close.width / 2, close.y + close.height / 2)?.closest('[aria-label="关闭导航"]');
+    }));
   }
 }
 try {
@@ -365,6 +390,7 @@ try {
     const filling = popup.evaluate((tabId: number) => (globalThis as any).chrome.runtime.sendMessage({
       type: '1warden:fill', application: true, itemId: 'smoke-alpha', tabId,
     }), targetId);
+    let lookup: any;
     try {
       await new Promise((resolve) => setTimeout(resolve, 100));
       const responsive = await Promise.race([
@@ -373,9 +399,16 @@ try {
         new Promise((resolve) => setTimeout(() => resolve(false), 2_000)),
       ]);
       check('search and details respond while a frozen tab blocks filling', responsive === true);
+      lookup = await browser.newPage();
+      await lookup.goto(siteUrl);
+      await lookup.click('#email');
+      await lookup.waitForSelector('[data-onewarden-inline][data-state="accounts"]', { visible: true, timeout: 3000 });
+      check('another website receives inline accounts while a frozen tab blocks filling', true);
     } finally {
       await cdp.send('Page.setWebLifecycleState', { state: 'active' });
       await filling;
+      await lookup?.close();
+      await popup.bringToFront();
       await cdp.detach();
     }
   }
@@ -812,6 +845,9 @@ try {
   const registeredUsername = 'registration-smoke@example.invalid';
   const registeredPassword = 'Synthetic-New-Registration!42';
   const changedPassword = 'Synthetic-Changed-Registration!43';
+  // Successful focus sync may persist a profile secure note. Count login writes
+  // separately so this assertion still detects an unconfirmed credential save.
+  const loginCreates = () => cipherCreates.filter(cipher => cipher.type === 1).length;
   async function submitCredentialForm(changing: boolean): Promise<void> {
     await login.bringToFront();
     await login.evaluate((changing: boolean) => {
@@ -850,11 +886,11 @@ try {
   await submitCredentialForm(false);
   const registration = await pendingCapture('save');
   check('registration with new-password and confirmation prompts before writing',
-    cipherCreates.length === 0 && !JSON.stringify(registration).includes(registeredPassword));
+    loginCreates() === 0 && !JSON.stringify(registration).includes(registeredPassword));
   check('registration save confirmation succeeds', (await saveCapture(registration)).ok === true);
   const created = seed.items.find(record => record.login?.username === registeredUsername)!;
   check('registration creates one encrypted record with the correct username and new password',
-    cipherCreates.length === 1 && created?.login?.password === registeredPassword
+    loginCreates() === 1 && created?.login?.password === registeredPassword
       && created.login.uris[0]?.uri === siteUrl && !JSON.stringify(cipherCreates).includes(registeredPassword));
   await submitCredentialForm(true);
   const change = await pendingCapture('update');
@@ -864,7 +900,7 @@ try {
   const updatedLogin = seed.items.find(record => record.id === created.id)!;
   check('change-password saves the new password and preserves the old password in history',
     updatedLogin.login?.password === changedPassword && updatedLogin.passwordHistory[0]?.password === registeredPassword
-      && cipherCreates.length === 1 && !JSON.stringify(cipherWrites).includes(changedPassword));
+      && loginCreates() === 1 && !JSON.stringify(cipherWrites).includes(changedPassword));
 
   await openPopup(true);
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });

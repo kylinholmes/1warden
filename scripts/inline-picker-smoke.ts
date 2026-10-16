@@ -92,6 +92,34 @@ try {
   await page.click('#outside');
   check('outside click dismisses', await page.$('[data-onewarden-inline]') === null);
 
+  await page.evaluate(() => { (window as any).fixture.holdAccounts = true; });
+  await page.click('#email');
+  await page.waitForFunction(() => typeof (window as any).fixture.resumeAccounts === 'function');
+  await page.evaluate(() => {
+    const f = (window as any).fixture;
+    f.readsBeforeFocus = f.requests.filter((type: string) => type === '1warden:inline-accounts').length;
+    for (let i = 0; i < 4; i++) window.dispatchEvent(new Event('focus'));
+  });
+  check('repeated window focus shares the pending account lookup', await page.evaluate(() => {
+    const f = (window as any).fixture;
+    return f.requests.filter((type: string) => type === '1warden:inline-accounts').length === f.readsBeforeFocus;
+  }));
+  await page.waitForSelector('[data-onewarden-inline][data-state="error"]', { visible: true, timeout: 9000 });
+  check('an unresponsive background exits loading and offers retry', await page.evaluate(() => {
+    const root = (window as any).fixture.shadows.get(document.querySelector('[data-onewarden-inline]'));
+    return root.textContent.includes('超时') && root.querySelector('button')?.textContent === '重试';
+  }));
+  await page.evaluate(() => { (window as any).fixture.holdAccounts = false; });
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-onewarden-inline][data-state="accounts"]', { visible: true });
+  await page.evaluate(() => {
+    const f = (window as any).fixture;
+    f.accountErrorOnce = 'stale reply must be ignored'; f.resumeAccounts();
+  });
+  await page.waitForFunction(() => (window as any).fixture.accountErrorOnce === null);
+  check('late timed-out replies cannot replace a successful retry', await page.$('[data-onewarden-inline][data-state="accounts"]') !== null);
+  await page.keyboard.press('Escape');
+
   await page.evaluate(() => {
     const fixture = (window as any).fixture;
     fixture.locked = true; fixture.selected = null;

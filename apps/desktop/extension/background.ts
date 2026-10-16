@@ -20,6 +20,7 @@ import { accountKey, lockedAccount } from '../src/application/account-target';
  * storage 里**，模块变量随时可能归零。
  */
 import { ext } from './ext-api';
+import { withReadTimeout } from './read-timeout';
 import { installExtensionHost } from './host-impl';
 import {
   VaultClient, classifyFields, matchItemsByUrl,
@@ -206,8 +207,13 @@ async function restoreClientFromStorage(c: VaultClient): Promise<VaultClient> {
     resolvedClients.add(c);
     await scheduleAutoLock();
   } else {
-    await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY]);
-    await credentialController.clearSession();
+    // Clear once on worker restoration. Explicit lock/account changes already
+    // clear their session. Broadcasting on every locked read makes content
+    // observers request another read, creating a self-sustaining refresh loop.
+    if (!resolvedClients.has(c)) {
+      await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY]);
+      await credentialController.clearSession();
+    }
     const account = await sessions.loadAccount();
     if (c !== client) return getClient();
     if (account && !c.getSession().account) c.getSession().setAccount(account);
@@ -496,18 +502,23 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
     return undefined;
   }
   // Vault mutations share a queue; lock retires the current generation immediately.
+  const execute = async () => {
+    const owner = getClient();
+    await restoreFromStorage();
+    if (owner !== client) throw new Error('请求已取消，保险库已锁定');
+    return handle(msg as Request, sender);
+  };
   const result = req.type === '1warden:application'
     ? dispatchApplication(msg)
     : req.type === '1warden:clipboard-copied'
     ? handle(msg as Request, sender)
     : req.type === '1warden:lock'
     ? dispatchApplication({ method: 'lock', args: [] }).then(() => ({ ok: true }))
-    : runSerialized(async () => {
-      const owner = getClient();
-      await restoreFromStorage();
-      if (owner !== client) throw new Error('请求已取消，保险库已锁定');
-      return handle(msg as Request, sender);
-    });
+    // Display-only lookups must not queue behind a network write or a frozen
+    // tab's fill. The handler still verifies owner, live document and URL.
+    : req.type === '1warden:inline-accounts'
+    ? withReadTimeout(execute(), 4000, '读取账号超时，请重试')
+    : runSerialized(execute);
   void result.then((value) => respond(application ? { ok: true, result: value } : value)).catch(fail);
   return true;
 });

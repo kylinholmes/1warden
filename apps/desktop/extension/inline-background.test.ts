@@ -79,9 +79,54 @@ beforeEach(async () => {
   await import('./background');
 });
 
-afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
+afterEach(() => { vi.useRealTimers(); vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('inline account chooser boundary', () => {
+  it('times out a stalled document lookup and lets a new request succeed', async () => {
+    vi.useFakeTimers();
+    let release!: (value: chrome.scripting.InjectionResult<unknown>[]) => void;
+    vi.spyOn(chrome.scripting, 'executeScript').mockImplementationOnce(() => new Promise(resolve => { release = resolve; }));
+    const request = { type: '1warden:inline-accounts', nonce: 'synthetic-document', documentUrl: url };
+    const pending = send(request);
+    await vi.advanceTimersByTimeAsync(4100);
+    expect(await pending).toMatchObject({ error: expect.stringContaining('超时') });
+    expect(await send(request)).toMatchObject({ unlocked: true, accounts: [{ id: 'a' }, { id: 'b' }] });
+    release([{ result: true, frameId: 0, documentId: content.documentId }]);
+    await vi.advanceTimersByTimeAsync(0);
+  });
+
+  it('does not return account data if locking overtakes an independent lookup', async () => {
+    let release!: (value: chrome.scripting.InjectionResult<unknown>[]) => void;
+    let started!: () => void;
+    const waiting = new Promise<void>(resolve => { started = resolve; });
+    vi.spyOn(chrome.scripting, 'executeScript').mockImplementationOnce(() => new Promise(resolve => { release = resolve; started(); }));
+    const pending = send({ type: '1warden:inline-accounts', nonce: 'synthetic-document', documentUrl: url });
+    await waiting;
+    await send({ type: '1warden:lock' }, { id: content.id, url: 'chrome-extension://onewarden-id/popup.html' });
+    release([{ result: true, frameId: 0, documentId: content.documentId }]);
+    expect(await pending).toMatchObject({ error: expect.any(String) });
+  });
+
+  it('answers account lookups while another page holds the fill queue', async () => {
+    const original = chrome.scripting.executeScript;
+    let release!: () => void;
+    let started!: () => void;
+    const waiting = new Promise<void>(resolve => { started = resolve; });
+    const resume = new Promise<void>(resolve => { release = resolve; });
+    vi.spyOn(chrome.scripting, 'executeScript').mockImplementation(async (...args) => {
+      if (args[0].target.tabId === 8) { started(); await resume; }
+      return original(...args);
+    });
+    const filling = send({ type: '1warden:inline-fill', itemId: 'a' }, { ...content, tab: { id: 8 } as chrome.tabs.Tab });
+    await waiting;
+    try {
+      expect(await Promise.race([
+        send({ type: '1warden:inline-accounts', nonce: 'synthetic-document', documentUrl: url }),
+        new Promise(resolve => setTimeout(() => resolve('blocked'), 200)),
+      ])).toMatchObject({ unlocked: true, accounts: [{ id: 'a' }, { id: 'b' }] });
+    } finally { release(); await filling; }
+  });
+
   it('uses the browser URL after same-document navigation, only with a matching isolated nonce', async () => {
     currentUrl = 'https://example.com/sessions/two-factor/app';
     (data['1warden.session'] as { items: VaultItem[] }).items[0]!.login!.uris = [{ uri: currentUrl, match: 3 }];

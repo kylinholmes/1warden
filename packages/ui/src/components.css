@@ -290,9 +290,8 @@
      * ⚠️ 它一度绝对定位到窗口左上角 —— 桌面端那里正好是 macOS 的红绿灯，
      * 而那是**系统**画的、在 WebView 之上，应用控件抢不过。
      */
-    .nav-trigger {
+    .nav-trigger, .nav-close {
       position: relative;
-      z-index: 30;
       display: grid;
       place-items: center;
       width: 32px;
@@ -303,7 +302,7 @@
       transition: background-color var(--dur-fast) var(--ease-enter),
         color var(--dur-fast) var(--ease-enter);
     }
-    .nav-trigger:hover { background: var(--surface-hover); color: var(--ink-primary); }
+    .nav-trigger:hover, .nav-close:hover { background: var(--surface-hover); color: var(--ink-primary); }
 
     /* Only explicit clicks/keyboard activation change this state. */
     .nav-drawer[data-open='true'] .nav-drawer-panel { transform: none; }
@@ -328,10 +327,6 @@
        * 材质要跟着「它背后是什么」选，不是跟着「哪个组件」选。
        */
       background: var(--surface-paper);
-    }
-    @media (width < 900px) {
-      /* Keep the same trigger reachable while the drawer is open. */
-      .nav-drawer-panel .nav-band { padding-left: 56px; }
     }
 
     /* 抽屉里的导航栏不受折叠态影响 —— 它只在滑出来时可见 */
@@ -381,8 +376,7 @@
       pointer-events: none;
     }
     @media (width < 900px) {
-      /* Contain the list trigger's z-index while the detail overlays it.
-         inert blocks input but does not stop underlying controls painting above it. */
+      /* Keep list controls below the detail overlay during narrow navigation. */
       .vault-content[data-detail-mounted='true'] .vault-list { isolation: isolate; }
     }
 

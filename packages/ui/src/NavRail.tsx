@@ -1,7 +1,7 @@
 import { createStore, type StoreApi } from '@1warden/state';
 import { useLocalStore, useStore } from '@1warden/state/react';
 import { createContext, useContext, useEffect, useLayoutEffect, useId, useRef, type ReactNode, type RefObject } from 'react';
-import { IconChevronDown, IconItems } from './icons';
+import { IconChevronDown, IconClose, IconItems } from './icons';
 import { useCompactLayout } from './layout';
 
 interface NavigationState {
@@ -307,8 +307,8 @@ export function NavDrawer(
           .filter(element => element.tabIndex >= 0 && !element.matches(':disabled') && element.offsetParent !== null);
         const first = controls[0];
         const last = controls[controls.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); nav?.trigger.current?.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); nav?.trigger.current?.focus(); }
+        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last?.focus(); }
+        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first?.focus(); }
         else if (document.activeElement === nav?.trigger.current) { event.preventDefault(); (event.shiftKey ? last : first)?.focus(); }
       }
     }
@@ -320,7 +320,10 @@ export function NavDrawer(
       {nav?.open && nav.compact && <div className="nav-drawer-scrim" aria-hidden onPointerDown={() => nav.close()} />}
       <div ref={panel} id={nav?.panelId} className="nav-drawer-panel"
         inert={nav?.compact && !nav.open} aria-hidden={nav?.compact && !nav.open || undefined}>
-        <NavRail {...props} onSelect={key => { if (nav?.compact) nav.close(); props.onSelect(key); }} expanded />
+        <NavRail {...props} brand={props.brand ?? (nav?.compact ? null : undefined)}
+          brandAction={<>{props.brandAction}{nav?.compact && <button type="button" className="nav-close"
+            aria-label="关闭导航" title="关闭导航" onClick={nav.close}><IconClose size={17} /></button>}</>}
+          onSelect={key => { if (nav?.compact) nav.close(); props.onSelect(key); }} expanded />
       </div>
     </div>
   );
@@ -339,6 +342,7 @@ export function NavTrigger() {
   const nav = useNavigation();
   return (
     <button ref={nav?.trigger} type="button" className="nav-trigger" aria-label="导航" title="导航"
+      tabIndex={nav?.compact && nav.open ? -1 : undefined}
       aria-expanded={nav?.open ?? false} aria-controls={nav?.panelId} onClick={nav?.toggle}>
       <IconItems size={17} />
     </button>
