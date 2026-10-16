@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { makeUserKey, toBase64 } from '@1warden/crypto';
+import { generateTotp, makeUserKey, toBase64 } from '@1warden/crypto';
 import type { FieldDescriptor, VaultItem } from '@1warden/vault';
 
 type Listener = (request: unknown, sender: chrome.runtime.MessageSender, reply: (value: unknown) => void) => unknown;
@@ -79,7 +79,7 @@ beforeEach(async () => {
   await import('./background');
 });
 
-afterEach(() => { vi.unstubAllGlobals(); });
+afterEach(() => { vi.unstubAllGlobals(); vi.restoreAllMocks(); });
 
 describe('inline account chooser boundary', () => {
   it('uses the browser URL after same-document navigation, only with a matching isolated nonce', async () => {
@@ -106,14 +106,43 @@ describe('inline account chooser boundary', () => {
     pageFields.push({ ...pageFields[0]!, autocomplete: 'one-time-code', id: 'app_totp', name: 'app_otp' });
   }
 
-  it('offers only usable native and custom-field TOTP accounts without disclosing codes or seeds', async () => {
+  it('previews current codes only for usable matching TOTP accounts, never passwords or seeds', async () => {
     seedOtp();
-    expect(await send({ type: '1warden:inline-accounts', target: { index: 2, kind: 'totp' } })).toEqual({
+    const now = Date.now();
+    vi.spyOn(Date, 'now').mockReturnValue(now);
+    const code = await generateTotp('JBSWY3DPEHPK3PXP', now);
+    const response = await send({ type: '1warden:inline-accounts', target: { index: 2, kind: 'totp' } });
+    const otp = { code: code.code, period: 30, expiresAt: (Math.floor(now / 30_000) + 1) * 30_000 };
+    expect(response).toEqual({
       unlocked: true, accounts: [
-        { id: 'a', title: 'Account a', username: 'a@example.com' },
-        { id: 'b', title: 'Account b', username: 'b@example.com' },
+        { id: 'a', title: 'Account a', username: 'a@example.com', otp },
+        { id: 'b', title: 'Account b', username: 'b@example.com', otp },
       ],
     });
+    expect(JSON.stringify(response)).not.toContain('JBSWY3DPEHPK3PXP');
+    expect(JSON.stringify(response)).not.toContain(secret);
+  });
+
+  it('never previews codes from an ordinary account request or a stale OTP field', async () => {
+    seedOtp();
+    expect((await send({ type: '1warden:inline-accounts' })).accounts.every((entry: object) => !('otp' in entry))).toBe(true);
+    expect(await send({ type: '1warden:inline-accounts', target: { index: 1, kind: 'totp' } }))
+      .toMatchObject({ error: expect.any(String) });
+  });
+
+  it('refreshes an expired preview and fills a new code instead of trusting the displayed code', async () => {
+    seedOtp();
+    const initial = Math.floor(Date.now() / 30_000) * 30_000 + 29_000;
+    const clock = vi.spyOn(Date, 'now').mockReturnValue(initial);
+    const request = { type: '1warden:inline-accounts', target: { index: 2, kind: 'totp' } };
+    const previous = await send(request);
+    clock.mockReturnValue(initial + 2000);
+    const fresh = await generateTotp('JBSWY3DPEHPK3PXP', initial + 2000);
+    const next = await send(request);
+    expect(next.accounts[0].otp.code).toBe(fresh.code);
+    expect(next.accounts[0].otp.expiresAt).toBe(previous.accounts[0].otp.expiresAt + 30_000);
+    expect(await send({ type: '1warden:inline-fill', itemId: 'a', target: request.target, code: previous.accounts[0].otp.code })).toEqual({ ok: true });
+    expect(injections.at(-1)?.args?.[0]).toMatchObject([{ index: 2, value: fresh.code }]);
   });
 
   it('fills only the selected OTP input, including custom-field TOTP', async () => {

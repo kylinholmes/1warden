@@ -41,7 +41,7 @@ import { authorizeRequest, createApplicationDispatcher, createSerialRunner, seri
 import { createClipboardStore } from './clipboard-store';
 import { CONNECTION_DRAFT_KEY } from './connection-draft';
 import { CLIPBOARD_CLEAR_MS } from '@1warden/ui/clipboard';
-import type { InlineAccounts, InlineRequest } from './inline-accounts';
+import type { InlineAccount, InlineAccounts, InlineRequest } from './inline-accounts';
 import { focusedPlan, readPageFields, type InlineField, type InlineTarget } from './inline-fields';
 import { createCredentialController } from './credential-handlers';
 import type { CredentialRequest } from './credential-protocol';
@@ -665,17 +665,27 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const session = activeClient.getSession();
       requireInlineOwner(activeClient);
       validateInlineTarget(req.target);
+      if (session.isUnlocked() && req.target?.kind === 'totp') {
+        const fields = await readFieldsFrom(sender.tab!.id!, sender.documentId);
+        if (focusedPlan(fields, req.target.index)?.kind !== 'totp') throw new Error('验证码输入框已改变，请重新选择');
+      }
       const matches = session.isUnlocked() ? matchItemsByUrl(session.items, documentUrl)
         .filter((item) => item.type === 'login' && item.login !== null) : [];
-      const candidates = req.target?.kind === 'totp'
-        ? (await Promise.all(matches.map(async item => await totpCode(item) ? item : null))).filter(item => item !== null)
-        : matches;
+      const at = Date.now();
+      const candidates = (await Promise.all(matches.map(async (item): Promise<InlineAccount | null> => {
+        const account: InlineAccount = { id: item.id, title: item.name, username: item.login!.username ?? '' };
+        if (req.target?.kind !== 'totp') return account;
+        const code = await totpCode(item, at);
+        if (!code) return null;
+        account.otp = { code: code.code, period: code.period,
+          expiresAt: (Math.floor(at / (code.period * 1000)) + 1) * code.period * 1000 };
+        return account;
+      }))).filter(item => item !== null);
       await requireInlineDocument(sender, req.nonce, documentUrl);
       requireInlineOwner(activeClient);
       return {
         unlocked: session.isUnlocked(),
-        accounts: session.isUnlocked() ? candidates
-          .map((item) => ({ id: item.id, title: item.name, username: item.login!.username ?? '' })) : [],
+        accounts: session.isUnlocked() ? candidates : [],
       } satisfies InlineAccounts;
     }
     case '1warden:inline-fill': {
@@ -887,8 +897,8 @@ async function buildOtpEntries(indices: number[], item: VaultItem): Promise<Fill
 /**
  * 把密码计划翻译成「第几个框填什么值」。
  *
- * 只有这里——background——同时握有字段位置与明文。content script 从头到尾
- * 只给出位置，拿不到值。
+ * 填充内容在 background 中组装并直接注入。选择器可以短暂显示当前验证码，
+ * 但不参与生成或决定填充的明文，也拿不到登录密码和 TOTP 种子。
  */
 async function buildEntries(
   plan: ReturnType<typeof classifyFields>,

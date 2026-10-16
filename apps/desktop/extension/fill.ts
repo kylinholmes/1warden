@@ -3,9 +3,10 @@
  *
  * ## 安全模型：明文不经过 content script
  *
- * content script 只上报「页面上有哪些输入框」，**拿不到任何值**。
- * 值由 background 通过 `chrome.scripting.executeScript` 的 `args` 直接送进
+ * 填充值由 background 通过 `chrome.scripting.executeScript` 的 `args` 直接送进
  * 这个函数 —— 它是一次性的注入，不是常驻在页面里的那份额外上下文。
+ * 输入选择器可以显示短期验证码预览，但填充时仍从后台重新生成；登录密码和
+ * TOTP 种子不经过选择器。
  *
  * ## ⚠️ 这个函数必须**完全自包含**
  *

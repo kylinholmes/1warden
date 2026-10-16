@@ -2,7 +2,8 @@
  * content script —— 页面里唯一常驻的那份代码。
  *
  * 字段元数据供账号选择器使用；凭据观察器在 ISOLATED world 中，仅在用户
- * 编辑完成或提交表单时，短暂读取当前表单并交给 background。密码不进入页面 UI。
+ * 编辑完成或提交表单时，短暂读取当前表单并交给 background。登录密码和 TOTP
+ * 种子不进入提示 UI；验证码候选仅显示后台生成的短期验证码。
  */
 import { ext } from './ext-api';
 import { isLikelyLoginForm, type FieldDescriptor } from '@1warden/vault';

@@ -30,13 +30,22 @@ const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     <label>Password<input id="password" type="password" autocomplete="current-password"></label>
     <button id="outside" type="button">Outside</button></form>
     <script>
-      window.fixture={locked:false,selected:null,unlockRequests:0,submissions:0,requests:[],focus:[],accountErrorOnce:null,pendingUnlock:false};
+      window.fixture={locked:false,selected:null,unlockRequests:0,submissions:0,requests:[],focus:[],accountErrorOnce:null,pendingUnlock:false,
+        shadows:new WeakMap(),clockOffset:0,otpCode:'123456',otpExpiresAt:Date.now()+30000,holdAccounts:false,listeners:[],lockedReads:0};
+      const realNow=Date.now.bind(Date);Date.now=()=>realNow()+fixture.clockOffset;
+      const attach=Element.prototype.attachShadow;
+      Element.prototype.attachShadow=function(options){const root=attach.call(this,options);fixture.shadows.set(this,root);return root};
       document.addEventListener('focusout',()=>fixture.focus.push(document.activeElement?.tagName),true);
       const accounts=[{id:'a',title:'Personal account',username:'personal@example.invalid'},
         {id:'b',title:'Work account',username:'work@example.invalid'}];
-      window.chrome={runtime:{onMessage:{addListener(){}},sendMessage:async(message)=>{
+      window.chrome={runtime:{onMessage:{addListener(listener){fixture.listeners.push(listener)}},sendMessage:async(message)=>{
         fixture.requests.push(message.type);
-        if(message.type==='1warden:inline-accounts'){if(fixture.accountErrorOnce){const error=fixture.accountErrorOnce;fixture.accountErrorOnce=null;return{error}};return {unlocked:!fixture.locked,accounts:fixture.locked?[]:accounts}};
+        if(message.type==='1warden:inline-accounts'){
+          if(fixture.locked){fixture.lockedReads++;fixture.listeners.forEach(listener=>listener({type:'1warden:credential-refresh'}))}
+          if(fixture.holdAccounts)await new Promise(resolve=>fixture.resumeAccounts=resolve);
+          if(fixture.accountErrorOnce){const error=fixture.accountErrorOnce;fixture.accountErrorOnce=null;return{error}};
+          return {unlocked:!fixture.locked,accounts:fixture.locked?[]:accounts.map(account=>message.target?.kind==='totp'
+            ?{...account,otp:{code:fixture.otpCode,period:30,expiresAt:fixture.otpExpiresAt}}:account)}};
         if(message.type==='1warden:inline-fill'){fixture.selected=message.itemId;document.querySelector('#email').value=accounts.find(a=>a.id===message.itemId).username;return{ok:true}};
         if(message.type==='1warden:inline-unlock'){fixture.unlockRequests++;if(fixture.pendingUnlock)return new Promise(()=>{});return{error:'请点击浏览器工具栏中的 1Warden 图标解锁，然后回到此输入框选择账号。'}};
         if(message.type==='1warden:submitted')fixture.submissions++;
@@ -120,12 +129,81 @@ try {
   check('unlock refresh resumes even if the popup-open reply remains pending', true);
   await page.keyboard.press('Escape');
 
+  await page.evaluate(() => {
+    const fixture = (window as any).fixture;
+    fixture.pendingUnlock = false; fixture.otpExpiresAt = Date.now() + 30_000;
+    const input = document.createElement('input'); input.id = 'otp'; input.autocomplete = 'one-time-code';
+    document.querySelector('form')!.append(input);
+  });
+  await page.click('#otp');
+  await page.waitForFunction(() => {
+    const root = (window as any).fixture.shadows.get(document.querySelector('[data-onewarden-inline]'));
+    return root?.querySelector('.otp-code')?.textContent === '123 456';
+  });
+  check('TOTP choices display six digits in two groups with remaining time', await page.evaluate(() => {
+    const root = (window as any).fixture.shadows.get(document.querySelector('[data-onewarden-inline]'));
+    return root.querySelectorAll('.otp-code').length === 2 && /\d+s/.test(root.querySelector('.otp-countdown').textContent);
+  }));
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown');
+  await page.evaluate(() => {
+    const f = (window as any).fixture;
+    f.focusedOtp = f.shadows.get(document.querySelector('[data-onewarden-inline]')).activeElement;
+    f.clockOffset += 31_000; f.otpCode = '654321'; f.otpExpiresAt = Date.now() + 30_000;
+  });
+  await page.waitForFunction(() => (window as any).fixture.shadows.get(document.querySelector('[data-onewarden-inline]'))
+    ?.querySelector('.otp-code')?.textContent === '654 321');
+  check('rollover refreshes the code without replacing the keyboard-selected account', await page.evaluate(() => {
+    const f = (window as any).fixture;
+    return f.shadows.get(document.querySelector('[data-onewarden-inline]')).activeElement === f.focusedOtp;
+  }));
+  await page.evaluate(() => { (window as any).fixture.holdAccounts = true; });
+  await page.waitForFunction(() => typeof (window as any).fixture.resumeAccounts === 'function');
+  await page.evaluate(() => { (window as any).fixture.clockOffset += 31_000; });
+  await page.waitForFunction(() => (window as any).fixture.shadows.get(document.querySelector('[data-onewarden-inline]'))
+    ?.querySelector('.otp-code')?.textContent === '··· ···');
+  check('expired digits disappear even when the background refresh is delayed', true);
+  await page.evaluate(() => {
+    const f = (window as any).fixture;
+    f.holdAccounts = false; f.accountErrorOnce = '连接失败，请重试'; f.resumeAccounts();
+  });
+  await page.waitForSelector('[data-onewarden-inline][data-state="error"]', { visible: true });
+  check('a failed refresh clears the code and offers retry', await page.evaluate(() => !(window as any).fixture.shadows
+    .get(document.querySelector('[data-onewarden-inline]')).querySelector('.otp-code')));
+  await page.evaluate(() => { (window as any).fixture.otpExpiresAt = Date.now() + 30_000; });
+  await page.keyboard.press('Enter');
+  await page.waitForSelector('[data-onewarden-inline][data-state="accounts"]', { visible: true });
+  await page.evaluate(() => { (window as any).fixture.locked = true; });
+  await page.waitForSelector('[data-onewarden-inline][data-state="locked"]', { visible: true });
+  check('locking an open TOTP chooser removes displayed codes', await page.evaluate(() => !(window as any).fixture.shadows
+    .get(document.querySelector('[data-onewarden-inline]')).querySelector('.otp-code')));
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => { (window as any).fixture.locked = false; });
+
   await page.setViewport({ width: 360, height: 480 });
   await page.click('#password');
   await page.waitForSelector('[data-onewarden-inline]', { visible: true });
   check('chooser stays within the narrow viewport', await page.$eval('[data-onewarden-inline]', (host: HTMLElement) => {
     const rect = host.getBoundingClientRect();
     return rect.left >= 0 && rect.right <= innerWidth && rect.top >= 0 && rect.bottom <= innerHeight;
+  }));
+  await page.keyboard.press('Escape');
+  await page.click('#otp');
+  await page.waitForSelector('[data-onewarden-inline][data-state="accounts"]', { visible: true });
+  check('large OTP digits and countdown fit side by side on a narrow screen', await page.evaluate(() => {
+    const host = document.querySelector<HTMLElement>('[data-onewarden-inline]')!;
+    const root = (window as any).fixture.shadows.get(host);
+    const code = root.querySelector('.otp-code').getBoundingClientRect();
+    const timer = root.querySelector('.otp-timer').getBoundingClientRect();
+    const bounds = host.getBoundingClientRect();
+    return code.width > 0 && code.right < timer.left && timer.right <= bounds.right && code.left >= 0 && bounds.right <= innerWidth;
+  }));
+  await page.keyboard.press('Escape');
+  await page.evaluate(() => { (window as any).fixture.closedAt = Date.now();
+    (window as any).fixture.closedReads = (window as any).fixture.requests.filter((type: string) => type === '1warden:inline-accounts').length; });
+  await page.waitForFunction(() => Date.now() - (window as any).fixture.closedAt > 1250);
+  check('closing the chooser removes the code and stops background polling', await page.evaluate(() => {
+    const f = (window as any).fixture;
+    return !document.querySelector('[data-onewarden-inline]') && f.closedReads === f.requests.filter((type: string) => type === '1warden:inline-accounts').length;
   }));
   check('no uncaught page errors', errors.length === 0);
 } catch (error) {

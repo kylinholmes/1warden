@@ -1,8 +1,8 @@
 import { focusedPlan, type InlineField, type InlineTarget } from './inline-fields';
 import { ext } from './ext-api';
-import type { InlineAccounts, InlineReply } from './inline-accounts';
+import type { InlineAccounts, InlineOtp, InlineReply } from './inline-accounts';
 
-/** Page-resident UI receives only matched account labels, never vault secrets. */
+/** The chooser displays short-lived codes; passwords and TOTP seeds never enter it. */
 export function installInlinePicker(readFields: () => InlineField[], credentials?: {
   nonce: string;
   suppress(field: HTMLInputElement): boolean;
@@ -26,12 +26,21 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let pageUrl = location.href;
   let target: InlineTarget | null = null;
+  let otpTimer: ReturnType<typeof setInterval> | null = null;
+  let nextOtpRefresh = 0;
+  let pendingRefresh: number | null = null;
+  const otpRows = new Map<string, { otp: InlineOtp | null; button: HTMLButtonElement; title: HTMLSpanElement;
+    username: HTMLSpanElement | null; code: HTMLSpanElement; timer: HTMLSpanElement; countdown: HTMLSpanElement }>();
 
   function close(restoreFocus = false): void {
     const previous = anchor;
     request++;
     if (refreshTimer !== null) clearTimeout(refreshTimer);
     refreshTimer = null;
+    if (otpTimer !== null) clearInterval(otpTimer);
+    otpTimer = null;
+    pendingRefresh = null;
+    otpRows.clear();
     awaitingUnlock = false;
     busy = false;
     host?.remove();
@@ -104,6 +113,13 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
       .title,.username { display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
       .title { font-weight:600; }
       .username { margin-top:2px; color:var(--onewarden-muted); font-size:12px; }
+      .otp-line { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-top:8px; }
+      .otp-code { font:650 24px/1.2 ui-monospace,SFMono-Regular,Consolas,monospace; letter-spacing:.06em; font-variant-numeric:tabular-nums; }
+      .otp-timer { display:grid; place-items:center; position:relative; width:32px; height:32px; flex:none;
+        border-radius:50%; background:conic-gradient(var(--onewarden-accent) var(--remaining),var(--onewarden-border) 0); }
+      .otp-timer::before { content:''; position:absolute; inset:2px; border-radius:50%; background:var(--onewarden-paper); }
+      .otp-countdown { position:relative; font-size:10px; font-variant-numeric:tabular-nums; }
+      .otp-code[data-expiring='true'] { color:var(--onewarden-muted); }
     `;
     panel = document.createElement('div');
     panel.className = 'panel';
@@ -140,6 +156,31 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
       host.popover = 'manual';
       try { host.showPopover(); } catch { /* fixed-position fallback */ }
     }
+    if (target?.kind === 'totp') {
+      nextOtpRefresh = Date.now() + 1000;
+      otpTimer = setInterval(() => {
+        if (!host || !anchor?.isConnected || pageUrl !== location.href || document.hidden) { close(); return; }
+        paintCodes();
+        if (!busy && pendingRefresh === null && host.dataset['state'] === 'accounts' && Date.now() >= nextOtpRefresh) {
+          void refresh(true);
+        }
+      }, 250);
+    }
+  }
+
+  function paintCodes(): void {
+    const now = Date.now();
+    for (const row of otpRows.values()) {
+      const remaining = row.otp ? Math.max(0, Math.ceil((row.otp.expiresAt - now) / 1000)) : 0;
+      if (remaining === 0) row.otp = null;
+      const code = row.otp?.code ?? '';
+      row.code.textContent = code ? (/^\d{6}$/.test(code) ? `${code.slice(0, 3)} ${code.slice(3)}` : code) : '··· ···';
+      row.code.setAttribute('aria-label', code ? `验证码 ${code.split('').join(' ')}` : '验证码正在刷新');
+      row.code.dataset['expiring'] = String(remaining <= 5);
+      row.countdown.textContent = remaining ? `${remaining}s` : '…';
+      row.timer.setAttribute('aria-label', remaining ? `${remaining} 秒后刷新` : '正在刷新');
+      row.timer.style.setProperty('--remaining', `${row.otp ? Math.min(1, remaining / row.otp.period) * 360 : 0}deg`);
+    }
   }
 
   function message(text: string): void {
@@ -156,18 +197,27 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
     return text;
   }
 
-  function action(title: string, username: string | null, run: () => void): void {
+  function action(title: string, username: string | null, run: () => void, preview?: { id: string; otp: InlineOtp }): void {
     const button = document.createElement('button');
     button.type = 'button';
     const label = document.createElement('span');
     label.className = 'title';
     label.textContent = title;
     button.append(label);
+    let detail: HTMLSpanElement | null = null;
     if (username !== null) {
-      const detail = document.createElement('span');
+      detail = document.createElement('span');
       detail.className = 'username';
       detail.textContent = username || '未设置用户名';
       button.append(detail);
+    }
+    if (preview) {
+      const line = document.createElement('span'); line.className = 'otp-line';
+      const code = document.createElement('span'); code.className = 'otp-code';
+      const timer = document.createElement('span'); timer.className = 'otp-timer';
+      const countdown = document.createElement('span'); countdown.className = 'otp-countdown';
+      timer.append(countdown); line.append(code, timer); button.append(line);
+      otpRows.set(preview.id, { otp: preview.otp, button, title: label, username: detail, code, timer, countdown });
     }
     button.addEventListener('click', (event) => {
       if (event.isTrusted && !busy) run();
@@ -223,14 +273,28 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
   async function refresh(quiet = false): Promise<void> {
     if (!host || busy) return;
     const version = ++request;
+    pendingRefresh = version;
+    nextOtpRefresh = Date.now() + 1000;
     if (!quiet) message(target?.kind === 'totp' ? '正在查找验证码…' : '正在查找账号…');
     try {
       const reply = await ext.runtime.sendMessage({ type: '1warden:inline-accounts', target,
         nonce: credentials?.nonce, documentUrl: pageUrl }) as InlineAccounts | { error: string };
       if (version !== request || !host) return;
       if (!reply || 'error' in reply) throw new Error(reply && 'error' in reply ? reply.error : '扩展没有响应，请重试');
-      if (!reply.unlocked && quiet) { scheduleRefresh(); return; }
+      if (!reply.unlocked && quiet && awaitingUnlock && host.dataset['state'] === 'locked') { scheduleRefresh(); return; }
+      // Keep the existing buttons during ticking/rollover so hover, scroll and
+      // keyboard focus remain on the account the user is about to choose.
+      if (reply.unlocked && target?.kind === 'totp' && otpRows.size > 0 && otpRows.size === reply.accounts.length
+        && reply.accounts.every(account => otpRows.has(account.id) && account.otp)) {
+        for (const account of reply.accounts) {
+          const row = otpRows.get(account.id)!;
+          row.otp = account.otp!; row.title.textContent = account.title;
+          if (row.username) row.username.textContent = account.username || '未设置用户名';
+        }
+        paintCodes(); return;
+      }
       const hadFocus = document.activeElement === host;
+      otpRows.clear();
       choices?.replaceChildren();
       buttons = [];
       host.dataset['state'] = reply.unlocked ? (reply.accounts.length ? 'accounts' : 'empty') : 'locked';
@@ -241,10 +305,15 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
         awaitingUnlock = false;
         if (refreshTimer !== null) clearTimeout(refreshTimer);
         refreshTimer = null;
-        message(reply.accounts.length ? (target?.kind === 'totp' ? '选择账号，填入当前验证码' : '')
+        message(reply.accounts.length ? ''
           : target?.kind === 'totp' ? '此网站没有可用的验证码。请在 1Warden 的对应账号中配置 TOTP，或使用你的验证器。'
             : '此网站没有匹配的账号。登录后可按提示保存到 1Warden。');
-        for (const account of reply.accounts) action(account.title, account.username, () => { void choose(account.id); });
+        for (const account of reply.accounts) {
+          const id = account.id;
+          action(account.title, account.username, () => { void choose(id); },
+            target?.kind === 'totp' && account.otp ? { id, otp: account.otp } : undefined);
+        }
+        paintCodes();
       }
       if (reply.unlocked && anchor && target?.kind === 'login' && credentials?.canGenerate(anchor)) {
         const field = anchor;
@@ -258,6 +327,7 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
       if (version !== request || !host) return;
       awaitingUnlock = false;
       const hadFocus = document.activeElement === host;
+      otpRows.clear();
       choices?.replaceChildren();
       buttons = [];
       host.dataset['state'] = 'error';
@@ -265,6 +335,8 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
       action('重试', null, () => { void refresh(); });
       if (hadFocus) focusButton(0);
       position();
+    } finally {
+      if (pendingRefresh === version) pendingRefresh = null;
     }
   }
 
@@ -320,4 +392,13 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
   window.addEventListener('pagehide', () => close());
   document.addEventListener('visibilitychange', () => { if (document.hidden) close(); });
   window.addEventListener('focus', () => { if (host && !busy) void refresh(awaitingUnlock); });
+  ext.runtime.onMessage.addListener((message: unknown) => {
+    if ((message as { type?: string })?.type === '1warden:credential-refresh' && host && target?.kind === 'totp') {
+      for (const row of otpRows.values()) row.otp = null;
+      paintCodes();
+      // A locked background can broadcast this while answering our own request.
+      // Do not invalidate that in-flight response or start a refresh loop.
+      if (!busy && pendingRefresh === null && host.dataset['state'] === 'accounts') void refresh(true);
+    }
+  });
 }
