@@ -3,6 +3,7 @@ import { useEffect, useRef } from 'react';
 import type { QuickAccount, QuickItem } from '../quick-bridge';
 import { IconLock, IconSearch } from '@1warden/ui';
 import { QuickLockedAccounts } from '../components/QuickLockedAccounts';
+import { QuickUnlockPanel, type QuickAuthentication } from '../components/QuickUnlockPanel';
 
 import { ItemIcon } from '@1warden/ui';
 import type { IconStore } from '@1warden/vault';
@@ -24,7 +25,7 @@ import type { IconStore } from '@1warden/vault';
  * 而不是主窗口那种三栏结构。窗口边缘那一圈圆角由外壳给（透明窗口），
  * 这里只负责内部。
  */
-export function QuickAccess({ items, icons, locked, busy, notice, accounts = [], onOpenAccount, pinned = false, onTogglePin, onQueryChange, onPick, onClose }: {
+export function QuickAccess({ items, icons, locked, busy, notice, accounts = [], onOpenAccount, onAuthenticate, onChooseAccounts, onCancelAuthentication, onAuthenticationComplete, authReset = 0, authError = null, syncing = false, syncError = null, activeAccount, onRetrySync, pinned = false, onTogglePin, onQueryChange, onPick, onClose }: {
   items: readonly QuickItem[];
   /** 站点图标的缓存。主窗口过桥传来服务端地址后建的；没有就只显示彩色徽标 */
   icons: IconStore | null;
@@ -33,6 +34,16 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
   notice: string | null;
   accounts?: readonly QuickAccount[];
   onOpenAccount?: (id: string | null) => void;
+  onAuthenticate?: QuickAuthentication;
+  onChooseAccounts?: () => void;
+  onCancelAuthentication?: () => void;
+  onAuthenticationComplete?: () => void;
+  authReset?: number;
+  authError?: string | null;
+  syncing?: boolean;
+  syncError?: string | null;
+  activeAccount?: { email: string; serverUrl: string } | null;
+  onRetrySync?: () => void;
   pinned?: boolean;
   onTogglePin?: () => void;
   onQueryChange: (q: string, seq: number) => void;
@@ -42,19 +53,22 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
   const viewStore = useLocalStore(() => {
     const query = '';
     const index = 0;
-    return { query, index };
+    return { query, index, choosingAccount: false };
   });
   const [query, setQuery] = useStoreField(viewStore, 'query');
   const [index, setIndex] = useStoreField(viewStore, 'index');
+  const [choosingAccount, setChoosingAccount] = useStoreField(viewStore, 'choosingAccount');
+  const authenticating = locked || choosingAccount;
   const inputRef = useRef<HTMLInputElement>(null);
   const panelRef = useRef<HTMLDivElement>(null);
   const selectedRef = useRef<HTMLButtonElement>(null);
   const seq = useRef(0);
+  const authBack = useRef<(() => void) | null>(null);
 
   useEffect(() => {
-    if (locked) (panelRef.current?.querySelector<HTMLButtonElement>('[data-quick-account]:not(:disabled)') ?? panelRef.current)?.focus();
+    if (authenticating) (panelRef.current?.querySelector<HTMLButtonElement>('[data-quick-account]:not(:disabled)') ?? panelRef.current)?.focus();
     else inputRef.current?.focus();
-  }, [locked]);
+  }, [authenticating]);
 
   // 结果变了就把选中项收回到第一条 —— 否则光标会停在一个已经不存在的下标上
   useEffect(() => { setIndex(0); }, [items]);
@@ -67,7 +81,12 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
   }
 
   function onKeyDown(e: React.KeyboardEvent) {
-    if (e.key === 'Escape') { e.preventDefault(); onClose(); return; }
+    if (e.key === 'Escape') {
+      e.preventDefault();
+      if (authenticating && authBack.current) authBack.current();
+      else { onCancelAuthentication?.(); onClose(); }
+      return;
+    }
     if (e.target !== inputRef.current) return;
     if (e.key === 'ArrowDown') { e.preventDefault(); setIndex((i) => Math.min(i + 1, items.length - 1)); return; }
     if (e.key === 'ArrowUp') { e.preventDefault(); setIndex((i) => Math.max(i - 1, 0)); return; }
@@ -91,19 +110,22 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
       {/* 搜索就是这一屏的主角 —— 给它 --text-lg，比列表里的条目名还大一号，
           因为用户打开面板时脑子里想的是「我要找的那个东西叫什么」 */}
       <div className="panel-head quick-search-head gap-3 px-4 py-3.5">
-        {locked
+        {authenticating
           ? <IconLock size={18} className="shrink-0 text-[var(--ink-tertiary)]" />
           : <IconSearch size={18} className="shrink-0 text-[var(--ink-tertiary)]" />}
         <input
           ref={inputRef}
           value={query}
           onChange={(e) => update(e.target.value)}
-          placeholder={locked ? '保险库已锁定' : '搜索保险库…'}
+          placeholder={authenticating ? '解锁后继续搜索' : '搜索保险库…'}
           aria-label="搜索保险库"
-          disabled={locked}
+          disabled={authenticating}
           className="quick-search-input min-w-0 flex-1 bg-transparent text-lg placeholder:text-[var(--ink-tertiary)] disabled:cursor-not-allowed"
         />
         {busy && <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">…</span>}
+        {!authenticating && onAuthenticate && <button type="button" className="btn btn-ghost h-8 px-2 text-xs"
+          aria-label="切换搜索账户" title={activeAccount ? `${activeAccount.email}\n${activeAccount.serverUrl}` : '切换账户'}
+          onClick={() => { setChoosingAccount(true); onChooseAccounts?.(); }}><span className="max-w-[120px] truncate">{activeAccount?.email ?? '切换账户'}</span></button>}
         {onTogglePin && <button type="button" className="btn btn-ghost h-8 w-8 p-1.5" aria-label={pinned ? '取消固定快速搜索' : '固定快速搜索'}
           aria-pressed={pinned} title={pinned ? '已临时固定；Esc 仍可关闭' : '临时固定，点击外部不关闭'} onClick={onTogglePin}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill={pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
@@ -112,16 +134,26 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
         </button>}
       </div>
 
-      {locked ? (
-        <QuickLockedAccounts accounts={accounts} busy={busy} onOpenAccount={onOpenAccount} />
+      {!authenticating && syncError && <div role="alert" className="flex items-center gap-2 px-4 py-2 text-xs text-[var(--risk)]">
+        <span className="min-w-0 flex-1 break-words">同步失败：{syncError}</span>
+        {onRetrySync && <button type="button" className="btn btn-quiet shrink-0" disabled={syncing} onClick={onRetrySync}>重试同步</button>}
+      </div>}
+
+      {authenticating ? (
+        onAuthenticate ? <QuickUnlockPanel accounts={accounts} loading={busy} autoSelect={!choosingAccount} reset={authReset} externalError={authError} backRef={authBack}
+          onAuthenticate={onAuthenticate} onCancel={() => onCancelAuthentication?.()}
+          onUnlocked={() => { setChoosingAccount(false); onAuthenticationComplete?.(); }}
+          onLogin={() => onOpenAccount?.(null)} onClose={() => {
+            if (choosingAccount && !locked) setChoosingAccount(false); else onClose();
+          }} /> : <QuickLockedAccounts accounts={accounts} busy={busy} onOpenAccount={onOpenAccount} />
       ) : (
         <ul className="flex-1 overflow-y-auto p-2">
           {items.length === 0 ? (
             <li className="flex h-full flex-col items-center justify-center gap-1 px-6 text-center">
               <p className="text-sm text-[var(--ink-secondary)]">
-                {query ? `没有匹配「${query}」的条目` : '输入以搜索'}
+                {syncing ? '正在同步保险库…' : query ? `没有匹配「${query}」的条目` : '输入以搜索'}
               </p>
-              {!query && (
+              {!query && !syncing && (
                 <p className="text-xs text-[var(--ink-tertiary)]">
                   名称、用户名、网址都能搜
                 </p>
@@ -173,8 +205,8 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
       )}
 
       <footer className="panel-foot px-4 py-2.5">
-        <span aria-live="polite" className="min-w-0 truncate">{notice ?? (locked ? (accounts.length ? '← → 选择账户 · ⏎ 前往解锁' : '登录后即可快速搜索') : '⏎ 复制密码')}</span>
-        <span className="shrink-0">esc 关闭</span>
+        <span aria-live="polite" className="min-w-0 truncate">{notice ?? (authenticating ? (accounts.length ? '解锁后即可搜索此账户' : '登录后即可快速搜索') : '⏎ 复制密码')}</span>
+        <span className="shrink-0">{authenticating ? 'esc 返回 / 关闭' : 'esc 关闭'}</span>
       </footer>
     </div>
   );

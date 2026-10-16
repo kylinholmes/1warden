@@ -57,6 +57,8 @@ mod build_support;
 mod tray;
 #[cfg(desktop)]
 mod quick;
+#[cfg(desktop)]
+mod quick_auth;
 #[cfg(target_os = "windows")]
 mod clipboard;
 #[cfg(target_os = "macos")]
@@ -183,6 +185,16 @@ pub fn run() {
             quick::quick_window_state,
             #[cfg(desktop)]
             quick::quick_set_pinned,
+            #[cfg(desktop)]
+            quick_auth::quick_auth_request,
+            #[cfg(desktop)]
+            quick_auth::quick_auth_take,
+            #[cfg(desktop)]
+            quick_auth::quick_auth_is_current,
+            #[cfg(desktop)]
+            quick_auth::quick_auth_cancel,
+            #[cfg(desktop)]
+            quick_auth::quick_auth_complete,
             #[cfg(target_os = "windows")]
             windows::window_action,
             #[cfg(target_os = "windows")]
@@ -234,6 +246,7 @@ pub fn run() {
             #[cfg(desktop)]
             {
                 app.manage(quick::QuickState::new(dir.join("quick-search.json")));
+                app.manage(quick_auth::QuickAuthState::default());
                 app.manage(dropped_file::DroppedFileState::default());
                 quick::update_shortcut(app.handle());
             }

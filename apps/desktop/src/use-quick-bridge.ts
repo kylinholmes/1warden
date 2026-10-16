@@ -48,7 +48,7 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
     const getClient = typeof source === 'function' ? source : () => source;
     let disposed = false;
     let selection = 0;
-    let query = { query: '', seq: 0 };
+    let query = { query: '', seq: 0, includeAccounts: false };
     let resultsVersion = 0;
     let openingAccount = false;
     let accountCards: QuickAccount[] = [];
@@ -71,12 +71,15 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
         items: items.map(summarise),
         serverUrl: session.account?.serverUrl ?? null,
         accounts: accountCards,
-        accountsLoading: locked && Boolean(accounts),
+        accountsLoading: (locked || query.includeAccounts) && Boolean(accounts),
+        activeAccount: session.account ? { email: session.account.email, serverUrl: session.account.serverUrl } : null,
+        syncing: session.syncing,
+        syncError: getClient().syncError,
       };
       void emitTo(QUICK_WINDOW, '1warden:results', result);
       // Account cards are only shown while locked. Re-emitting an unlocked list
       // for metadata would clone its items over IPC and reset keyboard selection.
-      if (accounts && locked) void accounts.load().then(values => {
+      if (accounts && (locked || query.includeAccounts)) void accounts.load().then(values => {
         if (disposed || version !== resultsVersion) return;
         // Explicit projection prevents future cache/provider fields becoming IPC data.
         accountCards = values.map(({ id, email, serverUrl, displayName, avatarDataUrl }) => ({ id, email, serverUrl, displayName, avatarDataUrl }));
@@ -88,8 +91,9 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
     if (subscribeActive) unlisteners.push(subscribeActive(() => { selection++; sendResults(); }));
 
     // ── 面板要搜索结果 ──
-    void listen<{ query: string; seq: number }>('1warden:query', (e) => {
-      query = e.payload; sendResults();
+    void listen<{ query: string; seq: number; includeAccounts?: boolean; refresh?: boolean }>('1warden:query', (e) => {
+      query = { ...e.payload, includeAccounts: e.payload.includeAccounts === true }; sendResults();
+      if (e.payload.refresh && getClient().isUnlocked()) void getClient().refresh().catch(() => { if (!disposed) sendResults(); });
     }).then(rememberUnlisten);
 
     void listen<{ accountId: string | null; requestId?: number }>('1warden:open-account', e => {

@@ -8,7 +8,7 @@ impl Default for Preferences { fn default() -> Self { Self { enabled: true } } }
 
 pub struct QuickState {
     preferences: Mutex<Preferences>, path: PathBuf,
-    pinned: AtomicBool, generation: AtomicU64,
+    pinned: AtomicBool, generation: AtomicU64, opened: AtomicBool,
     shortcut_error: Mutex<Option<String>>,
     #[cfg(target_os = "windows")]
     shortcut: Mutex<Option<crate::windows::Hotkey>>,
@@ -17,7 +17,7 @@ pub struct QuickState {
 impl QuickState {
     pub fn new(path: PathBuf) -> Self {
         let preferences = std::fs::read(&path).ok().and_then(|data| serde_json::from_slice(&data).ok()).unwrap_or_default();
-        Self { preferences: Mutex::new(preferences), path, pinned: AtomicBool::new(false), generation: AtomicU64::new(0),
+        Self { preferences: Mutex::new(preferences), path, pinned: AtomicBool::new(false), generation: AtomicU64::new(0), opened: AtomicBool::new(false),
             shortcut_error: Mutex::new(None), #[cfg(target_os = "windows")] shortcut: Mutex::new(None) }
     }
     fn enabled(&self) -> bool { self.preferences.lock().map(|p| p.enabled).unwrap_or(false) }
@@ -56,16 +56,19 @@ pub fn show(app: &AppHandle) {
             state.pinned.store(false, Ordering::SeqCst);
             state.generation.fetch_add(1, Ordering::SeqCst);
         }
-        let _ = window.show(); let _ = window.set_focus();
+        state.opened.store(window.show().is_ok(), Ordering::SeqCst); let _ = window.set_focus();
         let _ = app.emit_to("quick", "1warden:quick-open", ());
     }
 }
 pub fn hide(app: &AppHandle) {
     let state = app.state::<QuickState>();
     state.pinned.store(false, Ordering::SeqCst);
+    state.opened.store(false, Ordering::SeqCst);
     if let Some(window) = app.get_webview_window("quick") { let _ = window.hide(); }
+    crate::quick_auth::cancel_all(app);
 }
 pub fn focus_lost(app: &AppHandle) {
+    crate::quick_auth::cancel_all(app);
     if let Some(state) = app.try_state::<QuickState>() {
         if !state.pinned.load(Ordering::SeqCst) { hide(app); }
     }
@@ -113,6 +116,11 @@ pub fn quick_set_pinned(app: AppHandle, window: tauri::WebviewWindow, pinned: bo
     Ok(pinned)
 }
 pub fn enabled(app: &AppHandle) -> bool { app.state::<QuickState>().enabled() }
+
+pub fn is_current(app: &AppHandle, generation: u64) -> bool {
+    let state = app.state::<QuickState>();
+    state.enabled() && state.generation.load(Ordering::SeqCst) == generation && state.opened.load(Ordering::SeqCst)
+}
 
 #[cfg(test)]
 mod tests {

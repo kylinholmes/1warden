@@ -30,6 +30,20 @@ async function mount(item: VaultItem | null, onSave = async (draft: VaultItem) =
 }
 
 describe('complete native editor and custom-field interactions', () => {
+  it('retains drafts when changing a new item type and only saves the selected fields', async () => {
+    let saved: VaultItem | undefined;
+    await mount(null, async draft => { saved = draft; return { id: 'saved', name: draft.name }; });
+    await input(host.querySelector<HTMLInputElement>('[aria-label="名称"]')!, 'Draft');
+    await input(host.querySelector<HTMLInputElement>('[aria-label="密码"]')!, 'kept-password');
+    await click(button(TYPE_LABEL.card!));
+    await input(host.querySelector<HTMLInputElement>('[aria-label="卡号"]')!, '4111111111111111');
+    await click(button(TYPE_LABEL.login!));
+    expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')!.value).toBe('kept-password');
+    await click(button(TYPE_LABEL.card!));
+    expect(host.querySelector<HTMLInputElement>('[aria-label="卡号"]')!.value).toBe('4111111111111111');
+    await click(button('保存'));
+    expect(saved!.card!.number).toBe('4111111111111111'); expect(saved!.login).toBeNull();
+  });
   it('locks every draft control during a slow save and ignores same-tick duplicate submissions', async () => {
     let resolve!: (value: { id: string; name: string }) => void;
     const onSave = vi.fn(() => new Promise<{ id: string; name: string }>(done => { resolve = done; }));

@@ -42,10 +42,11 @@ function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts }: R
   const mounted = useRef(true);
   const leaving = useRef(false);
   const submitting = useRef(false);
+  const operation = useRef(0);
   const writes = useRef<Promise<unknown>>(Promise.resolve());
   useEffect(() => {
     mounted.current = true;
-    return () => { mounted.current = false; };
+    return () => { mounted.current = false; operation.current++; };
   }, []);
   useEffect(() => {
     const draft: ConnectionDraft = { serverUrl, email, error: null, intent: 'register',
@@ -64,6 +65,8 @@ function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts }: R
     event?.preventDefault();
     if (submitting.current || leaving.current) return;
     if (cloudRegion) { await openWebVault(); return; }
+    const version = ++operation.current;
+    const current = () => mounted.current && !leaving.current && version === operation.current;
     submitting.current = true; setBusy(true); setError(null);
     try {
       const baseUrl = registrationServerUrl(serverUrl);
@@ -71,33 +74,33 @@ function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts }: R
       const http = new HttpClient({ baseUrl, fetchImpl: host().fetch });
       if (step.kind === 'identity' || step.kind === 'verifyEmail') {
         const next = await beginRegistration(http, { email: normalizedEmail, name });
-        if (!mounted.current) return;
+        if (!current()) return;
         setServerUrl(baseUrl); setEmail(normalizedEmail); setStep(next);
       } else if (step.kind === 'setPassword') {
         validateRegistrationPassword(password, confirmation);
         const keys = await createRegistrationKeys(normalizedEmail, password);
-        if (!mounted.current) return;
+        if (!current()) return;
         await finishRegistration(http, { ...keys, email: normalizedEmail, emailVerificationToken: step.token, masterPasswordHint: null });
-        if (!mounted.current) return;
+        if (!current()) return;
         setPassword(''); setConfirmation(''); setStep({ kind: 'complete' });
       }
     } catch (cause) {
-      if (!mounted.current) return;
+      if (!current()) return;
       if (client.capabilities.native && (cause as { kind?: string })?.kind === 'certUntrusted') {
         try {
           const { probeCertificate } = await import('../trust');
           const certificate = await probeCertificate(serverUrl);
-          if (mounted.current) setCert(certificate);
-        } catch (probeError) { if (mounted.current) setError(message(probeError)); }
+          if (current()) setCert(certificate);
+        } catch (probeError) { if (current()) setError(message(probeError)); }
       } else setError(message(cause));
     } finally {
-      submitting.current = false;
-      if (mounted.current) setBusy(false);
+      if (current()) { submitting.current = false; setBusy(false); }
     }
   }
   async function leave(destination: 'home' | 'login') {
-    if (submitting.current || leaving.current) return;
-    leaving.current = true; setBusy(true); setPassword(''); setConfirmation('');
+    if (leaving.current) return;
+    operation.current++; submitting.current = false;
+    leaving.current = true; setBusy(true); setPassword(''); setConfirmation(''); setCert(null);
     try {
       await writes.current;
       if (destination === 'home') await onHome();
@@ -113,14 +116,15 @@ function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts }: R
   }
   async function trustAndRetry() {
     if (!cert || busy) return;
+    const version = ++operation.current;
     setBusy(true);
     try {
       const { trustCertificate } = await import('../trust');
       await trustCertificate(serverUrl, cert.fingerprint);
-      if (!mounted.current) return;
+      if (!mounted.current || leaving.current || version !== operation.current) return;
       setCert(null); await submit();
-    } catch (cause) { if (mounted.current) setError(message(cause)); }
-    finally { if (mounted.current) setBusy(false); }
+    } catch (cause) { if (mounted.current && !leaving.current && version === operation.current) setError(message(cause)); }
+    finally { if (mounted.current && !leaving.current && version === operation.current) setBusy(false); }
   }
 
   return <main aria-label="注册账户" className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
@@ -151,6 +155,7 @@ function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts }: R
             <Field label="确认主密码"><input type="password" autoComplete="new-password" required minLength={12} disabled={busy} value={confirmation} onChange={event => setConfirmation(event.target.value)} className="field secret" /></Field>
             <p className="text-xs leading-relaxed text-[var(--ink-secondary)]">请牢记主密码。1Warden 无法找回你的主密码，也无法代你解密保险库。</p>
             <button type="submit" disabled={busy} className="btn btn-primary w-full gap-2 py-2.5">{busy && <IconSpinner size={15} />}{busy ? '正在创建账户…' : '创建账户'}</button>
+            {busy && <p className="text-xs text-[var(--ink-tertiary)]">返回只停止等待；已提交的注册仍可能完成，可稍后用此邮箱登录确认。</p>}
             <button type="button" disabled={busy} className="btn btn-quiet w-full py-2" onClick={() => { setPassword(''); setConfirmation(''); setError(null); setStep({ kind: 'identity' }); }}>修改邮箱或服务器</button>
           </form>
         </>}

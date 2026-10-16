@@ -113,6 +113,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
   const [undoRemoval, setUndoRemoval] = useStoreField(viewStore, 'undoRemoval');
   const editorBody = useRef<HTMLDivElement>(null);
   const restoreAfterSave = useRef<HTMLElement | null>(null);
+  const typeDrafts = useRef(new Map<ItemType, VaultItem>());
   const [createdFolders, setCreatedFolders] = useStoreField(viewStore, 'createdFolders');
   const [folderName, setFolderName] = useStoreField(viewStore, 'folderName');
   const [creatingFolder, setCreatingFolder] = useStoreField(viewStore, 'creatingFolder');
@@ -130,6 +131,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
   itemRef.current = item;
 
   useEffect(() => {
+    typeDrafts.current.clear();
     if (!open) return;
     const start = itemRef.current ?? newEditorItem();
     setBusy(false);
@@ -375,7 +377,8 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
             {TYPE_ORDER.map(type => <button key={type} type="button" aria-pressed={draft.type === type}
               onClick={() => {
                 if (type === draft.type) return;
-                const next = itemWithType(draft, type);
+                typeDrafts.current.set(draft.type, draft);
+                const next = itemWithType(draft, type, typeDrafts.current.get(type));
                 setDraft(next); setUndoRemoval(null);
               }}
               className={`flex min-w-0 flex-col items-center gap-1.5 rounded-[var(--radius-md)] border px-1 py-3 text-xs ${
@@ -507,18 +510,18 @@ function newEditorItem(): VaultItem {
   return blankEditorItem();
 }
 
-function itemWithType(draft: VaultItem, type: ItemType): VaultItem {
+function itemWithType(draft: VaultItem, type: ItemType, previous?: VaultItem): VaultItem {
   const rawType = { login: 1, secureNote: 2, card: 3, identity: 4, sshKey: 5, bankAccount: 6, driversLicense: 7, passport: 8, unknown: -1 }[type];
   return {
     ...draft, type, rawType, customFields: customFieldsForItemType(draft.customFields, type),
-    login: type === 'login' ? blankLogin() : null,
-    card: type === 'card' ? blankCard() : null,
-    identity: type === 'identity' ? blankIdentity() : null,
-    secureNote: type === 'secureNote' ? { type: 0 } : null,
-    sshKey: type === 'sshKey' ? blankSshKey() : null,
-    bankAccount: type === 'bankAccount' ? emptyBankAccount() : null,
-    driversLicense: type === 'driversLicense' ? emptyDriversLicense() : null,
-    passport: type === 'passport' ? emptyPassport() : null,
+    login: type === 'login' ? previous?.login ?? blankLogin() : null,
+    card: type === 'card' ? previous?.card ?? blankCard() : null,
+    identity: type === 'identity' ? previous?.identity ?? blankIdentity() : null,
+    secureNote: type === 'secureNote' ? previous?.secureNote ?? { type: 0 } : null,
+    sshKey: type === 'sshKey' ? previous?.sshKey ?? blankSshKey() : null,
+    bankAccount: type === 'bankAccount' ? previous?.bankAccount ?? emptyBankAccount() : null,
+    driversLicense: type === 'driversLicense' ? previous?.driversLicense ?? emptyDriversLicense() : null,
+    passport: type === 'passport' ? previous?.passport ?? emptyPassport() : null,
   };
 }
 

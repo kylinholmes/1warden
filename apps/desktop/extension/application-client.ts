@@ -38,7 +38,11 @@ function call<K extends ApplicationMethod>(method: K, ...args: Parameters<Applic
 }
 
 function clearCaptureLink(id: string): void {
-  if (location.hash === `#capture=${encodeURIComponent(id)}`) history.replaceState(null, '', location.pathname + location.search);
+  try {
+    if (location.hash.startsWith('#capture=') && decodeURIComponent(location.hash.slice(9)) === id) {
+      history.replaceState(null, '', location.pathname + location.search);
+    }
+  } catch { /* An unrelated malformed link must not be removed. */ }
 }
 
 /** Called only after the clipboard write succeeds, from the shared clipboard helper. */
@@ -86,8 +90,18 @@ export function createExtensionApplicationClient(): ApplicationClient {
     capabilities: { native: false, browser: true, saveAttachments: true },
     browser: {
       credentials: {
-        list: () => request({ type: '1warden:credential-list', application: true,
-          ...(location.hash.startsWith('#capture=') ? { captureId: decodeURIComponent(location.hash.slice(9)) } : {}) }, 5_000),
+        list: async () => {
+          const captureId = location.hash.startsWith('#capture=') ? decodeURIComponent(location.hash.slice(9)) : undefined;
+          try {
+            return await request({ type: '1warden:credential-list', application: true,
+              ...(captureId !== undefined ? { captureId } : {}) }, 5_000);
+          } catch (error) {
+            // Preserve the expiry explanation once; Retry then loads the current queue.
+            // Network failures must retain the requested link.
+            if (captureId !== undefined && (error as { kind?: string } | null)?.kind === 'captureExpired') clearCaptureLink(captureId);
+            throw error;
+          }
+        },
         save: async choice => { await request({ type: '1warden:credential-save', choice, application: true }); clearCaptureLink(choice.captureId); },
         dismiss: async id => { await request({ type: '1warden:credential-dismiss', id, application: true }); clearCaptureLink(id); },
         history: () => request({ type: '1warden:credential-history', application: true }, 5_000),

@@ -23,7 +23,7 @@ export async function loadQuickAccounts(snapshot: ApplicationSnapshot, selected:
   }));
 }
 
-export type QuickAccountNavigation = (target: AccountTarget | null) => Promise<void>;
+export type QuickAccountNavigation = (target: AccountTarget | null, assertCurrent?: () => Promise<void>) => Promise<void>;
 export type SubscribeQuickAccountNavigation = (handler: QuickAccountNavigation) => () => void;
 
 /** Local main-window routing only; no secrets or authentication cross this boundary. */
@@ -34,9 +34,9 @@ export function createQuickAccountNavigation() {
       current = handler;
       return () => { if (current === handler) current = null; };
     }) satisfies SubscribeQuickAccountNavigation,
-    async open(target: AccountTarget | null) {
+    async open(target: AccountTarget | null, assertCurrent?: () => Promise<void>) {
       if (!current) throw new Error('主窗口正在载入，请稍后重试');
-      await current(target);
+      await current(target, assertCurrent);
     },
   };
 }

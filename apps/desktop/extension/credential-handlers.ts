@@ -122,7 +122,9 @@ export function createCredentialController(deps: Dependencies) {
     switch (req.type) {
       case '1warden:credential-list': {
         const records = await captures.list(owner);
-        if (req.captureId !== undefined && !records.some(row => row.id === req.captureId)) throw new Error('待保存信息已过期，请重新提交表单');
+        if (req.captureId !== undefined && !records.some(row => row.id === req.captureId)) {
+          throw Object.assign(new Error('这条待保存信息已过期，重试可查看其他待保存项'), { kind: 'captureExpired' });
+        }
         const review = (await deps.session.get(REVIEW_KEY))[REVIEW_KEY] as { account: string; id: string } | undefined;
         owner.assertCurrent();
         const preferred = req.captureId ?? (review?.account === owner.account ? review.id : undefined);

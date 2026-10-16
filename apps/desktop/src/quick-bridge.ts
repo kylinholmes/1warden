@@ -7,7 +7,7 @@
  * 天然拿不到。看上去最直接的做法是把解好的条目通过 Tauri 的 event 传过去，
  * 但那意味着把明文密码和会话信息暴露给本来只负责搜索的第二个 WebView。
  *
- * 所以面板不持有密码、密钥或条目密文：它只发查询、收摘要。
+ * 所以面板不持有保险库密钥或条目密文：搜索只发查询、收摘要。
  * Windows 的显式复制由主窗口调用仅 main 可用的原生剪贴板命令；
  * 只有待复制的那段文本进入系统剪贴板，密钥和整库数据不参与该调用。
  *
@@ -15,7 +15,8 @@
  *   quick  ◀─1warden:results {items}─  main   ← 只有名称与用户名，没有密码
  *   quick  ──1warden:action {...}───▶  main   ← 复制/输入由主窗口执行
  *
- * 面板只接收条目摘要和账户展示信息；解锁仍在主窗口完成，密码不会过桥。
+ * 面板就地收集主密码，使用独立的原生一次性认证通道交给 main；
+ * 本文件的事件只携带摘要、账户展示信息和操作指令，不携带认证凭据。
  */
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -73,14 +74,17 @@ export interface QuickResults {
   serverUrl: string | null;
   accounts?: QuickAccount[];
   accountsLoading?: boolean;
+  activeAccount?: { email: string; serverUrl: string } | null;
+  syncing?: boolean;
+  syncError?: string | null;
 }
 
 export const QUICK_WINDOW = 'quick';
 export const MAIN_WINDOW = 'main';
 
 /** 面板 → 主窗口：搜什么 */
-export function askMain(query: string, seq: number): Promise<void> {
-  return emitTo(MAIN_WINDOW, '1warden:query', { query, seq });
+export function askMain(query: string, seq: number, includeAccounts = false, refresh = false): Promise<void> {
+  return emitTo(MAIN_WINDOW, '1warden:query', { query, seq, includeAccounts, refresh });
 }
 
 /** 主窗口 → 面板：搜到了什么 */

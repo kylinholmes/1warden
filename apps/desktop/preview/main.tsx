@@ -12,6 +12,7 @@ import { createRoot } from 'react-dom/client';
 import { SecurityReportView } from '../src/screens/SecurityReport';
 import { VaultView, ItemDetail, EmptyDetail } from '../src/screens/VaultView';
 import { QuickAccess } from '../src/screens/QuickAccess';
+import { QuickInteractionPreview } from './QuickInteractionPreview';
 import { Settings, type SectionId } from '../src/screens/Settings';
 import { ImportScreen } from '../src/screens/Import';
 
@@ -483,6 +484,8 @@ void fakeClient.initialize().then(() => createRoot(document.getElementById('root
       <Connect client={fakeClient} onConnected={() => {}} />
     ) : which === 'unlock' ? (
       <Unlock client={fakeClient} onUnlocked={() => {}} onDisconnect={() => {}} />
+    ) : which === 'quick-unlock' ? (
+      <div style={{ width: '100vw', height: '100vh' }}><QuickInteractionPreview single={params.has('single')} twoFactor={params.has('twoFactor')} /></div>
     ) : which === 'quick' || which === 'quick-locked' ? (
       <div style={{ width: which === 'quick-locked' ? '100vw' : 620, height: which === 'quick-locked' ? '100vh' : 400 }}>
         <QuickAccess

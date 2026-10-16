@@ -45,13 +45,13 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
   const entryWrites = useRef<Promise<void>>(Promise.resolve());
   const autosave = useProfileAutosave();
   const quickNavigation = useRef<QuickAccountNavigation>(async () => {});
-  quickNavigation.current = async account => {
+  quickNavigation.current = async (account, assertCurrent) => {
     if (navigation.current) throw new Error('正在切换账户，请稍后重试');
-    await switchAccount(account);
+    await switchAccount(account, 'work', assertCurrent);
   };
   useEffect(() => {
     if (!ready || !subscribeQuickAccountNavigation) return;
-    return subscribeQuickAccountNavigation(account => quickNavigation.current(account));
+    return subscribeQuickAccountNavigation((account, assertCurrent) => quickNavigation.current(account, assertCurrent));
   }, [ready, subscribeQuickAccountNavigation]);
 
   useEffect(() => {
@@ -91,7 +91,7 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
     } catch (e) { setError(e instanceof Error ? e.message : '返回首页失败'); }
     finally { navigation.current = false; setNavigating(false); }
   }
-  async function switchAccount(account: AccountTarget | null, nextRoute: 'work' | 'register' = 'work') {
+  async function switchAccount(account: AccountTarget | null, nextRoute: 'work' | 'register' = 'work', assertCurrent?: () => Promise<void>) {
     if (navigation.current) return;
     entryOperation.current++;
     navigation.current = true; setError(null);
@@ -99,9 +99,11 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
       const active = client.getSnapshot();
       if (!account || !active.account || accountKey(active.account) !== accountKey(account)) {
         await saveBeforeLeaving();
+        await assertCurrent?.();
         setNavigating(true);
         await client.switchAccount(account);
       }
+      await assertCurrent?.();
       setEntryDraft(undefined); setRoute(nextRoute);
     } catch (e) { setError(e instanceof Error ? e.message : '切换账户失败'); throw e; }
     finally { navigation.current = false; setNavigating(false); }

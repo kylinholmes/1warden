@@ -11,6 +11,7 @@ import { initTheme } from './theme';
 import { IS_DESKTOP } from '@1warden/ui';
 import { listen } from '@tauri-apps/api/event';
 import { useQuickBridge } from './use-quick-bridge';
+import { useQuickAuth, type QuickAuthOptions } from './use-quick-auth';
 import { createQuickAccountNavigation, loadQuickAccounts } from './quick-accounts';
 import { invoke } from '@tauri-apps/api/core';
 import { createDesktopApplication } from './application/desktop';
@@ -40,10 +41,19 @@ const quickAccounts = {
     await invoke('quick_open_main');
   },
 };
+const quickAuth: QuickAuthOptions = {
+  getActiveVault: runtime.getActiveVault,
+  subscribeActiveVault: runtime.subscribeActiveVault,
+  subscribeVaultChanges: runtime.subscribeVaultChanges,
+  loadAccounts: quickAccounts.load,
+  openAccount: quickNavigation.open,
+  refresh: runtime.client.refresh,
+};
 const AppUpdateHost = lazy(() => import('./components/AppUpdateHost'));
 
 function DesktopEvents() {
   useQuickBridge(runtime.getActiveVault, runtime.subscribeVaultChanges, quickAccounts);
+  useQuickAuth(quickAuth);
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;

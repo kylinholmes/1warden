@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installHost, resetHost } from '@1warden/ui';
+import { installHost, resetHost, readAccounts } from '@1warden/ui';
 import { buildProfileItem, type VaultClient, type UserProfile } from '@1warden/vault';
 import {
   concatBytes, deriveMasterKey, encryptBytes, encryptString, hashMasterPassword, makeUserKey, stretchMasterKey,
@@ -44,6 +44,7 @@ async function setup() {
   const authentications: string[] = [];
   const twoFactor = new Set<string>();
   let waitForAuth: { origin: string; started: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> } | null = null;
+  let waitForSync: { origin: string; started: ReturnType<typeof deferred>; release: ReturnType<typeof deferred> } | null = null;
   installHost({ storage: { get: async (key) => storage.get(key) ?? null,
     set: async (key, value) => { storage.set(key, value); }, remove: async (key) => { storage.delete(key); } },
     fetch: async (input, init) => {
@@ -66,7 +67,9 @@ async function setup() {
             expires_in: 3600, Key: account.wrapped, Kdf: 0 });
         }
         case '/api/accounts/revision-date': return new Response('1');
-        case '/api/sync': return Response.json({ profile: { id: url.hostname, email: a.email },
+        case '/api/sync':
+          if (waitForSync?.origin === url.origin) { waitForSync.started.resolve(); await waitForSync.release.promise; }
+          return Response.json({ profile: { id: url.hostname, email: a.email },
           ciphers: account.ciphers, folders: [], collections: [] });
         default: throw Error(`Unexpected request: ${url.pathname}`);
       }
@@ -83,6 +86,7 @@ async function setup() {
     pauseAuthentication(origin: string) {
       waitForAuth = { origin, started: deferred(), release: deferred() }; return waitForAuth;
     },
+    pauseSync(origin: string) { waitForSync = { origin, started: deferred(), release: deferred() }; return waitForSync; },
     requireTwoFactor: (origin: string) => { twoFactor.add(origin); },
   };
 }
@@ -98,6 +102,38 @@ afterEach(() => {
 });
 
 describe('desktop retained account sessions', () => {
+  it.each([false, true])('remembers a newly authenticated account before leaving during sync (OTP %s)', async otp => {
+    const { app, active, pauseSync, requireTwoFactor } = await setup();
+    await app.connectionDraft?.save({ ...a, error: null });
+    const paused = pauseSync(a.serverUrl);
+    if (otp) {
+      requireTwoFactor(a.serverUrl);
+      await expect(app.connect({ ...a, masterPassword: password })).rejects.toMatchObject({ kind: 'twoFactorRequired' });
+    }
+    const connecting = (otp ? app.connectWithTwoFactor('123456', 0, false)
+      : app.connect({ ...a, masterPassword: password })).catch(error => error);
+    await paused.started.promise; active(); await app.refresh();
+    expect(await app.connectionDraft?.load()).toBeNull();
+    await app.switchAccount(null);
+    expect(await readAccounts()).toContainEqual(a);
+    paused.release.resolve(); await connecting;
+    expect(app.getSnapshot().account).toBeNull();
+  });
+  it.each(['stay', 'switch', 'lock', 'logout'] as const)('shows authenticated login while initial sync is pending and honors %s', async boundary => {
+    const { app, active, pauseSync } = await setup();
+    const paused = pauseSync(a.serverUrl);
+    const connecting = app.connect({ ...a, masterPassword: password }).catch(error => error);
+    await paused.started.promise; await app.refresh(); const original = active();
+    expect(app.getSnapshot()).toMatchObject({ status: 'unlocked', syncing: true, account: a });
+    if (boundary === 'switch') await app.switchAccount(b);
+    if (boundary === 'lock') await app.lock();
+    if (boundary === 'logout') await app.logout();
+    paused.release.resolve(); await connecting; await app.refresh();
+    if (boundary === 'stay') expect(app.getSnapshot()).toMatchObject({ status: 'unlocked', syncing: false, account: a });
+    if (boundary === 'switch') { expect(app.getSnapshot().account?.serverUrl).toBe(b.serverUrl); expect(original.isUnlocked()).toBe(true); }
+    if (boundary === 'lock') expect(app.getSnapshot().status).toBe('locked');
+    if (boundary === 'logout') expect(app.getSnapshot().status).toBe('loggedOut');
+  });
   it('prepares the Add Account origin draft before switching publishes the connection screen', async () => {
     const { app, active, connect } = await setup();
     await connect(a);

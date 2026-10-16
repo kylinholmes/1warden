@@ -1,6 +1,7 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { type FormEvent } from 'react';
+import { useEffect, useRef, type FormEvent } from 'react';
 import { IconSpinner } from './icons';
+import { Select } from './Select';
 
 /**
  * 两步验证 —— **两端共用这一份**。
@@ -47,42 +48,55 @@ export function TwoFactorForm({
 }) {
   const viewStore = useLocalStore(() => {
     const code = '';
-    const remember = true;
-    return { code, remember };
+    const provider: number | null = providers.find(value => value === 0 || value === 3) ?? null;
+    return { code, provider };
   });
   const [code, setCode] = useStoreField(viewStore, 'code');
-  const [remember, setRemember] = useStoreField(viewStore, 'remember');
+  const [provider, setProvider] = useStoreField(viewStore, 'provider');
+  const input = useRef<HTMLInputElement>(null);
+  const submitted = useRef(false);
+  const supported: number[] = providers.filter(value => value === 0 || value === 3);
+  useEffect(() => {
+    if (provider === null || !supported.includes(provider)) { setProvider(supported[0] ?? null); setCode(''); }
+  }, [providers.join(',')]);
+  useEffect(() => { if (!busy) { submitted.current = false; input.current?.focus(); } }, [busy, provider]);
 
   function submit(e: FormEvent) {
     e.preventDefault();
-    onSubmit({ code: code.trim(), provider: providers[0] ?? 0, remember });
+    if (busy || submitted.current || !code.trim() || provider === null || !supported.includes(provider)) return;
+    submitted.current = true;
+    const value = code.trim(); setCode('');
+    onSubmit({ code: value, provider, remember: false });
   }
 
+  if (!supported.length) return <p role="alert" className="text-sm leading-relaxed text-[var(--ink-secondary)]">
+    此账户仅提供{providers.map(value => PROVIDER_NAME[value] ?? `方式 ${value}`).join('、') || '未知验证方式'}，当前客户端暂不支持。
+    请返回，并在服务器网页中为账户启用验证器应用或 YubiKey OTP 后重试。
+  </p>;
+
   return (
-    <form onSubmit={submit} className="space-y-4">
-      <p className="text-sm text-[var(--ink-secondary)]">
-        可用方式：{providers.map((p) => PROVIDER_NAME[p] ?? `方式 ${p}`).join('、')}
-      </p>
+    <form onSubmit={submit} className="space-y-3">
+      {providers.length > 1 ? <Select aria-label="验证方式" value={String(provider)} disabled={busy}
+        options={providers.map(value => ({ value: String(value), label: `${PROVIDER_NAME[value] ?? `方式 ${value}`}${supported.includes(value) ? '' : '（暂不支持）'}`,
+          disabled: !supported.includes(value) }))}
+        onChange={value => { setProvider(Number(value)); setCode(''); submitted.current = false; }} />
+        : <p className="text-sm text-[var(--ink-secondary)]">{PROVIDER_NAME[provider ?? 0]}</p>}
 
       <label className="block">
         <span className="mb-1.5 block text-xs font-medium text-[var(--ink-secondary)]">验证码</span>
         <input
+          ref={input}
           type="text"
           required
-          inputMode="numeric"
-          autoFocus
+          aria-label="验证码" autoComplete="one-time-code" disabled={busy}
+          inputMode={provider === 0 ? 'numeric' : 'text'}
           value={code}
           onChange={(e) => setCode(e.target.value)}
           className="field secret text-center text-xl tracking-[0.3em]"
         />
       </label>
 
-      <label className="flex items-center gap-2.5 text-sm text-[var(--ink-secondary)]">
-        <input type="checkbox" checked={remember} onChange={(e) => setRemember(e.target.checked)} />
-        记住这台设备
-      </label>
-
-      <button type="submit" disabled={busy} className="btn btn-primary w-full py-2.5">
+      <button type="submit" disabled={busy || !code.trim()} className="btn btn-primary w-full py-2.5">
         {busy && <IconSpinner size={15} />}
         {busy ? '验证中…' : '验证'}
       </button>

@@ -29,6 +29,26 @@ async function click(label: string) {
   await act(() => node.click());
 }
 describe('Generator clipboard feedback', () => {
+  it('serializes a pending clipboard write across regeneration and ignores its stale feedback', async () => {
+    let finish!: () => void;
+    write.mockImplementationOnce(() => new Promise<void>(resolve => { finish = resolve; })).mockResolvedValue(undefined);
+    await mount(); await click('复制'); await click('换一个');
+    const next = host!.querySelector('.generator-result p')!.textContent!;
+    await click('复制'); expect(write).toHaveBeenCalledTimes(1);
+    await act(() => finish()); expect(host!.querySelector('[data-state="ok"]')).toBeNull();
+    await click('复制'); expect(write).toHaveBeenCalledTimes(2); expect(write).toHaveBeenLastCalledWith(next);
+    expect(host!.querySelector('[data-state="ok"]')).not.toBeNull();
+  });
+  it('does not label a new generated value as copied', async () => {
+    write.mockResolvedValue(undefined); await mount(); await click('复制');
+    expect(host!.querySelector('[data-state="ok"]')).not.toBeNull();
+    const previous = write.mock.calls.at(-1)![0];
+    await click('换一个');
+    const next = host!.querySelector('.generator-result p')!.textContent!;
+    expect(next).not.toBe(previous); expect(host!.querySelector('[data-state="ok"]')).toBeNull();
+    expect(write).toHaveBeenCalledTimes(1);
+    await click('复制'); expect(write).toHaveBeenLastCalledWith(next);
+  });
   it('announces failed copy and clears the error only after a successful retry', async () => {
     write.mockRejectedValueOnce(new Error('clipboard busy')).mockResolvedValueOnce(undefined);
     await mount();

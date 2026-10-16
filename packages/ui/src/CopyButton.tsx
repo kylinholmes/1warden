@@ -56,6 +56,7 @@ export interface CopyButtonProps {
   iconSize?: number;
   /** 文字版默认的词 */
   label?: string;
+  feedbackKey?: unknown;
 }
 
 /**
@@ -70,14 +71,15 @@ export interface CopyButtonProps {
  */
 export function CopyButton({
   getValue, onCopied, onError, className = 'btn btn-ghost shrink-0 gap-1.5',
-  iconOnly = false, iconSize = 13, label = '复制',
+  iconOnly = false, iconSize = 13, label = '复制', feedbackKey,
 }: CopyButtonProps) {
-  const { state, copy } = useCopyAction({ getValue, onCopied, onError });
+  const { state, copy } = useCopyAction({ getValue, onCopied, onError, feedbackKey });
   const copied = state === 'ok';
 
   return (
     <button
       type="button"
+      disabled={state === 'busy'}
       onClick={() => { void copy(); }}
       title={copied ? '已复制' : `复制（${CLIPBOARD_CLEAR_MS / 1000} 秒后自动清空剪贴板）`}
       aria-label={copied ? '已复制' : '复制'}

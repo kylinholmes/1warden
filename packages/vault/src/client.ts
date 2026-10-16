@@ -299,6 +299,19 @@ export class VaultClient {
     await this.finishAuthentication(pending, { token: code, provider, remember });
   }
 
+  /** Capture immediately after starting authentication. A dismissed secondary
+   * window may cancel its own challenge, never a newer attempt. includeUnlocked
+   * is reserved for an owning caller whose success has not yet been accepted. */
+  captureAuthentication(): { isCurrent(): boolean; cancel(includeUnlocked?: boolean): void } {
+    const generation = this.authenticationGeneration;
+    return {
+      isCurrent: () => generation === this.authenticationGeneration,
+      cancel: (includeUnlocked = false) => {
+        if (generation === this.authenticationGeneration && (includeUnlocked || !this.session.isUnlocked())) this.lock();
+      },
+    };
+  }
+
   private clearPendingAuthentication(): void {
     this.pendingAuthentication?.masterKey.fill(0);
     this.pendingAuthentication = null;
@@ -1660,9 +1673,21 @@ export class VaultClient {
     const cached = await this.kdfCache?.load(account.serverUrl, account.email).catch(() => null);
     const kdf = cached?.kdf ?? await this.preloginKdf(bare, account.email);
     this.assertAuthentication(generation);
-    await this.authenticatePassword({
-      serverUrl: account.serverUrl, email: account.email, masterPassword,
-    }, kdf, generation);
+    const params = { serverUrl: account.serverUrl, email: account.email, masterPassword };
+    try {
+      await this.authenticatePassword(params, kdf, generation);
+    } catch (error) {
+      this.assertAuthentication(generation);
+      // A server-side KDF change invalidates only the public cached parameters.
+      // Refresh once on authentication rejection; never replay a wrong password
+      // when the parameters are unchanged, or retry network/rate-limit failures.
+      if (!cached || (error as { kind?: string } | null)?.kind !== 'auth') throw error;
+      const current = await this.preloginKdf(bare, account.email);
+      this.assertAuthentication(generation);
+      if (current.kdf === kdf.kdf && current.iterations === kdf.iterations
+        && (current.kdf !== 1 || kdf.kdf !== 1 || (current.memory === kdf.memory && current.parallelism === kdf.parallelism))) throw error;
+      await this.authenticatePassword(params, current, generation);
+    }
   }
 
 

@@ -31,6 +31,14 @@ it('routes a request only while the main application has a live navigation handl
   await navigation.open(target); expect(selected).toEqual([target]);
   stop(); await expect(navigation.open(target)).rejects.toThrow();
 });
+it('carries the cancellation guard through to the application navigation save boundary', async () => {
+  const navigation = createQuickAccountNavigation(); let cancelled = false; let switched = false;
+  navigation.subscribe(async (_target, assertCurrent) => {
+    cancelled = true; await assertCurrent?.(); switched = true;
+  });
+  await expect(navigation.open(null, async () => { if (cancelled) throw new Error('cancelled'); })).rejects.toThrow('cancelled');
+  expect(switched).toBe(false);
+});
 it('uses the authoritative selected vault during a switch before its application snapshot refreshes', async () => {
   installHost({ fetch, storage: { get: async () => null, set: async () => {}, remove: async () => {} } });
   const previous = { serverUrl: 'https://previous.example', email: 'previous@example.test', userId: '', kdf: { kdf: 0 as const, iterations: 1000 } };

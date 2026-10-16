@@ -123,6 +123,7 @@ export function GeneratorBody({ className = '' }: { className?: string }) {
           换一个
         </button>
         <CopyButton
+          feedbackKey={value}
           getValue={async () => value}
           onCopied={copied => { setCopyError(null); scheduleClipboardClear(copied); }}
           onError={() => setCopyError('复制失败，请重试；剪贴板内容未更新。')}

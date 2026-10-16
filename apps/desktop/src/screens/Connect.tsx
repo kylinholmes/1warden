@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { TwoFactorChallenge } from '@1warden/vault';
 import type { ApplicationClient, ConnectionDraft } from '../application/types';
 import type { CertInfo } from '../trust';
-import { twoFactorChallenge } from './auth-error';
+import { twoFactorChallenge, twoFactorErrorMessage } from './auth-error';
 import {
   ConnectScreen, BrandMark, IconSpinner, apiMessageOf, initialServerUrl, rememberAccount, useAccounts,
   type ConnectCreds, type SavedAccount,
@@ -138,7 +138,8 @@ export function Connect({ client, onConnected, onHome, initialCredentials, onReg
       if (version !== operation.current || leaving.current) return;
       // 只记住服务器与邮箱 —— **绝不**记住主密码。不 await：它是便利功能，
       // 而且 `rememberAccount` 自己就不抛
-      void rememberAccount({ serverUrl: c.serverUrl, email: c.email });
+      const account = client.getSnapshot().account;
+      if (account) void rememberAccount({ serverUrl: account.serverUrl, email: account.email });
       await clearDraft(version);
       if (mounted.current && version === operation.current) onConnected();
     } catch (err) {
@@ -192,7 +193,7 @@ export function Connect({ client, onConnected, onHome, initialCredentials, onReg
     } catch (err) {
       if (!mounted.current || version !== operation.current || leaving.current) return;
       if ((err as { kind?: string } | null)?.kind === 'authRestartRequired') setChallenge(null);
-      setError(apiMessageOf(err));
+      setError(twoFactorErrorMessage(err, apiMessageOf));
     } finally {
       if (mounted.current && version === operation.current) setBusy(false);
     }

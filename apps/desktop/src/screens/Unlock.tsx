@@ -4,7 +4,7 @@ import { useEffect, useRef, type FormEvent } from 'react';
 import type { ApplicationClient } from '../application/types';
 import type { TwoFactorChallenge } from '@1warden/vault';
 import { BackButton, IconAlert, IconGlobe, IconSpinner, ServerSpeed, TwoFactorForm } from '@1warden/ui';
-import { twoFactorChallenge } from './auth-error';
+import { twoFactorChallenge, twoFactorErrorMessage } from './auth-error';
 
 interface Props {
   client: ApplicationClient;
@@ -50,10 +50,11 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
   useEffect(() => () => { operation.current++; }, []);
 
   // 解锁屏一出现就聚焦输入框 —— 用户按下快捷键后应该能直接开始打字
-  useEffect(() => { inputRef.current?.focus(); }, []);
+  useEffect(() => { if (!busy && !challenge) inputRef.current?.focus(); }, [busy, challenge]);
 
   async function submit(e: FormEvent) {
     e.preventDefault();
+    if (viewStore.getState().busy || !password) return;
     const version = ++operation.current;
     setBusy(true);
     setError(null);
@@ -68,8 +69,7 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
       if (nextChallenge) setChallenge(nextChallenge);
       else setError(messageOf(err));
       setPassword('');
-      // 失败后把焦点还给输入框：用户下一步一定是重输
-      inputRef.current?.focus();
+      // Focus is restored after React has re-enabled the input.
     } finally {
       if (version === operation.current) setBusy(false);
     }
@@ -86,7 +86,7 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
     } catch (err) {
       if (version !== operation.current) return;
       if ((err as { kind?: string } | null)?.kind === 'authRestartRequired') setChallenge(null);
-      setError(messageOf(err));
+      setError(twoFactorErrorMessage(err, messageOf));
     } finally { if (version === operation.current) setBusy(false); }
   }
 

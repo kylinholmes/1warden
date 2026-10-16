@@ -28,7 +28,7 @@ it('shows account identity and explicit unlock action; activates the chosen acco
   expect(cards()[0]!.getAttribute('aria-label')).toContain('Personal');
   expect(cards()[0]!.textContent).toContain('one@example.test');
   expect(cards()[0]!.title).toContain('https://one.example/team');
-  expect(cards()[0]!.getAttribute('aria-label')).toContain('前往解锁');
+  expect(cards()[0]!.getAttribute('aria-label')).toContain('选择账户');
   expect(cards()[0]!.querySelectorAll('[data-quick-account-label]')).toHaveLength(1);
   expect(node.querySelector('input[type=password]')).toBeNull();
   expect(node.querySelector('footer')!.textContent).not.toContain('复制密码');

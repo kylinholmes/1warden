@@ -1,4 +1,4 @@
-import type { VaultClient } from '@1warden/vault';
+import type { VaultClient, SessionStatus } from '@1warden/vault';
 import { APPLICATION_METHODS } from './client';
 import { accountKey, lockedAccount } from './account-target';
 import { createVaultService } from './service';
@@ -13,16 +13,24 @@ interface AccountSession {
 }
 
 /** Native sessions stay in memory. Each VaultClient owns its keys, transport and lock timer. */
-export function createAccountSessions(createVault: () => VaultClient, profileCache?: ProfileCache) {
+export function createAccountSessions(createVault: (onStatus: (status: SessionStatus) => void) => VaultClient, profileCache?: ProfileCache,
+  onAuthenticated?: (account: AccountTarget) => void) {
   const sessions = new Map<string, AccountSession>();
   const listeners = new Set<() => void>();
   const createSession = (): AccountSession => {
-    const vault = createVault();
+    const vault = createVault(status => {
+      const candidate = pending;
+      // The normal login route is an empty connection session. Publish its
+      // authenticated vault before sync; replacing an existing account directly
+      // keeps the original atomic operation/account-boundary semantics.
+      if (status === 'unlocked' && candidate?.session.vault === vault && candidate.selection === selection
+        && active.vault.getSession().account === null) adopt(candidate);
+    });
     return { vault, service: createVaultService(vault, profileCache, () => selectionGuard(vault)) };
   };
   let active = createSession();
   let selection = 0;
-  let pending: { session: AccountSession; key: string; selection: number } | null = null;
+  let pending: { session: AccountSession; key: string; selection: number; adopted: boolean } | null = null;
 
   function selectionGuard(vault: VaultClient): () => void {
     const selectedAt = selection;
@@ -43,14 +51,18 @@ export function createAccountSessions(createVault: () => VaultClient, profileCac
   }
 
   function adopt(candidate: NonNullable<typeof pending>) {
+    if (candidate.adopted) return;
     if (pending !== candidate || candidate.selection !== selection) {
       candidate.session.vault.logout();
       throw new Error('登录请求已过期，请重新选择账户');
     }
     const previous = sessions.get(candidate.key);
+    candidate.adopted = true;
     pending = null;
     sessions.set(candidate.key, candidate.session);
     if (previous && previous !== candidate.session) previous.vault.logout();
+    const account = candidate.session.vault.getSession().account;
+    if (account) onAuthenticated?.({ serverUrl: account.serverUrl, email: account.email });
     publishSelected(candidate.session);
   }
 
@@ -115,14 +127,14 @@ export function createAccountSessions(createVault: () => VaultClient, profileCac
   service.connect = async (params) => {
     const account = lockedAccount(params);
     cancelAuthentication();
-    const candidate = { session: createSession(), key: accountKey(account), selection };
+    const candidate = { session: createSession(), key: accountKey(account), selection, adopted: false };
     pending = candidate;
     try {
       await candidate.session.service.connect({ serverUrl: account.serverUrl, email: account.email,
         masterPassword: params.masterPassword });
       adopt(candidate);
     } catch (error) {
-      if (pending !== candidate || (error as { kind?: string } | null)?.kind !== 'twoFactorRequired') {
+      if (!candidate.adopted && (pending !== candidate || (error as { kind?: string } | null)?.kind !== 'twoFactorRequired')) {
         if (pending === candidate) pending = null;
         candidate.session.vault.logout();
       }

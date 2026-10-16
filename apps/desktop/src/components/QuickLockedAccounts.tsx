@@ -31,7 +31,7 @@ export function QuickLockedAccounts({ accounts, busy, onOpenAccount }: {
   }, []);
   return <section aria-label="选择要解锁的账户" className="flex min-h-0 flex-1 flex-col justify-center gap-2 py-3">
     <div className="px-6 text-center">
-      <h1 className="text-md font-medium">选择账户解锁</h1>
+      <h1 className="text-md font-medium">选择账户</h1>
     </div>
     <div ref={rail} data-quick-account-rail className="flex h-48 shrink-0 items-center gap-3 overflow-x-auto overflow-y-hidden px-6 py-4"
       onKeyDown={event => {
@@ -48,7 +48,7 @@ export function QuickLockedAccounts({ accounts, busy, onOpenAccount }: {
       {accounts.map(account => <button key={account.id} type="button" data-quick-account={account.id}
         disabled={busy || !onOpenAccount} onClick={() => onOpenAccount?.(account.id)}
         title={`${account.displayName || account.email}\n${account.email}\n${account.serverUrl}`}
-        aria-label={`前往解锁 ${account.displayName || account.email} · ${account.email} · ${account.serverUrl}`}
+        aria-label={`选择账户 ${account.displayName || account.email} · ${account.email} · ${account.serverUrl}`}
         className="group flex h-40 w-44 shrink-0 flex-col items-center justify-center gap-3 rounded-[var(--radius-lg)] px-2 py-2 text-center first:ml-auto last:mr-auto hover:bg-[var(--surface-hover)] focus-visible:outline-none disabled:opacity-60">
         <span className="shrink-0 rounded-full transition-transform duration-150 group-hover:scale-110 group-focus-visible:scale-110 group-focus-visible:ring-2 group-focus-visible:ring-[var(--accent)] group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-[var(--surface-overlay)] motion-reduce:transition-none">
           <ProfileAvatar profile={{ displayName: account.displayName, avatarDataUrl: account.avatarDataUrl }} fallback={account.email} className="h-[88px] w-[88px] text-3xl" />

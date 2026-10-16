@@ -1,7 +1,7 @@
 import { VaultClient } from '@1warden/vault';
 import { subscribeNotifications } from '@1warden/api';
 import { NativeWebSocket } from '../native-websocket';
-import { host, IS_DESKTOP, kdfCache, syncCache } from '@1warden/ui';
+import { host, IS_DESKTOP, kdfCache, syncCache, rememberAccount } from '@1warden/ui';
 import { fromBase64 } from '@1warden/crypto';
 import { canSaveFiles, saveFile } from '../save';
 import { tauriAvailable } from '../capabilities';
@@ -14,13 +14,20 @@ import { lockedAccount } from './account-target';
 export function createDesktopApplication() {
   const listeners = new Set<() => void>();
   const changed = () => { for (const listener of listeners) listener(); };
-  const sessions = createAccountSessions(() => new VaultClient({
+  let draft: ConnectionDraft | null = null;
+  let remembered = Promise.resolve();
+  const sessions = createAccountSessions(onStatus => new VaultClient({
     fetchImpl: host().fetch,
     notifications: options => subscribeNotifications(options, tauriAvailable() ? NativeWebSocket : globalThis.WebSocket),
     autoLockMs: 15 * 60 * 1000,
-    onLock: changed, onStatus: changed, onSync: changed,
+    onLock: changed, onStatus: status => { onStatus(status); changed(); }, onSync: changed,
     syncCache, kdfCache,
-  }), createProfileCache(host().storage));
+  }), createProfileCache(host().storage), account => {
+    // Authentication completion owns these tasks; leaving during initial sync
+    // must not skip them when the old Connect component is already unmounted.
+    draft = null;
+    remembered = remembered.then(() => rememberAccount(account));
+  });
   sessions.subscribeActiveVault(changed);
   const client = createApplicationClient(sessions.service, {
     capabilities: { native: IS_DESKTOP && tauriAvailable(), browser: false, saveAttachments: canSaveFiles() },
@@ -28,7 +35,6 @@ export function createDesktopApplication() {
     subscribeRemote(listener) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   });
   // The native window keeps connection drafts in memory; extensions use storage.session.
-  let draft: ConnectionDraft | null = null;
   client.connectionDraft = {
     load: async () => draft ? structuredClone(draft) : null,
     save: async (value) => { draft = { ...value,
@@ -45,6 +51,7 @@ export function createDesktopApplication() {
       returnAccount: { serverUrl: previous.serverUrl, email: previous.email },
     };
     await switchAccount(target);
+    await remembered;
   };
   return { client, get vault() { return sessions.getActiveVault(); },
     getActiveVault: sessions.getActiveVault, subscribeActiveVault: sessions.subscribeActiveVault,

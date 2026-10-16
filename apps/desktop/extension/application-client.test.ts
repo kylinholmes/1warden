@@ -6,6 +6,38 @@ import { twoFactorChallenge } from '../src/screens/auth-error';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+it.each(['#capture=expired', '#capture=%65xpired'])('recovers from an expired review link %s on Retry', async hash => {
+  vi.resetModules();
+  const location = { hash, pathname: '/popup.html', search: '' };
+  const requests: { captureId?: string }[] = [];
+  vi.stubGlobal('location', location);
+  vi.stubGlobal('history', { replaceState() { location.hash = ''; } });
+  vi.stubGlobal('chrome', { storage: { session: {} }, runtime: { sendMessage: async (request: { captureId?: string }) => {
+    requests.push(request);
+    return request.captureId ? { ok: false, error: { kind: 'captureExpired', message: '已过期，请重试' } }
+      : { ok: true, result: [{ id: 'fresh' }] };
+  } } });
+  const { createExtensionApplicationClient } = await import('./application-client');
+  const client = createExtensionApplicationClient();
+  await expect(client.browser!.credentials!.list()).rejects.toThrow('已过期');
+  expect(location.hash).toBe('');
+  expect(await client.browser!.credentials!.list()).toEqual([{ id: 'fresh' }]);
+  expect(requests[1]!.captureId).toBeUndefined();
+});
+it('retains review links on network failures and never removes a newer link', async () => {
+  vi.resetModules();
+  const location = { hash: '#capture=old', pathname: '/popup.html', search: '' };
+  vi.stubGlobal('location', location);
+  const replaceState = vi.fn(); vi.stubGlobal('history', { replaceState });
+  const sendMessage = vi.fn().mockResolvedValueOnce({ ok: false, error: { kind: 'network', message: 'offline' } })
+    .mockImplementationOnce(async () => { location.hash = '#capture=new'; return { ok: false, error: { kind: 'captureExpired', message: 'expired' } }; });
+  vi.stubGlobal('chrome', { storage: { session: {} }, runtime: { sendMessage } });
+  const { createExtensionApplicationClient } = await import('./application-client'); const client = createExtensionApplicationClient();
+  await expect(client.browser!.credentials!.list()).rejects.toThrow('offline'); expect(location.hash).toBe('#capture=old');
+  await expect(client.browser!.credentials!.list()).rejects.toThrow('expired'); expect(location.hash).toBe('#capture=new');
+  expect(replaceState).not.toHaveBeenCalled();
+});
+
 it('routes an explicit capture review and clears its link only after successful confirmation', async () => {
   vi.resetModules();
   const send = vi.fn(async () => ({ ok: true, result: [] }));
