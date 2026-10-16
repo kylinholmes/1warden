@@ -290,13 +290,23 @@ try {
   // Firefox does not emit normal network-navigation events for moz-extension
   // URLs. Wait on its BiDi readiness result, then the actual UI selector.
   const openPopup = async (reload = false) => {
-    await popup.bringToFront();
+    // Chromium needs a foreground page to finish screenshot animations.
+    // Gecko BiDi cannot activate privileged extension pages (no screenshots there).
+    if (name === 'chrome') await popup.bringToFront();
     if (name === 'firefox') {
       const context = popup.mainFrame().browsingContext;
       if (reload) await context.reload({ wait: 'interactive' });
       else await context.navigate(`${origin}/popup.html`, 'interactive');
+      // Use the extension tab API where BiDi activation is unsupported. After
+      // submitting the website, leaving this tab hidden stalls rendering/RAF.
+      await popup.evaluate(async () => {
+        const api = (globalThis as any).browser;
+        const tab = await api.tabs.getCurrent();
+        await api.tabs.update(tab.id, { active: true });
+      });
     } else if (reload) await popup.reload({ waitUntil: 'domcontentloaded' });
     else await popup.goto(`${origin}/popup.html`, { waitUntil: 'domcontentloaded' });
+    await popup.waitForFunction(() => document.visibilityState === 'visible');
   };
   await openPopup();
   await popup.waitForSelector('main button');
@@ -891,6 +901,7 @@ try {
   failure = error instanceof Error ? error.stack ?? error.message : String(error);
   console.error(failure);
   if (popup) {
+    console.error('Page visibility at failure:', await popup.evaluate(() => document.visibilityState).catch(() => 'unavailable'));
     await screenshot('failure').catch(() => {});
     const text = await popup.evaluate(() => document.body.innerText).catch(() => 'unavailable');
     console.error(`UI at failure: ${text}`);
