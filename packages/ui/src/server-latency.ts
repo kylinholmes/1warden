@@ -1,4 +1,5 @@
-import { useEffect, useSyncExternalStore } from 'react';
+import { useEffect } from 'react';
+import { useStoreSnapshot } from '@1warden/state/react';
 import { probeServer, registrationServerUrl } from '@1warden/api';
 import { host } from './host';
 
@@ -59,7 +60,7 @@ export function serverLatency(fetchImpl = host().fetch) {
 /** Reuses welcome's completed or in-flight measurements; custom editing is debounced. */
 export function useServerLatencies(values: readonly string[], delay = 0, disabled = false) {
   const service = serverLatency();
-  useSyncExternalStore(service.subscribe, service.snapshot, service.snapshot);
+  useStoreSnapshot(service.subscribe, service.snapshot, service.snapshot);
   const urls = JSON.stringify([...new Set(values.map(normalizeServerUrl).filter(Boolean))]);
   useEffect(() => {
     if (disabled) return;

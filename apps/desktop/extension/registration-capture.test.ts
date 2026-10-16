@@ -31,11 +31,23 @@ function storage(values: Record<string, unknown>) {
 const send = (request: unknown, sender: chrome.runtime.MessageSender = popup) =>
   new Promise<any>((resolve) => listener(request, sender, resolve));
 
-// Submission is a one-way content message. The subsequent popup request shares
-// the real worker's serial queue, so it waits until capture has finished.
-function submit() {
-  listener({ type: '1warden:submitted', url: 'https://caller-supplied.test/' }, content, () => {});
-  return send({ type: '1warden:pending', tabId: 7 });
+async function submit() {
+  const state = await send({ type: '1warden:credential-document', nonce: 'document-one' }, content);
+  if (state.unlocked) {
+    const password = inputs.find(i => i.autocomplete === 'new-password') ?? inputs.find(i => i.type === 'password');
+    await send({ type: '1warden:credential-capture', nonce: 'document-one', token: state.token,
+      input: { formId: 'form-one', username: inputs.find(i => i.type === 'email')?.value ?? null,
+        password: password?.value ?? '', intent: inputs.some(i => i.autocomplete === 'new-password') ? 'signup' : 'login', submitted: true } }, content);
+    return await send({ type: '1warden:credential-list' });
+  }
+  return [];
+}
+async function save(row: { id: string; revision: number; action: string; targets: { id: string; updatedAt: string }[] }) {
+  const target = row.targets[0];
+  return send({ type: '1warden:credential-save', application: true, choice: {
+    captureId: row.id, revision: row.revision, action: target ? 'update' : 'save',
+    ...(target ? { itemId: target.id, targetUpdatedAt: target.updatedAt } : {}),
+  } });
 }
 
 function existingLogin(): VaultItem {
@@ -59,7 +71,7 @@ beforeEach(async () => {
   inputs = [
     { type: 'email', autocomplete: 'username', value: username },
     { type: 'password', autocomplete: 'new-password', value: newPassword },
-    { type: 'password', autocomplete: 'new-password', name: 'confirm-password', value: 'different-confirmation-value' },
+    { type: 'password', autocomplete: 'new-password', name: 'confirm-password', value: newPassword },
   ];
   reads = 0;
   writes = [];
@@ -81,7 +93,7 @@ beforeEach(async () => {
     },
     storage: { session: storage(data), local: storage({}) },
     alarms: { create: async () => {}, clear: async () => true, onAlarm: { addListener: () => {} } },
-    tabs: { query: async () => [], onActivated: { addListener: () => {} }, onRemoved: { addListener: () => {} } },
+    tabs: { query: async () => [], get: async () => ({ id: 7, url }), onActivated: { addListener: () => {} }, onRemoved: { addListener: () => {} } },
     action: { setBadgeText: async () => {}, setBadgeBackgroundColor: async () => {} },
     scripting: { executeScript: async (injection: { func: Function; args?: unknown[] }) => {
       reads++;
@@ -96,74 +108,46 @@ beforeEach(async () => {
 
 afterEach(() => { vi.unstubAllGlobals(); });
 
-describe('submitted credential capture', () => {
-  it.each([true, false])('offers registration capture with username present=%s and saves only after confirmation', async (hasUsername) => {
+describe('submitted credential capture through validated document grants', () => {
+  it.each([true, false])('saves registration only after confirmation, username present=%s', async hasUsername => {
     if (!hasUsername) inputs.shift();
-    const pending = await submit();
-    expect(pending).toEqual({ pending: { url, username: hasUsername ? username : null, action: 'save', itemId: null } });
-    expect(JSON.stringify(pending)).not.toContain(newPassword);
-    expect(writes).toEqual([]);
-    expect(data['1warden.session']).toMatchObject({ items: [] });
-
-    expect(await send({ type: '1warden:save-capture', tabId: 7 })).toEqual({ ok: true });
-    expect(data['1warden.session']).toMatchObject({ items: [{ name: 'signup.example.test',
-      login: { username: hasUsername ? username : null, password: newPassword, uris: [{ uri: url, match: null }] } }] });
-    expect(writes).toHaveLength(1);
-    expect(writes[0]).toMatchObject({ url: 'https://vault.test/api/ciphers', method: 'POST' });
+    const rows = await submit();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({ url, username: hasUsername ? username : null, action: 'save' });
+    expect(JSON.stringify(rows)).not.toContain(newPassword); expect(writes).toEqual([]);
+    expect(await save(rows[0])).toEqual({ ok: true });
+    expect(data['1warden.session']).toMatchObject({ items: [{ login: { username: hasUsername ? username : null, password: newPassword } }] });
+    expect(writes).toHaveLength(1); expect(writes[0]).toMatchObject({ url: 'https://vault.test/api/ciphers', method: 'POST' });
     expect(JSON.stringify(writes)).not.toContain(newPassword);
-    expect(await send({ type: '1warden:pending', tabId: 7 })).toEqual({ pending: null });
+    expect(await send({ type: '1warden:credential-list' })).toEqual([]);
   });
-
-  it.each([2, 3])('captures the new password from a %s-password change form and keeps the old password in history', async (passwordCount) => {
+  it('updates the chosen login and retains its previous password history', async () => {
     (data['1warden.session'] as { items: VaultItem[] }).items = [existingLogin()];
-    inputs.splice(1, 0, { type: 'password', autocomplete: 'current-password', value: oldPassword });
-    if (passwordCount === 2) inputs.pop();
-    expect(await submit()).toEqual({ pending: { url, username, action: 'update', itemId: 'existing' } });
-    expect(writes).toEqual([]);
-
-    expect(await send({ type: '1warden:save-capture', tabId: 7 })).toEqual({ ok: true });
+    const rows = await submit(); expect(rows[0]).toMatchObject({ action: 'review' });
+    expect(await save(rows[0])).toEqual({ ok: true });
     expect(data['1warden.session']).toMatchObject({ items: [{ id: 'existing', login: { password: newPassword },
       passwordHistory: [{ password: oldPassword, lastUsedDate: expect.any(String) }] }] });
-    expect(writes).toHaveLength(1);
     expect(writes[0]).toMatchObject({ url: 'https://vault.test/api/ciphers/existing', method: 'PUT' });
   });
-
-  it('still captures a single current-password login field', async () => {
-    inputs = [inputs[0]!, { type: 'password', autocomplete: 'current-password', value: oldPassword }];
-    expect(await submit()).toMatchObject({ pending: { action: 'save', username } });
-    expect(await send({ type: '1warden:save-capture', tabId: 7 })).toEqual({ ok: true });
-    expect(data['1warden.session']).toMatchObject({ items: [{ login: { password: oldPassword } }] });
+  it.each(['', '   ', '********'])('ignores empty and placeholder submissions (%j)', async value => {
+    inputs[1]!.value = value; expect(await submit()).toEqual([]); expect(writes).toEqual([]);
   });
-
-  it.each(['', '   ', '********'])('does not capture an empty or placeholder new password (%j) or fall back to the old one', async (value) => {
-    inputs[1]!.value = value;
-    inputs.splice(1, 0, { type: 'password', autocomplete: 'current-password', value: oldPassword });
-    expect(await submit()).toEqual({ pending: null });
-    expect(writes).toEqual([]);
+  it('grants no capture authority while locked', async () => {
+    delete data['1warden.session']; expect(await submit()).toEqual([]); expect(reads).toBe(0); expect(writes).toEqual([]);
   });
-
-  it('does not read fields or capture credentials while the vault is locked', async () => {
-    delete data['1warden.session'];
-    expect(await submit()).toEqual({ pending: null });
-    expect(reads).toBe(0);
-    expect(writes).toEqual([]);
+  it('rejects the retired unbound capture APIs', async () => {
+    for (const type of ['1warden:submitted', '1warden:save-capture', '1warden:pending']) {
+      expect(await send({ type, tabId: 7 }, content)).toMatchObject({ error: expect.any(String) });
+      expect(await send({ type, tabId: 7 })).toMatchObject({ error: expect.any(String) });
+    }
+    expect(reads).toBe(0); expect(writes).toEqual([]);
   });
-
-  it('requires the trusted popup to confirm capture and clears it on dismiss', async () => {
-    expect(await submit()).toMatchObject({ pending: { action: 'save' } });
-    expect(await send({ type: '1warden:save-capture', tabId: 7 }, content)).toMatchObject({ error: expect.any(String) });
-    expect(writes).toEqual([]);
-    expect(await send({ type: '1warden:dismiss-capture', tabId: 7 })).toEqual({ ok: true });
-    expect(await send({ type: '1warden:pending', tabId: 7 })).toEqual({ pending: null });
-  });
-
-  it.each(['lock', 'switchAccount'] as const)('clears captured secrets at the %s boundary before a later save', async (method) => {
-    expect(await submit()).toMatchObject({ pending: { action: 'save' } });
+  it.each(['lock', 'switchAccount'] as const)('clears secrets at the %s boundary', async method => {
+    const rows = await submit(); expect(rows).toHaveLength(1);
     const args = method === 'lock' ? [] : [{ ...account, serverUrl: 'https://other-vault.test', email: 'other@example.test', userId: 'u2' }];
     expect(await send({ type: '1warden:application', method, args })).toMatchObject({ ok: true });
-    expect(await send({ type: '1warden:pending', tabId: 7 })).toEqual({ pending: null });
-    expect(await send({ type: '1warden:save-capture', tabId: 7 })).toMatchObject({ error: expect.any(String) });
-    expect(writes).toEqual([]);
-    expect(JSON.stringify(data)).not.toContain(newPassword);
+    expect(await save(rows[0])).toMatchObject({ ok: false });
+    expect(data['1warden.credential-captures']).toBeUndefined();
+    expect(JSON.stringify(data)).not.toContain(newPassword); expect(writes).toEqual([]);
   });
 });

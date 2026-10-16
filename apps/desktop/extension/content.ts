@@ -1,18 +1,18 @@
 /**
  * content script —— 页面里唯一常驻的那份代码。
  *
- * ## 它**看不到任何密码**
- *
- * 这里只做两件事：把页面上的输入框描述出来，以及在用户点击填充时
- * 把请求转给 background。值的注入由 background 用
- * `chrome.scripting.executeScript` 单独完成（见 fill.ts），
- * 不经过这份代码。
- *
- * 这样即使页面本身有 XSS、或者有别的扩展想读我们的内存，也拿不到明文。
+ * 字段元数据供账号选择器使用；凭据观察器在 ISOLATED world 中，仅在用户
+ * 编辑完成或提交表单时，短暂读取当前表单并交给 background。密码不进入页面 UI。
  */
 import { ext } from './ext-api';
 import { isLikelyLoginForm, type FieldDescriptor } from '@1warden/vault';
 import { installInlinePicker } from './inline-picker';
+import { installCredentialObserver } from './credential-observer';
+import { installInlineCredentials } from './inline-credentials';
+
+// Install capture listeners before page scripts can register clearing handlers.
+const credentialObserver = installCredentialObserver();
+const credentialUI = installInlineCredentials(credentialObserver);
 
 /** 与 background / popup 约定的消息形状 */
 interface FieldsReport {
@@ -100,6 +100,7 @@ function report(): void {
 let lastUrl = location.href;
 
 function maybeReport(): void {
+  credentialObserver.navigation();
   if (location.href !== lastUrl) {
     lastUrl = location.href;
     report();
@@ -112,43 +113,6 @@ function maybeReport(): void {
 }
 
 let reportedOnce = false;
-
-/**
- * 表单提交检测。
- *
- * ⚠️ **这里读不到也不上报任何值** —— 只发一个「某个登录表单被提交了」的信号。
- * 真正的取值由 background 收到信号后注入一次性的读取函数完成（看 fill.ts），
- * 值从页面直达 background，不经过这份常驻代码。
- *
- * 用捕获阶段监听：很多站点在冒泡阶段就 `preventDefault()` 了，
- * 那时候再监听就晚了。
- */
-function onFormSubmit(event: Event): void {
-  const form = event.target;
-  if (!(form instanceof HTMLFormElement)) return;
-  if (window.top !== window.self) return;
-
-  // 只关心含密码框的表单 —— 搜索框、订阅框提交时不该触发保存提示
-  if (!form.querySelector('input[type="password"]')) return;
-
-  console.debug('[onewarden] 检测到登录表单提交');
-  ext.runtime.sendMessage({ type: '1warden:submitted', url: location.href })
-    .catch(() => { /* 没有接收方是正常情况 */ });
-}
-
-document.addEventListener('submit', onFormSubmit, true);
-
-/**
- * 有些站点不用 submit 事件，而是给按钮绑 click 后自己发请求。
- * 这种情况靠 Enter 键兜底 —— 覆盖面不如 submit，但聊胜于无。
- */
-document.addEventListener('keydown', (e) => {
-  if (e.key !== 'Enter' || window.top !== window.self) return;
-  const el = e.target;
-  if (!(el instanceof HTMLInputElement)) return;
-  if (el.type !== 'password' && el.form?.querySelector('input[type="password"]') === null) return;
-  ext.runtime.sendMessage({ type: '1warden:submitted', url: location.href }).catch(() => {});
-}, true);
 
 // ── 注册顺序很重要 ──
 //
@@ -188,7 +152,7 @@ ext.runtime.onMessage.addListener((msg: unknown, _sender, respond) => {
  * ⚠️ **必须幂等。**
  *
  * MAIN world 那边会每 250ms 重发一次，直到收到回复 —— 因为在它发第一次的时候，
- * 这份脚本可能还没注入（它跑在 `document_start`，我们跑在 `document_idle`）。
+ * 两个 world 的脚本虽然都在 document_start 注入，执行先后仍可能不同。
  * 重发是对的，但**接收方**得扛得住：同一条请求转发两次、执行两次，
  * 就会注册出两条凭据、或者拿同一个 challenge 签两次名。
  *
@@ -221,7 +185,7 @@ window.addEventListener('message', (event: MessageEvent) => {
   const data = event.data as { tag?: string; id?: number } | null;
 
   // 探针：MAIN world 用它确认我们已经就位。**只回一个标记，不做任何事** ——
-  // 它跑在 document_start，我们跑在 document_idle，它必须等我们。
+  // 两个 world 的注入顺序不固定，它必须等我们。
   // 让重发带副作用（直接重发真正的请求）会让一次 create 执行多遍
   if (data?.tag === '1warden:webauthn-ping') {
     window.postMessage({ tag: '1warden:webauthn-pong' }, window.location.origin);
@@ -277,7 +241,12 @@ function safeReport(): void {
   }
 }
 
-installInlinePicker(readFields);
+installInlinePicker(readFields, {
+  suppress: field => credentialUI.prefersGenerator(field),
+  canGenerate: field => !!credentialObserver.forms.group(field)?.password,
+  openGenerator: field => { void credentialUI.openGenerator(field); },
+  onOpen: () => credentialUI.closeGenerator(),
+});
 safeReport();
 safeReportDelayed();
 

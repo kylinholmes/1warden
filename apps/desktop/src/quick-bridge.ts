@@ -15,7 +15,7 @@
  *   quick  ◀─1warden:results {items}─  main   ← 只有名称与用户名，没有密码
  *   quick  ──1warden:action {...}───▶  main   ← 复制/输入由主窗口执行
  *
- * 面板能看到的最敏感的东西是「用户名」。密码连它都看不到。
+ * 面板只接收条目摘要和账户展示信息；解锁仍在主窗口完成，密码不会过桥。
  */
 import { emitTo, listen, type UnlistenFn } from '@tauri-apps/api/event';
 
@@ -50,6 +50,15 @@ export interface QuickItem {
 /** 面板能触发的动作。刻意只有复制 —— 见 QuickAccess 顶部的说明。 */
 export type QuickAction = 'copy-password' | 'copy-username' | 'copy-totp';
 
+/** Remembered identity and optional presentation cache only. No session data. */
+export interface QuickAccount {
+  id: string;
+  email: string;
+  serverUrl: string;
+  displayName: string;
+  avatarDataUrl: string | null;
+}
+
 export interface QuickResults {
   /** 查询序号 —— 异步返回时用来丢弃过期结果 */
   seq: number;
@@ -62,6 +71,8 @@ export interface QuickResults {
    * 「先要一次」那条路会在启动时序上打架。这个值很小，重复带没关系。
    */
   serverUrl: string | null;
+  accounts?: QuickAccount[];
+  accountsLoading?: boolean;
 }
 
 export const QUICK_WINDOW = 'quick';
@@ -80,6 +91,11 @@ export function onResults(fn: (r: QuickResults) => void): Promise<UnlistenFn> {
 /** 面板 → 主窗口：执行动作（复制 / 输入） */
 export function askAction(itemId: string, action: QuickAction, requestId?: number): Promise<void> {
   return emitTo(MAIN_WINDOW, '1warden:action', { itemId, action, requestId });
+}
+
+/** Only an identity key crosses the window boundary; authentication stays in main. */
+export function askOpenAccount(accountId: string | null, requestId: number): Promise<void> {
+  return emitTo(MAIN_WINDOW, '1warden:open-account', { accountId, requestId });
 }
 
 /** 主窗口 → 面板：动作结果，用来给用户一句反馈 */

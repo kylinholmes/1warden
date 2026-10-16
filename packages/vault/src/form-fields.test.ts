@@ -15,6 +15,23 @@ function field(over: Partial<FieldDescriptor> = {}): FieldDescriptor {
 
 const pw = (over: Partial<FieldDescriptor> = {}) => field({ type: 'password', ...over });
 
+describe('registration and populated credential roles', () => {
+  it('recognises a single tokenized new password', () => {
+    expect(classifyFields([field({ autocomplete: 'section-signup username' }), pw({ autocomplete: 'section-signup new-password' })]))
+      .toEqual({ username: 0, newPassword: 1 });
+  });
+  it('keeps a populated username and excludes an OTP before the password', () => {
+    expect(classifyFields([field({ name: 'email', value: 'person@example.test' }), field({ autocomplete: 'one-time-code' }), pw()]))
+      .toMatchObject({ username: 0, password: 2, totp: 1 });
+  });
+  it('recognises an explicitly declared password when the site reveals it', () => {
+    expect(classifyFields([field({ type: 'text', autocomplete: 'new-password' })])).toEqual({ newPassword: 0 });
+  });
+  it('does not save an explicitly masked OTP as a password', () => {
+    expect(classifyFields([pw({ autocomplete: 'one-time-code' })])).toEqual({ totp: 0 });
+  });
+});
+
 describe('isLikelyLoginForm', () => {
   it('is true when there is a password field', () => {
     expect(isLikelyLoginForm([field({ type: 'email' }), pw()])).toBe(true);

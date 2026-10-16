@@ -20,6 +20,6 @@ if (!root) throw new Error('找不到 #root 挂载点');
 
 createRoot(root).render(
   <StrictMode>
-    <ErrorBoundary><App client={client} /><Suspense fallback={null}><AppUpdateHost /></Suspense></ErrorBoundary>
+    <ErrorBoundary><App client={client} openActiveAccount /><Suspense fallback={null}><AppUpdateHost /></Suspense></ErrorBoundary>
   </StrictMode>,
 );

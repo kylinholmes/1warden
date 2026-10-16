@@ -7,6 +7,16 @@ const page = { id: 'onewarden-id', url: runtime.getURL('popup.html') };
 const content = { id: 'onewarden-id', url: 'https://example.com', tab: { id: 7 } };
 
 describe('application message authority', () => {
+  it('keeps credential writes and recovery secrets exclusive to extension UI', () => {
+    for (const type of ['1warden:credential-document', '1warden:credential-capture', '1warden:credential-generate']) {
+      expect(() => authorizeRequest(type, content, runtime)).not.toThrow();
+      expect(() => authorizeRequest(type, { ...content, id: 'foreign' }, runtime)).toThrow();
+    }
+    for (const type of ['1warden:credential-save', '1warden:credential-reveal-history', '1warden:credential-list']) {
+      expect(() => authorizeRequest(type, page, runtime)).not.toThrow();
+      expect(() => authorizeRequest(type, content, runtime)).toThrow();
+    }
+  });
   it('accepts only the installed extension UI page for vault operations', () => {
     expect(() => authorizeRequest('1warden:application', page, runtime)).not.toThrow();
     for (const sender of [content, { ...page, id: 'other' }, { ...page, url: 'moz-extension://other/popup.html' },
@@ -19,12 +29,16 @@ describe('application message authority', () => {
   });
 
   it('limits content scripts to field reports, submissions and WebAuthn', () => {
-    for (const type of ['1warden:fields', '1warden:submitted', '1warden:webauthn']) {
+    for (const type of ['1warden:fields', '1warden:credential-capture', '1warden:webauthn']) {
       expect(() => authorizeRequest(type, content, runtime)).not.toThrow();
       expect(() => authorizeRequest(type, { ...content, id: 'foreign' }, runtime)).toThrow();
       expect(() => authorizeRequest(type, { ...content, url: 'file:///etc/passwd' }, runtime)).toThrow();
     }
     expect(() => authorizeRequest('1warden:clipboard-copied', content, runtime)).toThrow();
+    for (const type of ['1warden:submitted', '1warden:save-capture', '1warden:dismiss-capture', '1warden:pending']) {
+      expect(() => authorizeRequest(type, content, runtime)).toThrow();
+      expect(() => authorizeRequest(type, page, runtime)).toThrow();
+    }
   });
 });
 

@@ -3,7 +3,12 @@ import { ext } from './ext-api';
 import type { InlineAccounts, InlineReply } from './inline-accounts';
 
 /** Page-resident UI receives only matched account labels, never vault secrets. */
-export function installInlinePicker(readFields: () => FieldDescriptor[]): void {
+export function installInlinePicker(readFields: () => FieldDescriptor[], credentials?: {
+  suppress(field: HTMLInputElement): boolean;
+  canGenerate(field: HTMLInputElement): boolean;
+  openGenerator(field: HTMLInputElement): void;
+  onOpen(): void;
+}): void {
   // The existing fill implementation targets the top document only.
   if (window.top !== window.self) return;
 
@@ -232,6 +237,10 @@ export function installInlinePicker(readFields: () => FieldDescriptor[]): void {
         message(reply.accounts.length ? '' : '此网站没有匹配的账号');
         for (const account of reply.accounts) action(account.title, account.username, () => { void choose(account.id); });
       }
+      if (anchor && credentials?.canGenerate(anchor)) {
+        const field = anchor;
+        action('生成新密码…', null, () => { close(true); credentials.openGenerator(field); });
+      }
       // Removing the focused unlock button fires focusout. Move focus into the
       // replacement choices before its dismissal check runs.
       if (hadFocus && buttons.length) focusButton(0);
@@ -252,6 +261,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[]): void {
 
   function eligible(target: EventTarget | null): target is HTMLInputElement {
     if (!(target instanceof HTMLInputElement) || target.disabled || target.readOnly) return false;
+    if (credentials?.suppress(target)) return false;
     const fields = readFields();
     const index = Array.from(document.querySelectorAll('input, textarea')).indexOf(target);
     const plan = classifyFields(fields);
@@ -260,9 +270,12 @@ export function installInlinePicker(readFields: () => FieldDescriptor[]): void {
 
   function show(event: Event): void {
     if (!event.isTrusted || restoringFocus || busy) return;
+    if (event.target instanceof HTMLInputElement && credentials?.suppress(event.target)) { close(); return; }
     if (!eligible(event.target)) return;
     if (host && anchor === event.target) return;
+    if (!document.documentElement) return;
     close();
+    credentials?.onOpen();
     anchor = event.target;
     pageUrl = location.href;
     createHost();

@@ -6,6 +6,28 @@ import { twoFactorChallenge } from '../src/screens/auth-error';
 
 afterEach(() => { vi.unstubAllGlobals(); vi.useRealTimers(); });
 
+it('routes an explicit capture review and clears its link only after successful confirmation', async () => {
+  vi.resetModules();
+  const send = vi.fn(async () => ({ ok: true, result: [] }));
+  const location = { hash: '#capture=one', pathname: '/popup.html', search: '' };
+  const replaceState = vi.fn(() => { location.hash = ''; });
+  vi.stubGlobal('location', location); vi.stubGlobal('history', { replaceState });
+  vi.stubGlobal('chrome', { storage: { session: {} }, runtime: { sendMessage: send } });
+  const { createExtensionApplicationClient } = await import('./application-client');
+  const client = createExtensionApplicationClient();
+  await client.browser!.credentials!.list();
+  expect(send).toHaveBeenCalledWith({ type: '1warden:credential-list', application: true, captureId: 'one' });
+  const choice = { captureId: 'one', revision: 1, action: 'save' as const };
+  send.mockRejectedValueOnce(new Error('offline'));
+  await expect(client.browser!.credentials!.save(choice)).rejects.toThrow('offline');
+  expect(replaceState).not.toHaveBeenCalled();
+  await client.browser!.credentials!.save(choice);
+  expect(replaceState).toHaveBeenCalledExactlyOnceWith(null, '', '/popup.html');
+  await client.browser!.credentials!.list();
+  expect(send).toHaveBeenLastCalledWith({ type: '1warden:credential-list', application: true });
+  client.dispose();
+});
+
 it('forwards only merge IDs, preview tokens and explicit choices through the bridge', async () => {
   vi.resetModules();
   const send = vi.fn(async (request: { method: string; args: unknown[] }) => ({ ok: true,

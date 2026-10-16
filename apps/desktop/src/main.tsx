@@ -11,6 +11,8 @@ import { initTheme } from './theme';
 import { IS_DESKTOP } from '@1warden/ui';
 import { listen } from '@tauri-apps/api/event';
 import { useQuickBridge } from './use-quick-bridge';
+import { createQuickAccountNavigation, loadQuickAccounts } from './quick-accounts';
+import { invoke } from '@tauri-apps/api/core';
 import { createDesktopApplication } from './application/desktop';
 import './styles.css';
 
@@ -30,10 +32,18 @@ initNativeFeel();
 initTheme();
 
 const runtime = createDesktopApplication();
+const quickNavigation = createQuickAccountNavigation();
+const quickAccounts = {
+  load: () => loadQuickAccounts(runtime.client.getSnapshot(), runtime.getActiveVault().getSession().account),
+  async open(account: Parameters<typeof quickNavigation.open>[0]) {
+    await quickNavigation.open(account);
+    await invoke('quick_open_main');
+  },
+};
 const AppUpdateHost = lazy(() => import('./components/AppUpdateHost'));
 
 function DesktopEvents() {
-  useQuickBridge(runtime.getActiveVault, runtime.subscribeVaultChanges);
+  useQuickBridge(runtime.getActiveVault, runtime.subscribeVaultChanges, quickAccounts);
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
@@ -52,7 +62,7 @@ createRoot(root).render(
     {webAssemblyAvailable() ? (
       <ErrorBoundary>
         {IS_DESKTOP && <DesktopEvents />}
-        <App client={runtime.client} />
+        <App client={runtime.client} subscribeQuickAccountNavigation={quickNavigation.subscribe} />
         {tauriAvailable() && <Suspense fallback={null}><AppUpdateHost /></Suspense>}
       </ErrorBoundary>
     ) : (

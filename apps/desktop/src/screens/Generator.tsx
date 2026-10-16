@@ -1,4 +1,6 @@
 import { FloatingPanel, GeneratorBody, PageHeader } from '@1warden/ui';
+import type { BrowserCredentialActions } from '../application/browser-credentials';
+import { GeneratedPasswordHistory } from '../components/BrowserCredentialReview';
 
 /**
  * 生成器 —— **桌面端这里只剩浮层外壳**。
@@ -16,7 +18,7 @@ import { FloatingPanel, GeneratorBody, PageHeader } from '@1warden/ui';
  * 扩展弹窗那边不是浮层 —— 它整屏就只有 440px，浮层没有意义，
  * 直接把内容铺在列表那一层。**两个外壳，一份内容。**
  */
-export function Generator({ open, onClose }: { open: boolean; onClose: () => void }) {
+export function Generator({ open, onClose, credentials }: { open: boolean; onClose: () => void; credentials?: BrowserCredentialActions | undefined }) {
   return (
     <FloatingPanel
       open={open}
@@ -36,6 +38,7 @@ export function Generator({ open, onClose }: { open: boolean; onClose: () => voi
 
       <div className="min-h-0 flex-1 overflow-y-auto p-5">
         <GeneratorBody />
+        {open && credentials && <GeneratedPasswordHistory actions={credentials} />}
       </div>
     </FloatingPanel>
   );

@@ -14,12 +14,14 @@ import { Register } from './screens/Register';
 import { accountKey, type AccountTarget } from './application/account-target';
 import { createStore } from '@1warden/state';
 import { UNSAVED_PROFILE_MESSAGE } from './profile-autosave';
+import type { QuickAccountNavigation, SubscribeQuickAccountNavigation } from './quick-accounts';
 
 /** One application tree; each entry supplies its own runtime. */
-export function App({ client }: { client: ApplicationClient }) {
-  return <ProfileAutosaveProvider client={client}><AccountMetadataProvider client={client}><ToastProvider><AppContent client={client} /></ToastProvider></AccountMetadataProvider></ProfileAutosaveProvider>;
+interface AppProps { client: ApplicationClient; subscribeQuickAccountNavigation?: SubscribeQuickAccountNavigation | undefined; openActiveAccount?: boolean | undefined }
+export function App({ client, subscribeQuickAccountNavigation, openActiveAccount }: AppProps) {
+  return <ProfileAutosaveProvider client={client}><AccountMetadataProvider client={client}><ToastProvider><AppContent client={client} subscribeQuickAccountNavigation={subscribeQuickAccountNavigation} openActiveAccount={openActiveAccount} /></ToastProvider></AccountMetadataProvider></ProfileAutosaveProvider>;
 }
-function AppContent({ client }: { client: ApplicationClient }) {
+function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount }: AppProps) {
   const subscribe = useCallback((listener: () => void) => client.subscribe(listener), [client]);
   const getSnapshot = useCallback(() => client.getSnapshot(), [client]);
   const session = useStoreSnapshot(subscribe, getSnapshot, getSnapshot);
@@ -42,6 +44,15 @@ function AppContent({ client }: { client: ApplicationClient }) {
   const entryOperation = useRef(0);
   const entryWrites = useRef<Promise<void>>(Promise.resolve());
   const autosave = useProfileAutosave();
+  const quickNavigation = useRef<QuickAccountNavigation>(async () => {});
+  quickNavigation.current = async account => {
+    if (navigation.current) throw new Error('正在切换账户，请稍后重试');
+    await switchAccount(account);
+  };
+  useEffect(() => {
+    if (!ready || !subscribeQuickAccountNavigation) return;
+    return subscribeQuickAccountNavigation(account => quickNavigation.current(account));
+  }, [ready, subscribeQuickAccountNavigation]);
 
   useEffect(() => {
     let alive = true;
@@ -49,12 +60,18 @@ function AppContent({ client }: { client: ApplicationClient }) {
     setError(null);
     void client.initialize().then(async () => {
       const draft = await client.connectionDraft?.load().catch(() => null);
-      if (alive) { if (draft) { setEntryDraft(draft); setRoute(draft.intent === 'register' ? 'register' : 'work'); } setReady(true); }
+      if (alive) {
+        const current = client.getSnapshot();
+        if (openActiveAccount && current.status === 'unlocked') { setEntryDraft(undefined); setRoute('work'); }
+        else if (draft) { setEntryDraft(draft); setRoute(draft.intent === 'register' ? 'register' : 'work'); }
+        else if (openActiveAccount && current.account) setRoute('work');
+        setReady(true);
+      }
     }).catch((e: unknown) => {
       if (alive) setError(e instanceof Error ? e.message : '无法载入保险库');
     });
     return () => { alive = false; entryOperation.current++; };
-  }, [client, attempt]);
+  }, [client, attempt, openActiveAccount]);
 
   const handleLock = useCallback(() => {
     void client.lock().catch((e: unknown) => setError(e instanceof Error ? e.message : '锁定失败'));

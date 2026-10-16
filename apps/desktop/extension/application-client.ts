@@ -37,6 +37,10 @@ function call<K extends ApplicationMethod>(method: K, ...args: Parameters<Applic
     LOCAL_READS.has(method) ? 5_000 : undefined) as ReturnType<ApplicationService[K]>;
 }
 
+function clearCaptureLink(id: string): void {
+  if (location.hash === `#capture=${encodeURIComponent(id)}`) history.replaceState(null, '', location.pathname + location.search);
+}
+
 /** Called only after the clipboard write succeeds, from the shared clipboard helper. */
 export function scheduleExtensionClipboardClear(value: string): Promise<void> {
   return request({ type: '1warden:clipboard-copied', value });
@@ -81,10 +85,18 @@ export function createExtensionApplicationClient(): ApplicationClient {
   const client = createApplicationClient(service, {
     capabilities: { native: false, browser: true, saveAttachments: true },
     browser: {
+      credentials: {
+        list: () => request({ type: '1warden:credential-list', application: true,
+          ...(location.hash.startsWith('#capture=') ? { captureId: decodeURIComponent(location.hash.slice(9)) } : {}) }, 5_000),
+        save: async choice => { await request({ type: '1warden:credential-save', choice, application: true }); clearCaptureLink(choice.captureId); },
+        dismiss: async id => { await request({ type: '1warden:credential-dismiss', id, application: true }); clearCaptureLink(id); },
+        history: () => request({ type: '1warden:credential-history', application: true }, 5_000),
+        revealHistory: id => request({ type: '1warden:credential-reveal-history', id, application: true }, 5_000),
+        deleteHistory: id => request({ type: '1warden:credential-delete-history', id, application: true }),
+        recoverHistory: id => request({ type: '1warden:credential-recover-history', id, application: true }),
+      },
       context: () => request<SiteContext>({ type: '1warden:context' }),
       fill: (itemId, tabId) => request({ type: '1warden:fill', itemId, tabId, application: true }),
-      saveCapture: (tabId) => request({ type: '1warden:save-capture', tabId, application: true }),
-      dismissCapture: (tabId) => request({ type: '1warden:dismiss-capture', tabId, application: true }),
     },
     saveFile: (fileName, dataBase64) => downloadFile(ext.downloads, fileName, dataBase64),
     subscribeRemote(listener) {

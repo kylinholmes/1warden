@@ -483,8 +483,8 @@ void fakeClient.initialize().then(() => createRoot(document.getElementById('root
       <Connect client={fakeClient} onConnected={() => {}} />
     ) : which === 'unlock' ? (
       <Unlock client={fakeClient} onUnlocked={() => {}} onDisconnect={() => {}} />
-    ) : which === 'quick' ? (
-      <div style={{ width: 620, height: 400 }}>
+    ) : which === 'quick' || which === 'quick-locked' ? (
+      <div style={{ width: which === 'quick-locked' ? '100vw' : 620, height: which === 'quick-locked' ? '100vh' : 400 }}>
         <QuickAccess
           /*
            * ⚠️ 这些字段要和 `QuickItem` 对齐 —— 而**没有类型检查会提醒你**，
@@ -508,7 +508,14 @@ void fakeClient.initialize().then(() => createRoot(document.getElementById('root
               type: 'secureNote', summary: null, iconDomain: null, avatarText: '家里', avatarHue: 178 },
           ]}
           icons={null}
-          locked={false}
+          locked={which === 'quick-locked'}
+          accounts={which === 'quick-locked' ? [
+            { id: 'personal', displayName: '个人账户', email: 'alex@example.com', serverUrl: 'https://vault.vaultwarden.com', avatarDataUrl: null },
+            { id: 'work', displayName: '工作账户', email: 'alex@company.example', serverUrl: 'https://vault.company.example/team', avatarDataUrl: null },
+            { id: 'family', displayName: '家庭保险库', email: 'family@example.com', serverUrl: 'https://family.example.com', avatarDataUrl: null },
+            { id: 'long', displayName: '一个名称特别长的账户用来检查截断', email: 'long-account-name@example.com', serverUrl: 'https://a-very-long-server.example.com/team/vault', avatarDataUrl: null },
+          ] : []}
+          onOpenAccount={() => {}}
           busy={false}
           notice={null}
           onQueryChange={() => {}}

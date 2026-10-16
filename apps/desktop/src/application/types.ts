@@ -92,7 +92,7 @@ export interface SiteContext {
   tabId: number | null;
   url: string;
   matchedIds: string[];
-  pending: { url: string; username: string | null; action: 'save' | 'update'; itemId: string | null } | null;
+  pending: { url: string; username: string | null; action: 'save' | 'update' | 'review'; itemId: string | null } | null;
 }
 
 export interface ApplicationCapabilities {
@@ -152,10 +152,9 @@ export interface ApplicationService {
 }
 
 export interface BrowserActions {
+  credentials?: import('./browser-credentials').BrowserCredentialActions;
   context(): Promise<SiteContext>;
   fill(itemId: string, tabId: number): Promise<void>;
-  saveCapture(tabId: number): Promise<void>;
-  dismissCapture(tabId: number): Promise<void>;
 }
 
 /** A failed login form, separate from remembered accounts and vault session data. */

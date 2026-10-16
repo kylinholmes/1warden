@@ -46,6 +46,21 @@ beforeEach(async () => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('background application boundary', () => {
+  it('discards expired-session capture grants before the same account can unlock again', async () => {
+    (data['1warden.session'] as { expiresAt: number }).expiresAt = Date.now() - 1;
+    data['1warden.credential-captures'] = { records: [{ password: 'retired-secret' }], documents: [{ token: 'retired-grant' }] };
+    data['1warden.credential-review'] = { id: 'retired' };
+    expect(await send({ type: '1warden:application', method: 'snapshot', args: [] })).toMatchObject({ ok: true, result: { status: 'locked' } });
+    expect(data['1warden.credential-captures']).toBeUndefined();
+    expect(data['1warden.credential-review']).toBeUndefined();
+  });
+  it('forgets the stored account generated history when logout is the first request after restart', async () => {
+    const key = `1warden.generated-passwords:${JSON.stringify([account.serverUrl, account.email])}`;
+    await chrome.storage.local.set({ [key]: ['encrypted-history'], '1warden.generated-passwords:another': ['keep'] });
+    expect(await send({ type: '1warden:application', method: 'logout', args: [] })).toMatchObject({ ok: true });
+    expect((await chrome.storage.local.get(key))[key]).toBeUndefined();
+    expect((await chrome.storage.local.get('1warden.generated-passwords:another'))['1warden.generated-passwords:another']).toEqual(['keep']);
+  });
   it.each(['preview-read', 'commit-read', 'first-delete'] as const)('checks the browser session deadline during bulk cleanup %s', async phase => {
     const slot = data['1warden.session'] as { userKey: { encKey: string; macKey: string }; token: unknown; expiresAt: number };
     slot.token = { accessToken: 'target-token', expiresIn: 3600, kdf: 0 };

@@ -1,8 +1,8 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { useEffect, useRef } from 'react';
-import type { QuickItem } from '../quick-bridge';
+import type { QuickAccount, QuickItem } from '../quick-bridge';
 import { IconLock, IconSearch } from '@1warden/ui';
-import { quickShortcut } from '../platform';
+import { QuickLockedAccounts } from '../components/QuickLockedAccounts';
 
 import { ItemIcon } from '@1warden/ui';
 import type { IconStore } from '@1warden/vault';
@@ -24,13 +24,15 @@ import type { IconStore } from '@1warden/vault';
  * 而不是主窗口那种三栏结构。窗口边缘那一圈圆角由外壳给（透明窗口），
  * 这里只负责内部。
  */
-export function QuickAccess({ items, icons, locked, busy, notice, pinned = false, onTogglePin, onQueryChange, onPick, onClose }: {
+export function QuickAccess({ items, icons, locked, busy, notice, accounts = [], onOpenAccount, pinned = false, onTogglePin, onQueryChange, onPick, onClose }: {
   items: readonly QuickItem[];
   /** 站点图标的缓存。主窗口过桥传来服务端地址后建的；没有就只显示彩色徽标 */
   icons: IconStore | null;
   locked: boolean;
   busy: boolean;
   notice: string | null;
+  accounts?: readonly QuickAccount[];
+  onOpenAccount?: (id: string | null) => void;
   pinned?: boolean;
   onTogglePin?: () => void;
   onQueryChange: (q: string, seq: number) => void;
@@ -49,7 +51,10 @@ export function QuickAccess({ items, icons, locked, busy, notice, pinned = false
   const selectedRef = useRef<HTMLButtonElement>(null);
   const seq = useRef(0);
 
-  useEffect(() => { if (locked) panelRef.current?.focus(); else inputRef.current?.focus(); }, [locked]);
+  useEffect(() => {
+    if (locked) (panelRef.current?.querySelector<HTMLButtonElement>('[data-quick-account]:not(:disabled)') ?? panelRef.current)?.focus();
+    else inputRef.current?.focus();
+  }, [locked]);
 
   // 结果变了就把选中项收回到第一条 —— 否则光标会停在一个已经不存在的下标上
   useEffect(() => { setIndex(0); }, [items]);
@@ -108,15 +113,7 @@ export function QuickAccess({ items, icons, locked, busy, notice, pinned = false
       </div>
 
       {locked ? (
-        <div className="flex flex-1 flex-col items-center justify-center gap-1.5 px-6 text-center">
-          <span className="mb-1 grid h-10 w-10 place-items-center rounded-full bg-[var(--surface-well)] text-[var(--ink-tertiary)]">
-            <IconLock size={18} />
-          </span>
-          <p className="text-sm text-[var(--ink-secondary)]">保险库已锁定，无法搜索</p>
-          <p className="text-xs text-[var(--ink-tertiary)]">
-            打开 1Warden 解锁后按 {quickShortcut()}
-          </p>
-        </div>
+        <QuickLockedAccounts accounts={accounts} busy={busy} onOpenAccount={onOpenAccount} />
       ) : (
         <ul className="flex-1 overflow-y-auto p-2">
           {items.length === 0 ? (
@@ -176,7 +173,7 @@ export function QuickAccess({ items, icons, locked, busy, notice, pinned = false
       )}
 
       <footer className="panel-foot px-4 py-2.5">
-        <span className="min-w-0 truncate">{notice ?? '⏎ 复制密码'}</span>
+        <span aria-live="polite" className="min-w-0 truncate">{notice ?? (locked ? (accounts.length ? '← → 选择账户 · ⏎ 前往解锁' : '登录后即可快速搜索') : '⏎ 复制密码')}</span>
         <span className="shrink-0">esc 关闭</span>
       </footer>
     </div>

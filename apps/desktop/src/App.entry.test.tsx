@@ -5,6 +5,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { installHost, resetHost } from '@1warden/ui';
 import { EMPTY_SNAPSHOT, type ApplicationClient, type ConnectionDraft } from './application/types';
 import { App } from './App';
+import { createQuickAccountNavigation } from './quick-accounts';
 
 const { probe } = vi.hoisted(() => ({ probe: vi.fn() }));
 // Keep public prefetch observable without consuming the registration HTTP fixtures.
@@ -73,6 +74,72 @@ async function chooseServer(choice: string) {
 }
 
 describe('login and registration entry', () => {
+  it('opens the active extension vault directly so pending capture review is visible', async () => {
+    const test = client();
+    const snapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked' as const,
+      account: { serverUrl: 'https://vault.test', email: 'active@example.test', userId: 'active', kdf: { kdf: 0 as const, iterations: 1000 } } };
+    test.value.getSnapshot = () => snapshot;
+    await act(() => root.render(createElement(App, { client: test.value, openActiveAccount: true })));
+    expect(node.textContent).toContain('Vault fixture');
+    expect(node.querySelector('[aria-label="账户首页"]')).toBeNull();
+  });
+  it.each(['locked', 'unlocked'] as const)('opens a quick account request directly from Home into its %s screen', async status => {
+    const target = { serverUrl: 'https://selected.example', email: 'selected@example.test' };
+    const snapshot = { ...EMPTY_SNAPSHOT, status, account: { ...target, userId: 'selected', kdf: { kdf: 0 as const, iterations: 1000 } } };
+    const test = client();
+    test.value.getSnapshot = () => snapshot;
+    const navigation = createQuickAccountNavigation();
+    await act(() => root.render(createElement(App, { client: test.value, subscribeQuickAccountNavigation: navigation.subscribe })));
+    expect(node.querySelector('[aria-label="账户首页"]')).not.toBeNull();
+    await act(() => navigation.open(target));
+    expect(node.querySelector('[aria-label="账户首页"]')).toBeNull();
+    expect(test.value.switchAccount).not.toHaveBeenCalled();
+    if (status === 'locked') expect(node.querySelector('input[aria-label="主密码"]')).not.toBeNull();
+    else expect(node.textContent).toContain('Vault fixture');
+  });
+  it('routes a quick request to the chosen locked identity before showing its password input', async () => {
+    const target = { serverUrl: 'https://selected.example', email: 'selected@example.test' };
+    const test = client(); let snapshot = EMPTY_SNAPSHOT;
+    test.value.getSnapshot = () => snapshot;
+    const listeners = new Set<() => void>();
+    test.value.subscribe = callback => { listeners.add(callback); return () => listeners.delete(callback); };
+    test.value.switchAccount = vi.fn(async account => {
+      snapshot = { ...EMPTY_SNAPSHOT, status: 'locked', account: { ...account!, userId: '', kdf: { kdf: 0, iterations: 1000 } } };
+      for (const listener of listeners) listener();
+    });
+    const navigation = createQuickAccountNavigation();
+    await act(() => root.render(createElement(App, { client: test.value, subscribeQuickAccountNavigation: navigation.subscribe })));
+    await act(() => navigation.open(target));
+    expect(test.value.switchAccount).toHaveBeenCalledExactlyOnceWith(target);
+    expect(node.querySelector('input[aria-label="主密码"]')).not.toBeNull();
+    expect(node.textContent).toContain(target.email);
+    expect(node.textContent).toContain('selected.example');
+  });
+  it('clears an unfinished unlock password when quick navigation selects another locked account', async () => {
+    const first = { serverUrl: 'https://one.example', email: 'one@example.test' };
+    const second = { serverUrl: 'https://two.example', email: 'two@example.test' };
+    const test = client(); let snapshot = { ...EMPTY_SNAPSHOT, status: 'locked' as const,
+      account: { ...first, userId: '', kdf: { kdf: 0 as const, iterations: 1000 } } };
+    test.value.getSnapshot = () => snapshot;
+    const listeners = new Set<() => void>();
+    test.value.subscribe = callback => { listeners.add(callback); return () => listeners.delete(callback); };
+    test.value.switchAccount = vi.fn(async account => {
+      snapshot = { ...snapshot, account: { ...account!, userId: '', kdf: { kdf: 0, iterations: 1000 } } };
+      for (const listener of listeners) listener();
+    });
+    const navigation = createQuickAccountNavigation();
+    await act(() => root.render(createElement(App, { client: test.value, subscribeQuickAccountNavigation: navigation.subscribe })));
+    await act(() => navigation.open(first));
+    const field = node.querySelector<HTMLInputElement>('input[aria-label="主密码"]')!;
+    await act(() => {
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, 'unfinished-first-password');
+      field.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    expect(field.value).toBe('unfinished-first-password');
+    await act(() => navigation.open(second));
+    expect(node.querySelector<HTMLInputElement>('input[aria-label="主密码"]')!.value).toBe('');
+    expect(node.textContent).toContain(second.email);
+  });
   it('prefetches every unique public destination on welcome and reuses results across entry routes', async () => {
     saved = JSON.stringify([{ serverUrl: 'https://VAULT.VAULTWARDEN.COM:443/', email: 'a@example.test' },
       { serverUrl: 'https://saved.example/team/', email: 'b@example.test' },

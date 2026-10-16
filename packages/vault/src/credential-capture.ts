@@ -14,6 +14,7 @@ import type { VaultItem } from './model';
 export type CaptureDecision =
   | { kind: 'save' }
   | { kind: 'update'; itemId: string }
+  | { kind: 'review'; itemIds: string[] }
   | { kind: 'none'; reason: 'noPassword' | 'placeholder' | 'noSite' | 'unchanged' };
 
 export interface CapturedLogin {
@@ -57,31 +58,13 @@ export function decideCapture(
     return isWebUrl(captured.url) ? { kind: 'save' } : { kind: 'none', reason: 'noSite' };
   }
 
-  // 挑出该改哪一条。顺序即优先级，每一步都在**收紧猜测的程度**：
-  //
-  //   1. 用户名一模一样 —— 确定是同一条
-  //   2. 站内某条没记用户名 —— 不知道是谁，多半就是它
-  //   3. 表单压根没给用户名，且站内只有一条 —— 只能是它
-  //
-  // 剩下的情况一律存成新条目。**绝不**「反正只有一条就改它」——
-  // 那条可能是同事的账号，改掉等于毁了他的记录。
-  const target =
-    (captured.username === null
-      ? undefined
-      : matching.find((i) => i.login?.username === captured.username))
-    ?? matching.find((i) => i.login?.username === null)
-    ?? (captured.username === null && matching.length === 1 ? matching[0] : undefined);
-
-  if (!target) {
-    // 站点的记录都是别的账号 —— 这是一个新账号，存成新条目
-    return { kind: 'save' };
-  }
-
-  const stored = target.login?.password ?? null;
-  if (stored === password) return { kind: 'none', reason: 'unchanged' };
-
-  // 存的是 null（从没记过密码）也算「有变化」，该补上
-  return { kind: 'update', itemId: target.id };
+  const username = captured.username?.trim() || null;
+  if (username === null) return { kind: 'review', itemIds: matching.map(item => item.id) };
+  const sameAccount = matching.filter(item => item.login?.username?.trim() === username);
+  if (sameAccount.some(item => item.login?.password === password)) return { kind: 'none', reason: 'unchanged' };
+  if (!sameAccount.length) return { kind: 'save' };
+  if (sameAccount.length > 1) return { kind: 'review', itemIds: sameAccount.map(item => item.id) };
+  return { kind: 'update', itemId: sameAccount[0]!.id };
 }
 
 function isWebUrl(url: string): boolean {

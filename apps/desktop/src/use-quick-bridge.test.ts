@@ -123,3 +123,62 @@ it('does not copy an OTP that finishes after the selected session locks', async 
   expect(harness.replies.at(-1)?.event).toBe('1warden:action-result');
   expect(harness.replies.at(-1)?.payload).toMatchObject({ ok: false });
 });
+
+it('publishes only explicitly selected account presentation fields while locked', async () => {
+  const client = vault('A'); client.lock();
+  const account = { id: 'account-A', email: 'user@example.com', serverUrl: 'https://a.example', displayName: 'Personal', avatarDataUrl: null, password: 'never-publish' };
+  useQuickBridge(client, undefined, { load: async () => [account], open: async () => {} });
+  harness.handlers.get('1warden:query')!({ payload: { query: '', seq: 1 } });
+  expect(harness.replies.at(-1)?.payload).toMatchObject({ accountsLoading: true });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(harness.replies.at(-1)?.payload).toMatchObject({ locked: true, items: [], accountsLoading: false, accounts: [{ id: 'account-A', displayName: 'Personal' }] });
+  expect(JSON.stringify(harness.replies)).not.toContain('never-publish');
+});
+
+it('opens the selected remembered account and rejects identities removed since cards were shown', async () => {
+  const client = vault('A');
+  const account = { id: 'account-A', email: 'user@example.com', serverUrl: 'https://a.example', displayName: '', avatarDataUrl: null };
+  let remembered = [account]; const open = vi.fn(async () => {});
+  useQuickBridge(client, undefined, { load: async () => remembered, open });
+  harness.handlers.get('1warden:open-account')!({ payload: { accountId: account.id, requestId: 2 } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(open).toHaveBeenCalledExactlyOnceWith({ serverUrl: account.serverUrl, email: account.email });
+  expect(client.isUnlocked()).toBe(true);
+  expect(harness.replies.at(-1)?.payload).toMatchObject({ ok: true, requestId: 2 });
+  remembered = [];
+  harness.handlers.get('1warden:open-account')!({ payload: { accountId: account.id, requestId: 3 } });
+  await new Promise(resolve => setTimeout(resolve, 0));
+  expect(open).toHaveBeenCalledTimes(1);
+  expect(harness.replies.at(-1)?.payload).toMatchObject({ ok: false, requestId: 3 });
+});
+
+it('ignores a late account list and open request after the selected vault changes', async () => {
+  const a = vault('A'); const b = vault('B'); let active = a; const listeners = new Set<() => void>();
+  const release = deferred(); const open = vi.fn(async () => {});
+  useQuickBridge(() => active, listener => { listeners.add(listener); return () => listeners.delete(listener); }, {
+    load: async () => { await release.promise; return [{ id: 'A', email: 'a@example.test', serverUrl: 'https://a.example', displayName: '', avatarDataUrl: null }]; }, open,
+  });
+  harness.handlers.get('1warden:query')!({ payload: { query: '', seq: 1 } });
+  harness.handlers.get('1warden:open-account')!({ payload: { accountId: 'A', requestId: 1 } });
+  active = b; for (const listener of listeners) listener();
+  release.resolve(); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(open).not.toHaveBeenCalled();
+  expect(harness.replies.filter(reply => reply.event === '1warden:results').every(reply =>
+    !(reply.payload as { serverUrl: string; accounts?: unknown[] }).accounts?.length || (reply.payload as { serverUrl: string }).serverUrl === 'https://b.example')).toBe(true);
+});
+
+it('does not republish unlocked search results when delayed account metadata resolves', async () => {
+  const client = vault('A'); const release = deferred();
+  const load = vi.fn(async () => {
+    await release.promise;
+    return [{ id: 'A', email: 'a@example.test', serverUrl: 'https://a.example', displayName: 'A', avatarDataUrl: null }];
+  });
+  useQuickBridge(client, undefined, { load, open: async () => {} });
+  harness.handlers.get('1warden:query')!({ payload: { query: '', seq: 4 } });
+  // Each IPC publication clones items. A late replay would reset QuickAccess's
+  // keyboard selection after the user has already moved away from the first row.
+  expect(harness.replies.filter(reply => reply.event === '1warden:results')).toHaveLength(1);
+  release.resolve(); await new Promise(resolve => setTimeout(resolve, 0));
+  expect(harness.replies.filter(reply => reply.event === '1warden:results')).toHaveLength(1);
+  expect(load).not.toHaveBeenCalled();
+});

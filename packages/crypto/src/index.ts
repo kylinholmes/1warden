@@ -1,4 +1,5 @@
 export * from './bytes';
+export * from './portable-sha256';
 export * from './kdf';
 export * from './password-kdf';
 export * from './encstring';

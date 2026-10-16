@@ -11,21 +11,23 @@ import { initPlatform } from '../platform';
 import { installDesktopHost } from '../host-impl';
 import { initNativeFeel } from '../native';
 import { initTheme } from '../theme';
-import { askMain, askAction, onResults, onActionResult, type QuickItem } from '../quick-bridge';
+import { askMain, askAction, askOpenAccount, onResults, onActionResult, type QuickItem, type QuickAccount } from '../quick-bridge';
 import '../styles.css';
 
 function Quick() {
   const viewStore = useLocalStore(() => {
     const items = ([]) as QuickItem[];
+    const accounts = [] as QuickAccount[];
     const locked = true;
     const busy = false;
     const notice = (null) as string | null;
     const pinned = false;
     const generation = 0;
     const serverUrl = (null) as string | null;
-    return { items, locked, busy, notice, pinned, generation, serverUrl };
+    return { items, accounts, locked, busy, notice, pinned, generation, serverUrl };
   });
   const [items, setItems] = useStoreField(viewStore, 'items');
+  const [accounts, setAccounts] = useStoreField(viewStore, 'accounts');
   const [locked, setLocked] = useStoreField(viewStore, 'locked');
   const [busy, setBusy] = useStoreField(viewStore, 'busy');
   const [notice, setNotice] = useStoreField(viewStore, 'notice');
@@ -45,7 +47,7 @@ function Quick() {
       if (disposed || next.generation < state.current.generation) return;
       if (next.generation !== state.current.generation) {
         clearTimeout(closeTimer); state.current.query = ''; state.current.action++; state.current.pending = false;
-        state.current.generation = next.generation; setGeneration(next.generation); setNotice(null); setItems([]);
+        state.current.generation = next.generation; setGeneration(next.generation); setNotice(null); setItems([]); setAccounts([]); setLocked(true);
       }
       state.current.pinned = next.pinned; setPinned(next.pinned);
       setBusy(true); await askMain(state.current.query, ++state.current.seq);
@@ -54,7 +56,8 @@ function Quick() {
     void (async () => {
       remember(await onResults(result => {
         if (disposed || result.seq !== state.current.seq) return;
-        setItems(result.items); setLocked(result.locked); setBusy(state.current.pending); setServerUrl(result.serverUrl);
+        setItems(result.items); setAccounts(result.accounts ?? []); setLocked(result.locked);
+        setBusy(state.current.pending || (result.locked && Boolean(result.accountsLoading))); setServerUrl(result.serverUrl);
       }));
       remember(await onActionResult(result => {
         if (disposed || result.requestId !== state.current.action || !state.current.pending) return;
@@ -76,7 +79,16 @@ function Quick() {
   }, []);
 
   return <QuickAccess key={generation} items={items} icons={serverUrl === null ? null : iconStoreFor(serverUrl)}
-    locked={locked} busy={busy} notice={notice} pinned={pinned}
+    locked={locked} accounts={accounts} busy={busy} notice={notice} pinned={pinned}
+    onOpenAccount={accountId => {
+      if (state.current.pending) return;
+      state.current.pending = true; setNotice(null); setBusy(true);
+      const requestId = ++state.current.action;
+      void askOpenAccount(accountId, requestId).catch(() => {
+        if (requestId !== state.current.action) return;
+        state.current.pending = false; setBusy(false); setNotice('无法打开账户，请重试');
+      });
+    }}
     onTogglePin={() => {
       void invoke<boolean>('quick_set_pinned', { pinned: !state.current.pinned }).then(value => {
         state.current.pinned = value; setPinned(value);

@@ -21,6 +21,7 @@ import { ImportScreen } from './Import';
 import { ProfilePage } from './ProfilePage';
 import { TrashView } from './TrashView';
 import { SyncNotice } from '../components/SyncNotice';
+import { BrowserCredentialReview } from '../components/BrowserCredentialReview';
 import { visibleVaultItems, type VaultCategory as Category } from './vault-presentation';
 
 import { Settings } from './Settings';
@@ -466,7 +467,8 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
             </div>
 
             <SyncNotice session={session} client={client} />
-            {client.browser && <BrowserContext client={client} site={site} error={siteError}
+            {client.browser?.credentials && <BrowserCredentialReview actions={client.browser.credentials} revision={session.revision} />}
+            {client.browser && <BrowserContext site={site} error={siteError}
               onRefresh={() => setContextAttempt((n) => n + 1)}
               onSelectSite={() => { setCategory({ kind: 'site' }); setSelectedId(null); }} />}
 
@@ -635,7 +637,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
         生成密码这件事总是发生在别的上下文里（正在改某条记录、刚打开一个
         注册页），整屏会把用户从那个上下文里拽出来。浮层压在上面。
       */}
-      <Generator open={generatorOpen} onClose={() => setGeneratorOpen(false)} />
+      <Generator open={generatorOpen} onClose={() => setGeneratorOpen(false)} credentials={client.browser?.credentials} />
 
       {/*
         新建 / 编辑同一个浮层，只是标题与初始值不同。
@@ -786,45 +788,19 @@ function EmptyDetail({ hasItems }: { hasItems: boolean }) {
   );
 }
 
-function BrowserContext({ client, site, error, onRefresh, onSelectSite }: {
-  client: ApplicationClient;
+function BrowserContext({ site, error, onRefresh, onSelectSite }: {
   site: SiteContext | null;
   error: string | null;
   onRefresh: () => void;
   onSelectSite: () => void;
 }) {
-  const viewStore = useLocalStore(() => {
-    const busy = false;
-    const actionError = (null) as string | null;
-    return { busy, actionError };
-  });
-  const [busy, setBusy] = useStoreField(viewStore, 'busy');
-  const [actionError, setActionError] = useStoreField(viewStore, 'actionError');
-  async function capture(save: boolean): Promise<void> {
-    if (!client.browser || site?.tabId == null || busy) return;
-    setBusy(true); setActionError(null);
-    try {
-      if (save) await client.browser.saveCapture(site.tabId);
-      else await client.browser.dismissCapture(site.tabId);
-      onRefresh();
-    } catch (e) { setActionError(e instanceof Error ? e.message : '保存提示处理失败'); }
-    finally { setBusy(false); }
-  }
   if (!site && !error) return null;
   return <div className="border-b border-[var(--border-subtle)] px-3.5 py-2.5">
     {site?.url && <button onClick={onSelectSite} className="flex w-full items-center gap-2 text-left text-xs text-[var(--ink-secondary)]">
       <span className="min-w-0 flex-1 truncate" title={site.url}>当前网站 · {siteHost(site.url)}</span>
       <span className="shrink-0 text-[var(--accent)]">{site.matchedIds.length} 条匹配</span>
     </button>}
-    {site?.pending && <div className="mt-2.5 rounded-[var(--radius-sm)] bg-[var(--surface-well)] p-3">
-      <p className="text-sm">{site.pending.action === 'update' ? '更新已保存的登录？' : '保存这次登录？'}</p>
-      <p className="mt-1 truncate text-xs text-[var(--ink-secondary)]">{siteHost(site.pending.url)}{site.pending.username ? ` · ${site.pending.username}` : ''}</p>
-      <div className="mt-2 flex gap-2">
-        <button disabled={busy} onClick={() => { void capture(true); }} className="btn btn-primary">{busy ? '处理中…' : site.pending.action === 'update' ? '更新' : '保存'}</button>
-        <button disabled={busy} onClick={() => { void capture(false); }} className="btn btn-quiet">忽略</button>
-      </div>
-    </div>}
-    {(error || actionError) && <div role="alert" className="mt-2 text-xs text-[var(--risk)]"><p>{error || actionError}</p>
+    {error && <div role="alert" className="mt-2 text-xs text-[var(--risk)]"><p>{error}</p>
       {error && <button className="btn btn-ghost mt-1" onClick={onRefresh}>重试</button>}</div>}
   </div>;
 }

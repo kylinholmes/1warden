@@ -69,7 +69,13 @@ function isTextual(f: FieldDescriptor): boolean {
 }
 
 function isPassword(f: FieldDescriptor): boolean {
-  return norm(f.type) === 'password';
+  if (autocompleteHas(f, 'one-time-code')) return false;
+  return norm(f.type) === 'password' || (norm(f.type) === 'text'
+    && (autocompleteHas(f, 'new-password') || autocompleteHas(f, 'current-password')));
+}
+
+function autocompleteHas(f: FieldDescriptor, token: string): boolean {
+  return norm(f.autocomplete).split(/\s+/).includes(token);
 }
 
 /** 「确认 / 再次输入」这类字眼 —— 中英都要认 */
@@ -96,7 +102,7 @@ const SEARCH_HINT = /search|query|filter|搜索|查询|筛选/;
 export function isLikelyLoginForm(fields: readonly FieldDescriptor[]): boolean {
   const usable = fields.filter(isUsable);
   if (usable.some(isPassword)) return true;
-  return usable.some((f) => norm(f.autocomplete) === 'username');
+  return usable.some((f) => autocompleteHas(f, 'username'));
 }
 
 /**
@@ -120,7 +126,7 @@ export function classifyFields(fields: readonly FieldDescriptor[]): FieldPlan {
   const passwords = usable.filter(({ f }) => isPassword(f));
 
   // ── 用户名 ──
-  const explicitUser = usable.find(({ f }) => norm(f.autocomplete) === 'username');
+  const explicitUser = usable.find(({ f }) => isTextual(f) && !isPassword(f) && autocompleteHas(f, 'username'));
   if (explicitUser) {
     assign('username', explicitUser.i);
   } else if (passwords.length > 0) {
@@ -131,7 +137,7 @@ export function classifyFields(fields: readonly FieldDescriptor[]): FieldPlan {
   // 必须在密码分配**之前**做：名叫 `otp` 的框如果被当成密码就麻烦了，
   // 反过来也不行 —— 所以先把 code 框圈出来，后面分配密码时跳过它
   const codeField = usable.find(({ f }) =>
-    norm(f.autocomplete) === 'one-time-code'
+    autocompleteHas(f, 'one-time-code')
     || (!isPassword(f) && isTextual(f) && CODE_HINT.test(haystack(f))));
   if (codeField) assign('totp', codeField.i);
 
@@ -139,7 +145,7 @@ export function classifyFields(fields: readonly FieldDescriptor[]): FieldPlan {
   const pwIndices = passwords.map(({ i }) => i);
   if (pwIndices.length === 1) {
     // 只有一个密码框：登录，或者「只填密码」的二次验证
-    assign('password', pwIndices[0]);
+    assign(looksLikeNewPassword(passwords[0]!.f) ? 'newPassword' : 'password', pwIndices[0]);
   } else if (pwIndices.length === 2) {
     // 两个密码框：注册（新 + 确认）或改密码（旧 + 新）。
     //
@@ -166,9 +172,8 @@ export function classifyFields(fields: readonly FieldDescriptor[]): FieldPlan {
 }
 
 function looksLikeNewPassword(f: FieldDescriptor): boolean {
-  const auto = norm(f.autocomplete);
-  if (auto === 'new-password') return true;
-  if (auto === 'current-password') return false;
+  if (autocompleteHas(f, 'new-password')) return true;
+  if (autocompleteHas(f, 'current-password')) return false;
   return NEW_HINT.test(haystack(f));
 }
 
@@ -185,9 +190,7 @@ function pickUsernameBefore(
     const { f, i } = usable[k]!;
     if (i >= passwordIndex) continue;
     if (!isTextual(f) || isPassword(f)) continue;
-    if (SEARCH_HINT.test(haystack(f))) continue;
-    // 已经有内容的框多半是搜索/筛选，不是等着填的用户名
-    if (norm(f.value).length > 0) continue;
+    if (SEARCH_HINT.test(haystack(f)) || CODE_HINT.test(haystack(f))) continue;
     return i;
   }
   return undefined;

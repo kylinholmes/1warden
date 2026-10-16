@@ -500,22 +500,11 @@ async function main(): Promise<void> {
         .then((r) => (r.items || []).length)
     `);
 
-    // 把值写进页面并派发事件 —— 与用户手动输入走同一条读取路径
-    await page.eval(`
-      (() => {
-        const set = (sel, v) => {
-          const el = document.querySelector(sel);
-          const proto = el instanceof HTMLTextAreaElement
-            ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
-          Object.getOwnPropertyDescriptor(proto, 'value').set.call(el, v);
-          el.dispatchEvent(new Event('input', { bubbles: true }));
-          el.dispatchEvent(new Event('change', { bubbles: true }));
-        };
-        set('#email', ${JSON.stringify(USERNAME)});
-        set('#pw', ${JSON.stringify(SITE_PASSWORD)});
-        return true;
-      })()
-    `);
+    // CDP input is a genuine browser interaction; page-dispatched events cannot authorize capture.
+    await page.eval(`document.querySelector('#email').focus()`);
+    await page.send('Input.insertText', { text: USERNAME });
+    await page.eval(`document.querySelector('#pw').focus()`);
+    await page.send('Input.insertText', { text: SITE_PASSWORD });
 
     // 先确认「提交事件确实触发了」—— 捕获链路的起点在这里，
     // 它不成立的话后面所有环节都无从谈起
@@ -524,16 +513,18 @@ async function main(): Promise<void> {
       document.addEventListener('submit', () => { window.__submits++; }, true);
       true
     `);
-    await page.eval(`document.getElementById('f').requestSubmit()`);
+    await page.eval(`document.querySelector('#pw').focus()`);
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await new Promise((r) => setTimeout(r, 300));
     const submits = await page.eval<number>('window.__submits');
     check('提交事件确实触发了', submits > 0, `捕获到 ${submits} 次 submit`);
 
     const pending = await waitFor('捕获结果', async () => {
-      const r = await ext.eval<{ pending: { action?: string; username?: string | null } | null }>(
-        `chrome.runtime.sendMessage({ type: '1warden:pending', tabId: ${tabId} })`,
+      const r = await ext.eval<{ id: string; revision: number; tabId: number; action: string; username: string | null }[]>(
+        `chrome.runtime.sendMessage({ type: '1warden:credential-list' })`,
       );
-      return r?.pending ?? null;
+      return r?.find(row => row.tabId === tabId) ?? null;
     }, 30_000);
 
     check('提交后产生了待保存提示', pending !== null, JSON.stringify(pending));
@@ -542,13 +533,13 @@ async function main(): Promise<void> {
 
     // ⚠️ 待保存结构里**不该有密码** —— 它会被送进界面
     const rawPending = await ext.eval<string>(
-      `chrome.runtime.sendMessage({ type: '1warden:pending', tabId: ${tabId} })
+      `chrome.runtime.sendMessage({ type: '1warden:credential-list' })
          .then((r) => JSON.stringify(r))`,
     );
     check('待保存提示里不含密码', !rawPending.includes(SITE_PASSWORD));
 
     const saved = await ext.eval<{ ok?: boolean; error?: string }>(
-      `chrome.runtime.sendMessage({ type: '1warden:save-capture', tabId: ${tabId} })`,
+      `chrome.runtime.sendMessage({ type: '1warden:credential-save', application: true, choice: ${JSON.stringify({ captureId: pending?.id, revision: pending?.revision, action: 'save' })} })`,
     );
     check('保存成功', saved?.ok === true, JSON.stringify(saved));
 
@@ -688,12 +679,14 @@ async function main(): Promise<void> {
 
     // ── 6. 不再打扰 ──
     console.log('\n5. 已存过的密码不该再提示');
-    await page.eval(`document.getElementById('f').requestSubmit()`);
+    await page.eval(`document.querySelector('#pw').focus()`);
+    await page.send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
+    await page.send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Enter', code: 'Enter', windowsVirtualKeyCode: 13 });
     await new Promise((r) => setTimeout(r, 1500));
-    const second = await ext.eval<{ pending: unknown }>(
-      `chrome.runtime.sendMessage({ type: '1warden:pending', tabId: ${tabId} })`,
+    const second = await ext.eval<{ tabId: number }[]>(
+      `chrome.runtime.sendMessage({ type: '1warden:credential-list' })`,
     );
-    check('密码没变时不再提示保存', second?.pending === null, JSON.stringify(second));
+    check('密码没变时不再提示保存', !second?.some(row => row.tabId === tabId), JSON.stringify(second));
 
     // ── 6.5 passkey ──
     // 这一段失败也要继续往下走 —— 否则收尾的清理被跳过，
@@ -975,10 +968,10 @@ async function main(): Promise<void> {
           ext!.eval<string>(`(async () => {
             try {
               await chrome.storage.session.set({ '__probe': 'v' });
-              const g = await chrome.storage.session.get(['__probe', '1warden.trace', '1warden.pending']);
+              const g = await chrome.storage.session.get(['__probe', '1warden.trace', '1warden.credential-captures']);
               return '往返=' + (g['__probe'] === 'v') + ' trace键=' + (typeof g['1warden.trace'])
                 + '(' + (Array.isArray(g['1warden.trace']) ? g['1warden.trace'].length : '-') + ')'
-                + ' pending键=' + (typeof g['1warden.pending']);
+                + ' pending键=' + (typeof g['1warden.credential-captures']);
             } catch (e) { return 'ERR ' + e.message; }
           })()`),
           new Promise<string>((r) => setTimeout(() => r('超时'), 3000)),

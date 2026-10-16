@@ -11,8 +11,9 @@ import {
   searchItems, totpCode, summaryOf, iconDomainOf, avatarOf, isProfileItem,
   type VaultClient, type VaultItem,
 } from '@1warden/vault';
-import { QUICK_WINDOW, type QuickItem, type QuickAction } from './quick-bridge';
+import { QUICK_WINDOW, type QuickItem, type QuickAction, type QuickAccount } from './quick-bridge';
 import { copyQuickValue } from './quick-copy';
+import type { QuickAccountNavigation } from './quick-accounts';
 
 /** 面板一次最多列这么多 —— 再多就得靠搜索了，列满反而看不清 */
 const MAX_RESULTS = 8;
@@ -40,18 +41,23 @@ function summarise(i: VaultItem): QuickItem {
   };
 }
 
-export function useQuickBridge(source: VaultClient | (() => VaultClient), subscribeActive?: (listener: () => void) => () => void): void {
+export function useQuickBridge(source: VaultClient | (() => VaultClient), subscribeActive?: (listener: () => void) => () => void,
+  accounts?: { load: () => Promise<QuickAccount[]>; open: QuickAccountNavigation }): void {
   useEffect(() => {
     const unlisteners: (() => void)[] = [];
     const getClient = typeof source === 'function' ? source : () => source;
     let disposed = false;
     let selection = 0;
     let query = { query: '', seq: 0 };
+    let resultsVersion = 0;
+    let openingAccount = false;
+    let accountCards: QuickAccount[] = [];
     const rememberUnlisten = (unlisten: () => void) => {
       if (disposed) unlisten(); else unlisteners.push(unlisten);
     };
 
     function sendResults() {
+      const version = ++resultsVersion;
       const session = getClient().getSession();
       const locked = !session.isUnlocked();
 
@@ -59,11 +65,24 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
         .map((h) => h.item)
         .slice(0, MAX_RESULTS);
 
-      void emitTo(QUICK_WINDOW, '1warden:results', {
+      const result = {
         seq: query.seq,
         locked,
         items: items.map(summarise),
         serverUrl: session.account?.serverUrl ?? null,
+        accounts: accountCards,
+        accountsLoading: locked && Boolean(accounts),
+      };
+      void emitTo(QUICK_WINDOW, '1warden:results', result);
+      // Account cards are only shown while locked. Re-emitting an unlocked list
+      // for metadata would clone its items over IPC and reset keyboard selection.
+      if (accounts && locked) void accounts.load().then(values => {
+        if (disposed || version !== resultsVersion) return;
+        // Explicit projection prevents future cache/provider fields becoming IPC data.
+        accountCards = values.map(({ id, email, serverUrl, displayName, avatarDataUrl }) => ({ id, email, serverUrl, displayName, avatarDataUrl }));
+        void emitTo(QUICK_WINDOW, '1warden:results', { ...result, accounts: accountCards, accountsLoading: false });
+      }).catch(() => {
+        if (!disposed && version === resultsVersion) void emitTo(QUICK_WINDOW, '1warden:results', { ...result, accountsLoading: false });
       });
     }
     if (subscribeActive) unlisteners.push(subscribeActive(() => { selection++; sendResults(); }));
@@ -71,6 +90,25 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
     // ── 面板要搜索结果 ──
     void listen<{ query: string; seq: number }>('1warden:query', (e) => {
       query = e.payload; sendResults();
+    }).then(rememberUnlisten);
+
+    void listen<{ accountId: string | null; requestId?: number }>('1warden:open-account', e => {
+      void (async () => {
+        const reply = (ok: boolean, message: string) => emitTo(QUICK_WINDOW, '1warden:action-result', { ok, message, requestId: e.payload.requestId });
+        if (!accounts || openingAccount) { await reply(false, '主窗口正在处理请求，请重试'); return; }
+        const version = selection; const client = getClient();
+        openingAccount = true;
+        try {
+          const available = await accounts.load();
+          if (disposed || version !== selection || client !== getClient()) throw new Error('账户已切换，请重新选择');
+          const account = e.payload.accountId === null ? null : available.find(value => value.id === e.payload.accountId);
+          if (account === undefined) throw new Error('账户已移除，请重新选择');
+          await accounts.open(account ? { serverUrl: account.serverUrl, email: account.email } : null);
+          if (!disposed) await reply(true, '已打开主窗口');
+        } catch (error) {
+          if (!disposed) await reply(false, error instanceof Error ? error.message : '打开账户失败，请重试');
+        } finally { openingAccount = false; }
+      })();
     }).then(rememberUnlisten);
 
     // ── 面板要执行动作 ──
@@ -123,5 +161,5 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
     }).then(rememberUnlisten);
 
     return () => { disposed = true; for (const un of unlisteners) un(); };
-  }, [source, subscribeActive]);
+  }, [source, subscribeActive, accounts]);
 }

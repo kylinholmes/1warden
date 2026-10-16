@@ -5,13 +5,16 @@ import type { ApplicationMethod, ApplicationRequest, ApplicationService } from '
 type Sender = { id?: string | undefined; url?: string | undefined; frameId?: number | undefined; tab?: { id?: number | undefined } | undefined };
 type Runtime = { id: string; getURL(path: string): string };
 
-const contentRequests = new Set(['1warden:fields', '1warden:submitted', '1warden:webauthn']);
+const contentRequests = new Set(['1warden:fields', '1warden:webauthn']);
+for (const name of ['document', 'capture', 'username', 'generate', 'review', 'snooze']) contentRequests.add(`1warden:credential-${name}`);
 const inlineRequests = new Set(['1warden:inline-accounts', '1warden:inline-fill', '1warden:inline-unlock']);
 const pageRequests = new Set([
-  '1warden:application', '1warden:context', '1warden:fill', '1warden:save-capture',
-  '1warden:dismiss-capture', '1warden:clipboard-copied',
+  '1warden:credential-list', '1warden:credential-save', '1warden:credential-dismiss', '1warden:credential-history',
+  '1warden:credential-reveal-history', '1warden:credential-delete-history', '1warden:credential-recover-history',
+  '1warden:application', '1warden:context', '1warden:fill',
+  '1warden:clipboard-copied',
   // Existing automation clients; the application itself uses only the typed API.
-  '1warden:connect', '1warden:list', '1warden:matches', '1warden:pending', '1warden:copy', '1warden:lock',
+  '1warden:connect', '1warden:list', '1warden:matches', '1warden:copy', '1warden:lock',
 ]);
 
 /** Extension IDs alone do not distinguish content scripts from the trusted UI. */

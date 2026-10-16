@@ -22,15 +22,15 @@ import { accountKey, lockedAccount } from '../src/application/account-target';
 import { ext } from './ext-api';
 import { installExtensionHost } from './host-impl';
 import {
-  VaultClient, classifyFields, matchItemsByUrl, decideCapture,
-    type AccountInfo, type FieldDescriptor, type VaultItem, type CaptureDecision,
+  VaultClient, classifyFields, matchItemsByUrl,
+    type AccountInfo, type FieldDescriptor, type VaultItem,
   totpCode,
 } from '@1warden/vault';
 import { host } from '@1warden/ui';
 import { subscribeNotifications } from '@1warden/api';
 import { SessionStore, restrictSessionToTrustedContexts, type StorageArea } from './session-store';
 import { syncCache, kdfCache, summarise } from '@1warden/ui';
-import { fillFields, readFieldValues, type FillEntry, type FillOutcome } from './fill';
+import { fillFields, type FillEntry, type FillOutcome } from './fill';
 import { handleWebauthn, type WebauthnPayload } from './webauthn';
 import { createProfileCache } from '../src/application/profile-cache';
 import { createVaultService } from '../src/application/service';
@@ -42,12 +42,15 @@ import { createClipboardStore } from './clipboard-store';
 import { CONNECTION_DRAFT_KEY } from './connection-draft';
 import { CLIPBOARD_CLEAR_MS } from '@1warden/ui/clipboard';
 import type { InlineAccounts, InlineRequest } from './inline-accounts';
+import { createCredentialController } from './credential-handlers';
+import type { CredentialRequest } from './credential-protocol';
+import { CAPTURE_STATE_KEY } from './capture-service';
 
 /** 会话区：只在内存、浏览器重启即清空 */
 const storageWrites = createSerialRunner();
-const sessionArea: StorageArea = {
+const sessionArea: StorageArea & { set(items: Record<string, unknown>, assertCurrent?: () => void): Promise<void> } = {
   get: (keys) => ext.storage.session.get(keys as string | string[]),
-  set: (items) => storageWrites(() => ext.storage.session.set(items)),
+  set: (items, assertCurrent?: () => void) => storageWrites(() => { assertCurrent?.(); return ext.storage.session.set(items); }),
   remove: (keys) => storageWrites(() => ext.storage.session.remove(keys as string | string[])),
   clear: () => storageWrites(() => ext.storage.session.clear()),
 };
@@ -202,16 +205,13 @@ async function restoreClientFromStorage(c: VaultClient): Promise<VaultClient> {
     await scheduleAutoLock();
   } else {
     await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY]);
+    await credentialController.clearSession();
     const account = await sessions.loadAccount();
     if (c !== client) return getClient();
     if (account && !c.getSession().account) c.getSession().setAccount(account);
     resolvedClients.add(c);
   }
   return c;
-}
-
-async function unlockedClient(): Promise<VaultClient> {
-  return restoreFromStorage();
 }
 
 function getClient(): VaultClient {
@@ -296,6 +296,7 @@ function serviceFor(c: VaultClient) {
         if (selectedClient !== client) return;
         if (restored) selectedClient.restore(restored);
         await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY]);
+        await credentialController.clearSession();
         if (selected) await sessionArea.remove(CONNECTION_DRAFT_KEY);
         else if (previousAccount) await sessionArea.set({ [CONNECTION_DRAFT_KEY]: { serverUrl: '', email: '', error: null,
           returnAccount: { serverUrl: previousAccount.serverUrl, email: previousAccount.email },
@@ -330,7 +331,11 @@ function retireClient(c: VaultClient, forgetAccount: boolean, clearPresentation 
   if (resolved) resolvedClients.add(client);
   service = serviceFor(client);
   // clear() invalidates restoration synchronously, then drains already-started storage writes.
-  lockCleanup = Promise.all([clearSession(forgetAccount, owner), clearProfile]).then(() => {});
+  const clearHistory = forgetAccount
+    ? (previousAccount ? credentialController.clearAccount(accountKey(previousAccount))
+      : !resolved ? sessions.loadAccount().then(stored => stored ? credentialController.clearAccount(accountKey(stored)) : undefined) : undefined)
+    : undefined;
+  lockCleanup = Promise.all([clearSession(forgetAccount, owner), clearProfile, clearHistory]).then(() => {});
   return lockCleanup;
 }
 
@@ -354,34 +359,9 @@ const tabFields = new Map<number, FieldsState>();
  */
 const PENDING_KEY = '1warden.pending';
 
-interface PendingCapture {
-  tabId: number;
-  url: string;
-  username: string | null;
-  password: string;
-  decision: CaptureDecision;
-}
-
-async function setPending(p: PendingCapture | null, tabId?: number, owner = getClient()): Promise<void> {
-  const got = await ext.storage.session.get(PENDING_KEY);
-  const map = (got[PENDING_KEY] ?? {}) as Record<string, PendingCapture>;
-  if (p === null) {
-    if (tabId !== undefined) delete map[String(tabId)];
-  } else {
-    map[String(p.tabId)] = p;
-  }
-  requireCurrentClient(owner);
-  await sessionArea.set({ [PENDING_KEY]: map });
-}
-
-async function getPending(tabId: number): Promise<PendingCapture | null> {
-  const got = await ext.storage.session.get(PENDING_KEY);
-  const map = (got[PENDING_KEY] ?? {}) as Record<string, PendingCapture>;
-  return map[String(tabId)] ?? null;
-}
-
 type Request =
   | ApplicationRequest
+  | CredentialRequest
   | InlineRequest
   | { type: '1warden:connect'; serverUrl: string; email: string; masterPassword: string }
   | { type: '1warden:lock' }
@@ -389,9 +369,6 @@ type Request =
   | { type: '1warden:matches'; url: string }
   | { type: '1warden:context' }
   | { type: '1warden:fill'; itemId: string; tabId: number; application?: boolean }
-  | { type: '1warden:pending'; tabId?: number }
-  | { type: '1warden:save-capture'; tabId?: number }
-  | { type: '1warden:dismiss-capture'; tabId?: number }
   | { type: '1warden:copy'; itemId: string; field: 'username' | 'password' | 'totp' }
   | { type: '1warden:clipboard-copied'; value: string }
   | { type: '1warden:webauthn'; payload: unknown };
@@ -399,6 +376,22 @@ type Request =
 const AUTO_LOCK_ALARM = '1warden:auto-lock';
 const CLIPBOARD_ALARM = '1warden:clipboard-clear';
 const runSerialized = createSerialRunner();
+const credentialController = createCredentialController({
+  session: sessionArea,
+  local: { get: keys => ext.storage.local.get(keys as string | string[]),
+    set: (values, assertCurrent?: () => void) => storageWrites(() => { assertCurrent?.(); return ext.storage.local.set(values); }),
+    remove: keys => storageWrites(() => ext.storage.local.remove(keys as string | string[])) },
+  owner() {
+    const owner = getClient(); requireCurrentClient(owner);
+    const session = owner.getSession(); const key = session.getKey();
+    if (!key || !session.account) throw new Error('保险库未解锁');
+    return { account: accountKey(session.account), key, items: () => owner.getSession().items,
+      assertCurrent: () => requireCurrentClient(owner),
+      save: async item => { requireCurrentClient(owner); const saved = await owner.saveItem(item); requireCurrentClient(owner); return saved; },
+      sync: async () => { requireCurrentClient(owner); await owner.refresh(); requireCurrentClient(owner); } };
+  },
+  persist: () => persistState(), changed: notifyChanged,
+});
 let service = serviceFor(getClient());
 const dispatchApplication = createApplicationDispatcher(() => service, {
   run: runSerialized,
@@ -423,7 +416,8 @@ async function scheduleAutoLock(): Promise<void> {
 
 async function clearSession(forgetAccount = false, account?: AccountInfo | null): Promise<void> {
   await sessions.clear({ forgetAccount, ...(account !== undefined ? { account } : {}) });
-  await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY]);
+  await sessionArea.remove([PENDING_KEY, WA_DONE_KEY, WA_CLAIM_KEY, CAPTURE_STATE_KEY]);
+  await credentialController.clearSession();
   await scheduleAutoLock();
   await clearBadges();
 }
@@ -503,17 +497,6 @@ ext.runtime.onMessage.addListener((msg: unknown, sender, respond) => {
     }
     return undefined;
   }
-  if (req.type === '1warden:submitted') {
-    void runSerialized(async () => {
-      const owner = getClient();
-      await restoreFromStorage();
-      if (owner !== client) throw new Error('请求已取消，保险库已锁定');
-      await onSubmitted(sender.tab?.id, sender.url);
-      notifyChanged();
-    }).catch(reportFailure);
-    return undefined;
-  }
-
   // Vault mutations share a queue; lock retires the current generation immediately.
   const result = req.type === '1warden:application'
     ? dispatchApplication(msg)
@@ -677,6 +660,7 @@ async function runWebauthn(payload: unknown, senderOrigin: string | undefined, c
 
 async function handle(req: Request, sender: chrome.runtime.MessageSender): Promise<unknown> {
   const activeClient = getClient();
+  if (req.type.startsWith('1warden:credential-')) return credentialController.handle(req as CredentialRequest, sender);
   switch (req.type) {
     case '1warden:inline-accounts': {
       await requireInlineDocument(sender);
@@ -738,14 +722,10 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const tabId = tab?.id ?? null;
       const url = tab?.url ?? '';
       const session = getClient().getSession();
-      const capture = tabId !== null && session.isUnlocked() ? await getPending(tabId) : null;
       return {
         tabId, url,
         matchedIds: session.isUnlocked() ? matchItemsByUrl(session.items, url).map((i) => i.id) : [],
-        pending: capture && capture.decision.kind !== 'none' ? {
-          url: capture.url, username: capture.username, action: capture.decision.kind,
-          itemId: capture.decision.kind === 'update' ? capture.decision.itemId : null,
-        } : null,
+        pending: null,
       } satisfies SiteContext;
     }
     case '1warden:clipboard-copied':
@@ -788,68 +768,6 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       const failed = outcomes.filter((o) => !o.ok || !o.verified);
       if (req.application && failed.length > 0) throw new Error('部分字段未能填充，请检查页面');
       return { ok: failed.length === 0, outcomes, failed };
-    }
-
-    case '1warden:pending': {
-      const tabId = req.tabId ?? sender.tab?.id;
-      if (tabId === undefined) return { pending: null };
-      const p = await getPending(tabId);
-      if (p === null) return { pending: null };
-      // 先取出来，TS 才能对判别联合做收窄（透过 p.decision.kind 访问是收窄不了的）
-      const decision = p.decision;
-      // ⚠️ 只回展示需要的字段 —— 密码留在 background，保存时现取现用
-      return {
-        pending: {
-          url: p.url,
-          username: p.username,
-          action: decision.kind,
-          itemId: decision.kind === 'update' ? decision.itemId : null,
-        },
-      };
-    }
-
-    case '1warden:save-capture': {
-      const tabId = req.tabId ?? sender.tab?.id;
-      if (tabId === undefined) throw new Error('找不到标签页');
-      const p = await getPending(tabId);
-      if (p === null) throw new Error('没有待保存的登录信息');
-
-      const session = await sessions.load();
-      if (!session) throw new Error('保险库未解锁');
-
-      const c = await unlockedClient();
-      requireCurrentClient(activeClient);
-      const decision = p.decision;
-      if (decision.kind === 'update') {
-        const existing = session.items.find((i) => i.id === decision.itemId);
-        if (!existing) throw new Error('要更新的条目已经不存在了');
-        await c.saveItem({
-          ...existing,
-          login: {
-            ...(existing.login ?? { totp: null, uris: [], passwordRevisionDate: null, fido2Credentials: [] }),
-            username: p.username ?? existing.login?.username ?? null,
-            password: p.password,
-          },
-          // 旧密码进历史 —— 改错了还能找回来。1Password 也是这么做的
-          passwordHistory: existing.login?.password
-            ? [{ password: existing.login.password, lastUsedDate: new Date().toISOString() },
-               ...existing.passwordHistory].slice(0, 5)
-            : existing.passwordHistory,
-        });
-      } else {
-        await c.saveItem(newLoginItem(p.url, p.username, p.password));
-      }
-
-      // 保存后同步一次会话快照，否则下次读到的还是旧的
-      // ⚠️ 用客户端的 `exportState()`，不是自己照着字段列表拼一份 ——
-      // 拼的时候漏掉传输层，恢复出来就是一个「读得了、写不了」的客户端
-      requireCurrentClient(activeClient);
-      await persistState();
-
-      await setPending(null, tabId, activeClient);
-      await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
-      notifyChanged();
-      return { ok: true };
     }
 
     case '1warden:webauthn': {
@@ -904,14 +822,6 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
       if (result['ok'] === true) await writeDone(key, result, activeClient);
       else await releaseClaim(key, activeClient);
       return result;
-    }
-
-    case '1warden:dismiss-capture': {
-      const tabId = req.tabId ?? sender.tab?.id;
-      if (tabId === undefined) return { ok: true };
-      await setPending(null, tabId, activeClient);
-      await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
-      return { ok: true };
     }
 
     default: throw new Error(`未知请求：${req.type}`);
@@ -995,99 +905,6 @@ async function readFieldsFrom(tabId: number): Promise<FieldDescriptor[]> {
     // 注入失败（比如扩展没有该页面的权限）—— 退回用上报的那份
     return [];
   }
-}
-
-/**
- * 表单提交之后：取一次值，判断该不该提示保存。
- *
- * ⚠️ 取值这一步**必须由 background 注入完成**。让 content script 顺手把
- * 值读出来发过来要省事得多，但那样明文就常驻在页面里的那份代码中了 ——
- * 而它正是最容易被打字机/XSS 够到的地方。
- */
-async function onSubmitted(tabId: number | undefined, url: string | undefined): Promise<void> {
-  const owner = getClient();
-  // 这条链路上每一步都可能「合理地」放弃，而每一个放弃都必须是**可诊断的** ——
-  // 否则用户那边表现为「提交了但没提示保存」，我们这边什么都看不到。
-  if (tabId === undefined || url === undefined) {
-    console.debug('[onewarden] 捕获跳过：拿不到标签页或地址');
-    return;
-  }
-
-  const session = await sessions.load();
-  if (!session) {
-    console.debug('[onewarden] 捕获跳过：保险库未解锁');
-    return;
-  }
-
-  const fields = await readFieldsFrom(tabId);
-  const plan = classifyFields(fields);
-  // 注册和改密码要保存新密码；普通登录才读取当前密码。
-  const passwordIndex = plan.newPassword ?? plan.password;
-  if (passwordIndex === undefined) {
-    console.debug(`[onewarden] 捕获跳过：页面上没识别出密码框（读到 ${fields.length} 个输入框）`);
-    return;
-  }
-
-  const indices = plan.username === undefined ? [passwordIndex] : [plan.username, passwordIndex];
-  const [injection] = await ext.scripting.executeScript({
-    target: { tabId },
-    func: readFieldValues,
-    args: [indices],
-  });
-  const values = (injection?.result ?? []) as (string | null)[];
-  requireCurrentClient(owner);
-  if (values.length === 0) {
-    console.debug('[onewarden] 捕获跳过：注入读取没有返回结果');
-    return;
-  }
-
-  const username = plan.username === undefined ? null : values[0] ?? null;
-  const password = plan.username === undefined ? values[0] : values[1];
-  if (typeof password !== 'string') {
-    console.debug('[onewarden] 捕获跳过：读到的密码不是字符串');
-    return;
-  }
-  console.debug(`[onewarden] 捕获到登录信息（用户名 ${username === null ? '空' : '有'}，密码长度 ${password.length}）`);
-
-  const decision = decideCapture({ url, username, password }, session.items);
-  if (decision.kind === 'none') {
-    // 没变化就清掉上一次的提示 —— 用户可能刚手动改好了
-    await setPending(null, tabId, owner);
-    await ext.action.setBadgeText({ tabId, text: '' }).catch(() => {});
-    return;
-  }
-
-  await setPending({ tabId, url, username, password, decision }, undefined, owner);
-  // 角标只提示「有事可做」，不放数字 —— 数字会让人以为是待办事项
-  await ext.action.setBadgeText({ tabId, text: '●' }).catch(() => {});
-  await ext.action.setBadgeBackgroundColor({ color: '#3E7C8C' }).catch(() => {});
-}
-
-/** 站点的显示名：用主机名，与 1Password 的默认命名一致 */
-function nameFor(url: string): string {
-  try {
-    return new URL(url).hostname.replace(/^www\./, '');
-  } catch {
-    return url;
-  }
-}
-
-/** 拼一条新的登录条目。`id` 为空串表示新建 */
-function newLoginItem(url: string, username: string | null, password: string): VaultItem {
-  return {
-    id: '', type: 'login', rawType: 1, name: nameFor(url), nameFailed: false,
-    notes: null, notesFailed: false, folderId: null, favorite: false, reprompt: 0,
-    createdAt: '', updatedAt: '', deletedAt: null, archivedAt: null, wrappedKey: null,
-    login: {
-      username, password, totp: null,
-      uris: [{ uri: url, match: null }],
-      passwordRevisionDate: null,
-      // 新建的条目还没有 passkey —— 用户之后可以在站点上注册一个
-      fido2Credentials: [],
-    },
-    card: null, identity: null, secureNote: null, sshKey: null,
-    customFields: [], passwordHistory: [], attachments: [],
-  };
 }
 
 /**
@@ -1205,4 +1022,7 @@ ext.tabs.onActivated.addListener(({ tabId }) => {
   if (state) void updateBadge(tabId, state.isLoginForm);
 });
 
-ext.tabs.onRemoved.addListener((tabId) => { tabFields.delete(tabId); });
+ext.tabs.onRemoved.addListener((tabId) => {
+  tabFields.delete(tabId);
+  void runSerialized(() => credentialController.closeTab(tabId)).catch(reportFailure);
+});

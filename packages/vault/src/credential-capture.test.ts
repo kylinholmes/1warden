@@ -42,14 +42,14 @@ describe('decideCapture —— 更新', () => {
     expect(decideCapture(captured('me', 'new-password'), items)).toEqual({ kind: 'update', itemId: 'a' });
   });
 
-  it('updates when the stored item has no username but the site matches', () => {
+  it('does not overwrite a record without a known username', () => {
     const items = [login('a', null, 'old-password')];
-    expect(decideCapture(captured('me', 'new-password'), items)).toEqual({ kind: 'update', itemId: 'a' });
+    expect(decideCapture(captured('me', 'new-password'), items)).toEqual({ kind: 'save' });
   });
 
-  it('updates when the captured form had no username', () => {
+  it('requires choosing a record when the captured form had no username', () => {
     const items = [login('a', 'me', 'old-password')];
-    expect(decideCapture(captured(null, 'new-password'), items)).toEqual({ kind: 'update', itemId: 'a' });
+    expect(decideCapture(captured(null, 'new-password'), items)).toEqual({ kind: 'review', itemIds: ['a'] });
   });
 
   // 站点下有多条时，用户名相同的优先 —— 否则改的可能是别人的那条
@@ -59,6 +59,17 @@ describe('decideCapture —— 更新', () => {
       login('mine', 'me', 'pw-b'),
     ];
     expect(decideCapture(captured('me', 'brand-new-pw'), items)).toEqual({ kind: 'update', itemId: 'mine' });
+  });
+});
+
+describe('ambiguous capture accounts', () => {
+  it('requires a choice when multiple same-name records differ', () => {
+    expect(decideCapture(captured('me', 'new'), [login('a', 'me', 'old'), login('b', 'me', 'older')]))
+      .toEqual({ kind: 'review', itemIds: ['a', 'b'] });
+  });
+  it('does not prompt if one same-name duplicate already has this password', () => {
+    expect(decideCapture(captured('me', 'new'), [login('a', 'me', 'old'), login('b', 'me', 'new')]))
+      .toEqual({ kind: 'none', reason: 'unchanged' });
   });
 });
 
