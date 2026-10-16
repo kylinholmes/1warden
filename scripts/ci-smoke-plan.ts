@@ -23,6 +23,8 @@ export function smokePlan(suite: SmokeSuite): SmokeStep[] {
     build('build-extensions', ['run', 'build:extension-firefox']),
     smoke('edge-extension', 'browser-smoke.ts', ['edge']),
     smoke('firefox-extension', 'browser-smoke.ts', ['firefox']),
+    smoke('edge-inline-picker', 'inline-picker-smoke.ts', ['edge', 'apps/desktop/dist-extension/content.js']),
+    smoke('firefox-inline-picker', 'inline-picker-smoke.ts', ['firefox', 'apps/desktop/dist-firefox/content.js']),
     smoke('connection', 'connection-smoke.ts', ['edge']),
     smoke('profile', 'profile-smoke.ts', ['edge']),
     smoke('account-details', 'account-details-smoke.ts'),

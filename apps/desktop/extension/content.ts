@@ -7,6 +7,7 @@
 import { ext } from './ext-api';
 import { isLikelyLoginForm, type FieldDescriptor } from '@1warden/vault';
 import { installInlinePicker } from './inline-picker';
+import { readPageFields as readFields } from './inline-fields';
 import { installCredentialObserver } from './credential-observer';
 import { installInlineCredentials } from './inline-credentials';
 
@@ -20,64 +21,6 @@ interface FieldsReport {
   url: string;
   fields: FieldDescriptor[];
   isLoginForm: boolean;
-}
-
-/**
- * 读出页面上所有输入框的描述。
- *
- * 刻意**不读 `value`**（除了判断「是否已有内容」这个布尔用途）——
- * 页面里已有的内容可能是用户正在输的密码，没有理由把它送出去。
- */
-function readFields(): FieldDescriptor[] {
-  const nodes = Array.from(
-    document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'),
-  );
-
-  return nodes.map((el) => {
-    const label = labelFor(el);
-    // ⚠️ 只上报「有没有内容」，不上报内容本身
-    const hasValue = el.value.length > 0;
-    return {
-      type: (el.getAttribute('type') ?? 'text').toLowerCase(),
-      name: el.getAttribute('name') ?? '',
-      id: el.id ?? '',
-      autocomplete: el.getAttribute('autocomplete') ?? '',
-      placeholder: el.getAttribute('placeholder') ?? '',
-      ariaLabel: el.getAttribute('aria-label') ?? '',
-      labelText: label,
-      isVisible: isVisible(el),
-      isDisabled: el.disabled,
-      isReadOnly: el.readOnly,
-      // 空串与「有内容」在分类逻辑里是两种含义，这里只传这个布尔
-      value: hasValue ? ' ' : '',
-    };
-  });
-}
-
-/** 关联的 `<label>` 文字 —— for= 与包裹式两种都要认 */
-function labelFor(el: HTMLElement): string {
-  if (el.id) {
-    const byFor = document.querySelector(`label[for="${CSS.escape(el.id)}"]`);
-    if (byFor?.textContent) return byFor.textContent.trim().slice(0, 200);
-  }
-  const wrapping = el.closest('label');
-  if (wrapping?.textContent) return wrapping.textContent.trim().slice(0, 200);
-  const labelledBy = el.getAttribute('aria-labelledby');
-  if (labelledBy) {
-    const parts = labelledBy.split(/\s+/)
-      .map((id) => document.getElementById(id)?.textContent ?? '')
-      .join(' ').trim();
-    if (parts) return parts.slice(0, 200);
-  }
-  return '';
-}
-
-function isVisible(el: HTMLElement): boolean {
-  if (el.hidden) return false;
-  const style = getComputedStyle(el);
-  if (style.display === 'none' || style.visibility === 'hidden') return false;
-  // `type=hidden` 的框本来就不该被填
-  return el.getAttribute('type')?.toLowerCase() !== 'hidden';
 }
 
 function report(): void {
@@ -242,6 +185,7 @@ function safeReport(): void {
 }
 
 installInlinePicker(readFields, {
+  nonce: credentialObserver.nonce,
   suppress: field => credentialUI.prefersGenerator(field),
   canGenerate: field => !!credentialObserver.forms.group(field)?.password,
   openGenerator: field => { void credentialUI.openGenerator(field); },

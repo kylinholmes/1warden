@@ -205,6 +205,9 @@ describe('classifyFields —— 不该填的框', () => {
 });
 
 describe('classifyFields —— 边界', () => {
+  it.each(['Authentication code', 'Authenticator code', 'Two-factor code'])('recognizes the visible OTP label %s', labelText => {
+    expect(classifyFields([field({ id: 'code', labelText })]).totp).toBe(0);
+  });
   it('returns nothing for an empty form', () => {
     expect(classifyFields([])).toEqual({});
   });

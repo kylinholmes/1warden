@@ -18,6 +18,7 @@ export interface FillEntry {
   /** 目标输入框在 `readFields` 那份列表里的下标 */
   index: number;
   value: string;
+  expected?: { id: string; name: string; type: string; autocomplete: string; formIndex?: number };
 }
 
 export interface FillOutcome {
@@ -33,15 +34,32 @@ export interface FillOutcome {
  *
  * 自包含 —— 不要在里面引用模块作用域的任何东西。
  */
-export function fillFields(entries: FillEntry[], expectedUrl?: string): FillOutcome[] {
+export function fillFields(entries: FillEntry[], expectedUrl?: string, expectedNonce?: string): FillOutcome[] {
   // Inline selection is tied to the document that requested it. Recheck inside
   // the injected function too: navigation can race the background's tabs.get.
   if (expectedUrl !== undefined && location.href !== expectedUrl) {
     return entries.map(({ index }) => ({ index, ok: false, verified: false, reason: '网页地址已改变' }));
   }
+  if (expectedNonce !== undefined
+    && (globalThis as unknown as { __onewardenCredential?: { nonce: string } }).__onewardenCredential?.nonce !== expectedNonce) {
+    return entries.map(({ index }) => ({ index, ok: false, verified: false, reason: '网页已重新加载，请重新选择' }));
+  }
   const inputs = Array.from(
     document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>('input, textarea'),
   );
+  const forms = Array.from(document.forms);
+  // Validate the complete selection before writing anything. Dynamic pages can
+  // insert fields between metadata collection and this one-shot injection.
+  if (entries.some(({ index, expected }) => {
+    if (!expected) return false;
+    const el = inputs[index];
+    return !el || el.id !== expected.id || el.name !== expected.name
+      || (el.getAttribute('type') ?? 'text').toLowerCase() !== expected.type
+      || (el.getAttribute('autocomplete') ?? '') !== expected.autocomplete
+      || (expected.formIndex !== undefined && (el.form ? forms.indexOf(el.form) : -1) !== expected.formIndex)
+      || !el.getClientRects().length || el.matches(':disabled') || el.readOnly || !!el.closest('[hidden], [inert]')
+      || ['hidden', 'collapse'].includes(getComputedStyle(el).visibility);
+  })) return entries.map(({ index }) => ({ index, ok: false, verified: false, reason: '输入框已改变，请重新选择' }));
 
   /**
    * React / Vue 这类框架会给 value 装上自己的 setter，直接 `el.value = x`

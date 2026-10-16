@@ -14,6 +14,7 @@ import { encryptCipher } from '../packages/vault/src/encrypt';
 import { decryptCipher, decryptFolder } from '../packages/vault/src/decrypt';
 import type { CipherDto } from '../packages/api/src/types';
 import type { CapturePreview } from '../apps/desktop/src/application/browser-credentials';
+import { generateTotp } from '../packages/crypto/src/totp';
 
 const ROOT = resolve(import.meta.dir, '..');
 const product = process.argv[2];
@@ -178,7 +179,7 @@ function item(id: string, title: string, date: string): VaultItem {
     notesFailed: false, folderId: null, favorite: false, reprompt: 0,
     createdAt: date, updatedAt: date, deletedAt: null, archivedAt: null, wrappedKey: null,
     login: { username, password: secret, uris: [{ uri: siteUrl, match: 1 }, { uri: 'https://old.example.invalid', match: 0 },
-        { uri: 'https://keep.example.invalid', match: 3 }], totp: null,
+        { uri: 'https://keep.example.invalid', match: 3 }], totp: id === 'smoke-zulu' ? 'JBSWY3DPEHPK3PXP' : null,
       passwordRevisionDate: '2026-01-01T00:00:00Z', fido2Credentials: [] },
     card: null, identity: null, secureNote: null, sshKey: null,
     customFields: [{ name: 'Toggle smoke', value: 'false', type: 2, linkedId: null },
@@ -203,7 +204,7 @@ let popup: any;
 async function screenshot(label: string): Promise<void> {
   // Firefox 156/157 BiDi rejects captureScreenshot for privileged extension pages.
   // Keep interaction assertions active and report this limitation explicitly.
-  if (name === 'chrome') {
+  if (name === 'chrome' && await popup.evaluate(() => document.visibilityState === 'visible')) {
     await popup.evaluate(() => Promise.all(document.getAnimations()
       .filter((animation) => animation.effect?.getComputedTiming().iterations !== Infinity)
       .map((animation) => animation.finished.catch(() => {}))));
@@ -728,6 +729,84 @@ try {
   await login.waitForFunction((expected: string) => (document.querySelector('#password') as HTMLInputElement)?.value === expected, {}, secret);
   check('real site receives username and password', await login.$eval('#email', (input: HTMLInputElement) => input.value) === username);
 
+  // GitHub-style second step: no password field remains on the page. Use real
+  // content/background scripts and trusted input, including Gecko, not RPC fill.
+  await login.bringToFront();
+  await login.evaluate(() => {
+    history.pushState({}, '', '/sessions/two-factor/app');
+    document.querySelector('form')!.innerHTML = '<label for="app_totp">Authentication code</label>'
+      + '<input id="app_totp" name="app_otp" autocomplete="one-time-code" inputmode="numeric">'
+      + '<button type="submit">Verify</button>';
+    (window as any).otpSubmits = 0;
+    document.querySelector('form')!.onsubmit = event => { event.preventDefault(); (window as any).otpSubmits++; };
+  });
+  async function pickCode(selector: string): Promise<string[]> {
+    await login.click(selector);
+    await login.waitForSelector('[data-onewarden-inline][data-kind="totp"][data-state="accounts"]', { visible: true });
+    const before = (await generateTotp('JBSWY3DPEHPK3PXP')).code;
+    await login.keyboard.press('ArrowDown');
+    await login.keyboard.press('Enter');
+    await login.waitForFunction(() => document.querySelector('[data-onewarden-inline]') === null);
+    return [before, (await generateTotp('JBSWY3DPEHPK3PXP')).code];
+  }
+  const codes = await pickCode('#app_totp');
+  check('standalone authenticator input suggests and fills a fresh TOTP', codes.includes(await login.$eval('#app_totp', (input: HTMLInputElement) => input.value)));
+  check('choosing a TOTP does not submit the website form', await login.evaluate(() => (window as any).otpSubmits === 0));
+  await login.evaluate(() => {
+    document.querySelector('form')!.innerHTML = Array.from({ length: 6 }, (_, i) =>
+      `<input id="digit-${i}" maxlength="1" inputmode="numeric" ${i === 0 ? 'autocomplete="one-time-code"' : ''}>`).join('');
+  });
+  const splitCodes = await pickCode('#digit-3');
+  check('focusing any cell fills the entire split verification code', splitCodes.includes(await login.$$eval('form input', (inputs: HTMLInputElement[]) => inputs.map(input => input.value).join(''))));
+
+  await login.evaluate(() => {
+    document.querySelector('form')!.innerHTML = '<input id="current" type="password" autocomplete="current-password" value="keep-current">'
+      + '<input id="new" type="password" autocomplete="new-password" value="keep-new">'
+      + '<input id="confirm" type="password" autocomplete="new-password" value="keep-confirm">'
+      + '<label for="otp">Authenticator code</label><input id="otp" name="totp">';
+  });
+  await pickCode('#otp');
+  check('TOTP fill preserves current and new passwords', await login.$$eval('input[type="password"]', (inputs: HTMLInputElement[]) =>
+    inputs.map(input => input.value).join(',') === 'keep-current,keep-new,keep-confirm'));
+  await login.click('#current');
+  await login.waitForSelector('[data-onewarden-inline][data-kind="login"][data-state="accounts"]', { visible: true });
+  await login.keyboard.press('ArrowDown');
+  await login.keyboard.press('Enter');
+  await login.waitForFunction(() => (document.querySelector('#current') as HTMLInputElement).value !== 'keep-current');
+  check('saved current-password fill preserves generated new passwords', await login.$eval('#new', (input: HTMLInputElement) => input.value) === 'keep-new'
+    && await login.$eval('#confirm', (input: HTMLInputElement) => input.value) === 'keep-confirm');
+  await login.click('#new');
+  await login.waitForSelector('[data-onewarden-credentials="generator"]', { visible: true });
+  check('new-password focus offers the generator instead of saved-password fill', await login.$('[data-onewarden-inline]') === null);
+  await login.keyboard.press('Escape');
+  const otpRecord = seed.items.find(record => record.id === 'smoke-zulu')!;
+  check('TOTP can be removed for the missing-code interaction fixture', (await rpc('saveItem', [{
+    ...otpRecord, login: { ...otpRecord.login!, totp: null },
+  }])).ok);
+  await login.evaluate(() => { (document.querySelector('#otp') as HTMLInputElement).value = ''; });
+  await login.click('#otp');
+  await login.waitForSelector('[data-onewarden-inline][data-kind="totp"][data-state="empty"]', { visible: true });
+  check('no configured TOTP shows an explicit empty hint without filling a password', await login.$eval('#otp', (input: HTMLInputElement) => input.value) === '');
+  await login.keyboard.press('Escape');
+  check('Escape from an empty suggestion returns to the code input', await login.evaluate(() => document.activeElement?.id === 'otp'));
+  const latestOtpRecord = seed.items.find(record => record.id === otpRecord.id)!;
+  check('restoring TOTP is saved before re-opening suggestions', (await rpc('saveItem', [{
+    ...latestOtpRecord, login: { ...latestOtpRecord.login!, totp: otpRecord.login!.totp },
+  }])).ok);
+  await pickCode('#otp');
+  check('re-opening the code field observes newly configured TOTP', true);
+
+  await login.evaluate(() => {
+    document.querySelector('form')!.innerHTML = '<label for="recovery">Recovery code</label>'
+      + '<input id="recovery" name="recovery_code" autocomplete="one-time-code">'
+      + '<input id="sms" name="sms_otp" autocomplete="one-time-code">';
+  });
+  for (const selector of ['#recovery', '#sms']) {
+    await login.click(selector);
+    check(`${selector} does not offer an authenticator code`, await login.$('[data-onewarden-inline]') === null);
+  }
+  await login.evaluate((url: string) => history.replaceState({}, '', url), siteUrl);
+
   // Exercise the site's actual submit event and content script, including native
   // new-password/confirmation roles. Saving remains an explicit popup action.
   const registeredUsername = 'registration-smoke@example.invalid';
@@ -896,6 +975,14 @@ try {
   await openPopup(true);
   await popup.waitForSelector('input[type="password"]', { visible: true });
   check('reopening preserves locked account state', (await rpc('snapshot')).result.status === 'locked');
+  await login.bringToFront();
+  await login.evaluate(() => {
+    document.querySelector('form')!.innerHTML = '<input id="locked-otp" autocomplete="one-time-code">';
+  });
+  await login.click('#locked-otp');
+  await login.waitForSelector('[data-onewarden-inline][data-kind="totp"][data-state="locked"]', { visible: true });
+  check('a locked vault offers an unlock action directly beside the code input', await login.$eval('#locked-otp', (input: HTMLInputElement) => input.value) === '');
+  await login.keyboard.press('Escape');
   check('no uncaught UI errors', errors.length === 0, errors.join('\n'));
 } catch (error) {
   failure = error instanceof Error ? error.stack ?? error.message : String(error);

@@ -13,6 +13,8 @@ let currentUrl: string;
 let injections: { target: unknown; args?: unknown[] }[];
 let changeUrlOnRead: boolean;
 let popupOpened: boolean;
+let pageFields: FieldDescriptor[];
+let documentMatches: boolean;
 
 function item(id: string, uri = url, extra: Partial<VaultItem> = {}): VaultItem {
   return {
@@ -53,6 +55,10 @@ beforeEach(async () => {
   injections = [];
   changeUrlOnRead = false;
   popupOpened = false;
+  documentMatches = true;
+  const field: FieldDescriptor = { type: 'text', name: '', id: '', autocomplete: 'username', placeholder: '',
+    ariaLabel: '', labelText: '', isVisible: true, isDisabled: false, isReadOnly: false, value: '' };
+  pageFields = [field, { ...field, type: 'password', autocomplete: 'current-password' }];
   vi.stubGlobal('chrome', {
     runtime: { id: 'onewarden-id', getURL: (path: string) => `chrome-extension://onewarden-id/${path}`,
       onMessage: { addListener: (fn: Listener) => { listener = fn; } }, sendMessage: async () => {},
@@ -62,13 +68,12 @@ beforeEach(async () => {
     tabs: { query: async () => [], get: async (id: number) => ({ id, url: currentUrl }),
       onActivated: { addListener: () => {} }, onRemoved: { addListener: () => {} } },
     action: { setBadgeText: async () => {}, openPopup: async () => { popupOpened = true; } },
-    scripting: { executeScript: async (injection: { target: unknown; args?: unknown[] }) => {
+    scripting: { executeScript: async (injection: { target: unknown; args?: unknown[]; func?: Function }) => {
       injections.push(injection);
-      if (injection.args) return [{ result: [{ index: 0, ok: true, verified: true }, { index: 1, ok: true, verified: true }] }];
+      if (injection.func?.name === 'credentialDocumentMatches') return [{ result: documentMatches }];
+      if (injection.args) return [{ result: (injection.args[0] as { index: number }[]).map(({ index }) => ({ index, ok: true, verified: true })) }];
       if (changeUrlOnRead) currentUrl = 'https://other.test/';
-      const field: FieldDescriptor = { type: 'text', name: '', id: '', autocomplete: 'username', placeholder: '',
-        ariaLabel: '', labelText: '', isVisible: true, isDisabled: false, isReadOnly: false, value: '' };
-      return [{ result: [field, { ...field, type: 'password', autocomplete: 'current-password' }] }];
+      return [{ result: pageFields }];
     } },
   });
   await import('./background');
@@ -77,6 +82,52 @@ beforeEach(async () => {
 afterEach(() => { vi.unstubAllGlobals(); });
 
 describe('inline account chooser boundary', () => {
+  it('uses the browser URL after same-document navigation, only with a matching isolated nonce', async () => {
+    currentUrl = 'https://example.com/sessions/two-factor/app';
+    (data['1warden.session'] as { items: VaultItem[] }).items[0]!.login!.uris = [{ uri: currentUrl, match: 3 }];
+    expect(await send({ type: '1warden:inline-accounts', nonce: 'synthetic-document', documentUrl: currentUrl }))
+      .toEqual({ unlocked: true, accounts: [{ id: 'a', title: 'Account a', username: 'a@example.com' }] });
+    documentMatches = false;
+    expect(await send({ type: '1warden:inline-accounts', nonce: 'synthetic-document', documentUrl: currentUrl }))
+      .toMatchObject({ error: expect.any(String) });
+  });
+
+  it('rejects a chooser from an earlier route even if the document nonce still matches', async () => {
+    currentUrl = 'https://example.com/other';
+    expect(await send({ type: '1warden:inline-fill', itemId: 'a', nonce: 'synthetic-document', documentUrl: url }))
+      .toMatchObject({ error: expect.any(String) });
+    expect(injections).toEqual([]);
+  });
+  function seedOtp(): void {
+    const items = (data['1warden.session'] as { items: VaultItem[] }).items;
+    items[0]!.login!.totp = 'JBSWY3DPEHPK3PXP';
+    items[1]!.customFields.push({ name: '一次性密码', value: 'JBSWY3DPEHPK3PXP', type: 1, linkedId: null });
+    items.push(item('no-otp'), item('invalid-otp', url, { customFields: [{ name: 'otp', value: '!!!', type: 1, linkedId: null }] }));
+    pageFields.push({ ...pageFields[0]!, autocomplete: 'one-time-code', id: 'app_totp', name: 'app_otp' });
+  }
+
+  it('offers only usable native and custom-field TOTP accounts without disclosing codes or seeds', async () => {
+    seedOtp();
+    expect(await send({ type: '1warden:inline-accounts', target: { index: 2, kind: 'totp' } })).toEqual({
+      unlocked: true, accounts: [
+        { id: 'a', title: 'Account a', username: 'a@example.com' },
+        { id: 'b', title: 'Account b', username: 'b@example.com' },
+      ],
+    });
+  });
+
+  it('fills only the selected OTP input, including custom-field TOTP', async () => {
+    seedOtp();
+    expect(await send({ type: '1warden:inline-fill', itemId: 'b', target: { index: 2, kind: 'totp' } })).toEqual({ ok: true });
+    expect(injections.at(-1)?.args?.[0]).toMatchObject([{ index: 2, value: expect.stringMatching(/^\d{6}$/) }]);
+  });
+
+  it('rejects stale field roles and missing TOTP without injecting other credentials', async () => {
+    seedOtp();
+    expect(await send({ type: '1warden:inline-fill', itemId: 'a', target: { index: 1, kind: 'totp' } })).toMatchObject({ error: expect.any(String) });
+    expect(await send({ type: '1warden:inline-fill', itemId: 'no-otp', target: { index: 2, kind: 'totp' } })).toMatchObject({ error: expect.any(String) });
+    expect(injections.every(injection => !injection.args)).toBe(true);
+  });
   it('returns only matching account display fields and ignores caller-supplied URL and tab', async () => {
     expect(await send({ type: '1warden:inline-accounts', url: 'https://other.test/', tabId: 999 })).toEqual({
       unlocked: true, accounts: [

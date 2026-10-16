@@ -88,7 +88,7 @@ const NEW_HINT = /new|create|choose|设置|新密码|新/;
 const CURRENT_HINT = /current|old|existing|当前|原|旧/;
 
 /** 验证码类字段的名称线索 */
-const CODE_HINT = /(^|[^a-z])(otp|totp|mfa|2fa)([^a-z]|$)|one.?time|verif|auth.?code|security.?code|验证码|动态码|令牌/;
+const CODE_HINT = /(^|[^a-z])(otp|totp|mfa|2fa)([^a-z]|$)|one.?time|verif|auth(?:entication|enticator)?[\s_-]*code|two[\s_-]*factor[\s_-]*code|security.?code|验证码|动态码|令牌/;
 
 /** 明显是搜索的框 —— 它们在登录表单里很常见，但绝不能当用户名 */
 const SEARCH_HINT = /search|query|filter|搜索|查询|筛选/;

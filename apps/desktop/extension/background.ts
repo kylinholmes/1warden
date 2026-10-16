@@ -42,8 +42,10 @@ import { createClipboardStore } from './clipboard-store';
 import { CONNECTION_DRAFT_KEY } from './connection-draft';
 import { CLIPBOARD_CLEAR_MS } from '@1warden/ui/clipboard';
 import type { InlineAccounts, InlineRequest } from './inline-accounts';
+import { focusedPlan, readPageFields, type InlineField, type InlineTarget } from './inline-fields';
 import { createCredentialController } from './credential-handlers';
 import type { CredentialRequest } from './credential-protocol';
+import { credentialDocumentMatches } from './credential-protocol';
 import { CAPTURE_STATE_KEY } from './capture-service';
 
 /** 会话区：只在内存、浏览器重启即清空 */
@@ -659,33 +661,55 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
   if (req.type.startsWith('1warden:credential-')) return credentialController.handle(req as CredentialRequest, sender);
   switch (req.type) {
     case '1warden:inline-accounts': {
-      await requireInlineDocument(sender);
+      const documentUrl = await requireInlineDocument(sender, req.nonce, req.documentUrl);
       const session = activeClient.getSession();
+      requireInlineOwner(activeClient);
+      validateInlineTarget(req.target);
+      const matches = session.isUnlocked() ? matchItemsByUrl(session.items, documentUrl)
+        .filter((item) => item.type === 'login' && item.login !== null) : [];
+      const candidates = req.target?.kind === 'totp'
+        ? (await Promise.all(matches.map(async item => await totpCode(item) ? item : null))).filter(item => item !== null)
+        : matches;
+      await requireInlineDocument(sender, req.nonce, documentUrl);
       requireInlineOwner(activeClient);
       return {
         unlocked: session.isUnlocked(),
-        accounts: session.isUnlocked() ? matchItemsByUrl(session.items, sender.url!)
-          .filter((item) => item.type === 'login' && item.login !== null)
+        accounts: session.isUnlocked() ? candidates
           .map((item) => ({ id: item.id, title: item.name, username: item.login!.username ?? '' })) : [],
       } satisfies InlineAccounts;
     }
     case '1warden:inline-fill': {
-      await requireInlineDocument(sender);
+      const documentUrl = await requireInlineDocument(sender, req.nonce, req.documentUrl);
       requireCurrentClient(activeClient);
       if (typeof req.itemId !== 'string') throw new Error('无效的账号选择');
-      const item = matchItemsByUrl(activeClient.getSession().items, sender.url!)
+      const item = matchItemsByUrl(activeClient.getSession().items, documentUrl)
         .find((candidate) => candidate.id === req.itemId && candidate.type === 'login');
       if (!item?.login) throw new Error('这个账号与当前网站不匹配，请重新选择');
       const tabId = sender.tab!.id!;
-      const fields = await readFieldsFrom(tabId);
-      const entries = await buildEntries(classifyFields(fields), item);
-      await requireInlineDocument(sender);
+      validateInlineTarget(req.target);
+      const fields = await readFieldsFrom(tabId, sender.documentId);
+      const focused = req.target ? focusedPlan(fields, req.target.index) : null;
+      if (req.target && (!focused || focused.kind !== req.target.kind)) {
+        throw new Error('输入框已改变，请重新点击要填充的输入框');
+      }
+      const plan = focused?.plan ?? classifyFields(fields);
+      // Inline selection of a saved login must preserve generated new passwords.
+      const entries = focused?.kind === 'totp'
+        ? await buildOtpEntries(focused.otp, item)
+        : await buildEntries({ ...(plan.username === undefined ? {} : { username: plan.username }),
+          ...(plan.password === undefined ? {} : { password: plan.password }) }, item);
+      for (const entry of entries) {
+        const field = fields[entry.index]!;
+        entry.expected = { id: field.id, name: field.name, type: field.type, autocomplete: field.autocomplete,
+          ...(field.formIndex === undefined ? {} : { formIndex: field.formIndex }) };
+      }
+      await requireInlineDocument(sender, req.nonce, documentUrl);
       requireCurrentClient(activeClient);
       if (entries.length === 0) throw new Error('这个页面上找不到可以填的字段');
       const [injection] = await ext.scripting.executeScript({
         target: sender.documentId ? { tabId, documentIds: [sender.documentId] } : { tabId, frameIds: [0] },
         func: fillFields,
-        args: [entries, sender.url!],
+        args: req.nonce ? [entries, documentUrl, req.nonce] : [entries, documentUrl],
       });
       const outcomes = (injection?.result ?? []) as FillOutcome[];
       if (outcomes.length !== entries.length || outcomes.some((outcome) => !outcome.ok || !outcome.verified)) {
@@ -824,15 +848,40 @@ async function handle(req: Request, sender: chrome.runtime.MessageSender): Promi
   }
 }
 
-/** Browser-supplied sender identity is the authority; request payload URLs are never used. */
-async function requireInlineDocument(sender: chrome.runtime.MessageSender): Promise<void> {
+/** Browser identity and live URL are authoritative; payload URLs only reject stale UI. */
+async function requireInlineDocument(sender: chrome.runtime.MessageSender, nonce?: string, expectedUrl?: string): Promise<string> {
   if (sender.frameId !== 0 || sender.tab?.id === undefined || !sender.url) throw new Error('找不到目标网页');
   const tab = await ext.tabs.get(sender.tab.id);
-  if (tab.url !== sender.url) throw new Error('网页地址已改变，请重新选择账号');
+  if (!tab.url || new URL(tab.url).origin !== new URL(sender.url).origin
+    || (expectedUrl !== undefined && tab.url !== expectedUrl)) throw new Error('网页地址已改变，请重新选择账号');
+  if (nonce !== undefined) {
+    if (typeof nonce !== 'string' || nonce.length < 8 || nonce.length > 128) throw new Error('无效的网页来源');
+    // sender.url can retain the original path after SPA navigation. Authenticate
+    // the isolated document before using the browser's current URL for matching.
+    const [proof] = await ext.scripting.executeScript({
+      target: sender.documentId ? { tabId: sender.tab.id, documentIds: [sender.documentId] }
+        : { tabId: sender.tab.id, frameIds: [0] },
+      func: credentialDocumentMatches, args: [nonce],
+    });
+    if (proof?.result !== true) throw new Error('网页已改变，请重新选择账号');
+  } else if (tab.url !== sender.url) throw new Error('网页地址已改变，请重新选择账号');
+  return tab.url;
 }
 
 function requireInlineOwner(owner: VaultClient): void {
   if (owner !== client) throw new Error('保险库状态已改变，请重新选择账号');
+}
+
+function validateInlineTarget(target: InlineTarget | undefined): void {
+  if (target !== undefined && (!target || !Number.isInteger(target.index) || target.index < 0
+    || (target.kind !== 'login' && target.kind !== 'totp'))) throw new Error('无效的输入框选择');
+}
+
+async function buildOtpEntries(indices: number[], item: VaultItem): Promise<FillEntry[]> {
+  const code = await totpCode(item);
+  if (!code) throw new Error('此账号没有可用的 TOTP，请在 1Warden 中检查验证码设置');
+  if (indices.length > 1 && indices.length !== code.code.length) throw new Error('验证码位数与网页不一致，请检查账号的 TOTP 设置');
+  return indices.map((index, i) => ({ index, value: indices.length === 1 ? code.code : code.code[i]! }));
 }
 
 /**
@@ -866,7 +915,7 @@ async function buildEntries(
   // 验证码也填。它确实只有 30 秒有效期，但填充正是发生在**提交前那一刻** ——
   // 不进这一步，用户就得自己切到弹窗、复制、再切回来，多两次上下文切换。
   // 万一填晚了，页面会提示验证码错误，重填一次即可，代价很小。
-  if (plan.totp !== undefined && login.totp !== null) {
+  if (plan.totp !== undefined) {
     // `totpCode` 遇到不合法的密钥返回 null 而不是抛错 —— 那种情况就不填，
     // 其余字段照常
     const code = await totpCode(item);
@@ -875,30 +924,14 @@ async function buildEntries(
   return entries;
 }
 
-async function readFieldsFrom(tabId: number): Promise<FieldDescriptor[]> {
+async function readFieldsFrom(tabId: number, documentId?: string): Promise<InlineField[]> {
   try {
     const [res] = await ext.scripting.executeScript({
-      target: { tabId },
-      func: () => {
-        const nodes = Array.from(document.querySelectorAll<HTMLInputElement>('input, textarea'));
-        return nodes.map((el) => ({
-          type: (el.getAttribute('type') ?? 'text').toLowerCase(),
-          name: el.getAttribute('name') ?? '',
-          id: el.id ?? '',
-          autocomplete: el.getAttribute('autocomplete') ?? '',
-          placeholder: el.getAttribute('placeholder') ?? '',
-          ariaLabel: el.getAttribute('aria-label') ?? '',
-          labelText: el.closest('label')?.textContent?.trim().slice(0, 200) ?? '',
-          isVisible: !el.hidden && getComputedStyle(el).display !== 'none',
-          isDisabled: el.disabled,
-          isReadOnly: el.readOnly,
-          value: el.value.length > 0 ? ' ' : '',
-        }));
-      },
+      target: documentId ? { tabId, documentIds: [documentId] } : { tabId },
+      func: readPageFields,
     });
-    return (res?.result ?? []) as FieldDescriptor[];
+    return (res?.result ?? []) as InlineField[];
   } catch {
-    // 注入失败（比如扩展没有该页面的权限）—— 退回用上报的那份
     return [];
   }
 }

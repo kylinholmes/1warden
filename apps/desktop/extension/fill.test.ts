@@ -51,6 +51,7 @@ beforeEach(() => {
   nodes = [];
   globals['document'] = {
     querySelectorAll: () => nodes,
+    forms: [],
   };
   globals['HTMLInputElement'] = FakeInput;
   globals['HTMLTextAreaElement'] = FakeTextArea;
@@ -64,6 +65,22 @@ afterEach(() => {
 });
 
 describe('fillFields 必须自包含', () => {
+  it('refuses an old document nonce even when a reload kept the same URL', () => {
+    nodes = [new FakeInput()];
+    globals['location'] = { href: 'https://example.com/login' };
+    const out = detach<typeof fillFields>(fillFields)([{ index: 0, value: 'secret' }], 'https://example.com/login', 'old-document');
+    expect(out[0]).toMatchObject({ ok: false, verified: false });
+    expect((nodes[0] as unknown as { _value: string })._value).toBe('');
+  });
+  it('rejects a replaced target before filling any field', () => {
+    nodes = [new FakeInput(), new FakeInput()];
+    const out = detach<typeof fillFields>(fillFields)([
+      { index: 0, value: 'username' },
+      { index: 1, value: 'secret', expected: { id: 'original-password', name: '', type: 'password', autocomplete: '' } },
+    ]);
+    expect(out.every(result => !result.ok)).toBe(true);
+    expect(nodes.every(node => (node as unknown as { _value: string })._value === '')).toBe(true);
+  });
   it('refuses credentials when the document navigated after the background URL check', () => {
     nodes = [new FakeInput()];
     globals['location'] = { href: 'https://attacker.test/' };

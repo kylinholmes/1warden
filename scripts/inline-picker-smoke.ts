@@ -10,8 +10,8 @@ import { pathToFileURL } from 'node:url';
 
 const product = process.argv[2];
 const bundlePath = process.argv[3];
-if ((product !== 'edge' && product !== 'zen') || !bundlePath) {
-  throw new Error('Usage: bun scripts/inline-picker-smoke.ts edge|zen /path/to/content.js');
+if ((product !== 'edge' && product !== 'zen' && product !== 'firefox') || !bundlePath) {
+  throw new Error('Usage: bun scripts/inline-picker-smoke.ts edge|firefox|zen /path/to/content.js');
 }
 const executable = process.env[`ONEWARDEN_${product.toUpperCase()}`] ?? (product === 'edge'
   ? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge' : '/Applications/Zen.app/Contents/MacOS/zen');

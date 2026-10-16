@@ -1,9 +1,10 @@
-import { classifyFields, type FieldDescriptor } from '@1warden/vault';
+import { focusedPlan, type InlineField, type InlineTarget } from './inline-fields';
 import { ext } from './ext-api';
 import type { InlineAccounts, InlineReply } from './inline-accounts';
 
 /** Page-resident UI receives only matched account labels, never vault secrets. */
-export function installInlinePicker(readFields: () => FieldDescriptor[], credentials?: {
+export function installInlinePicker(readFields: () => InlineField[], credentials?: {
+  nonce: string;
   suppress(field: HTMLInputElement): boolean;
   canGenerate(field: HTMLInputElement): boolean;
   openGenerator(field: HTMLInputElement): void;
@@ -24,6 +25,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
   let awaitingUnlock = false;
   let refreshTimer: ReturnType<typeof setTimeout> | null = null;
   let pageUrl = location.href;
+  let target: InlineTarget | null = null;
 
   function close(restoreFocus = false): void {
     const previous = anchor;
@@ -36,6 +38,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
     host = panel = choices = null;
     status = null;
     anchor = null;
+    target = null;
     buttons = [];
     if (restoreFocus && previous?.isConnected) {
       restoringFocus = true;
@@ -72,6 +75,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
   function createHost(): void {
     host = document.createElement('div');
     host.dataset['onewardenInline'] = '';
+    host.dataset['kind'] = target!.kind;
     // Closed shadow DOM isolates labels/styles from ordinary page scripts.
     const shadow = host.attachShadow({ mode: 'closed' });
     host.style.cssText = 'all:initial!important;position:fixed!important;inset:auto!important;margin:0!important;padding:0!important;border:0!important;background:transparent!important;z-index:2147483647!important;color-scheme:light dark!important;';
@@ -104,10 +108,11 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
     panel = document.createElement('div');
     panel.className = 'panel';
     panel.setAttribute('role', 'dialog');
-    panel.setAttribute('aria-label', '1Warden · 此网站的账号');
+    const title = target?.kind === 'totp' ? '1Warden · 验证码' : '1Warden · 此网站的账号';
+    panel.setAttribute('aria-label', title);
     const heading = document.createElement('div');
     heading.className = 'heading';
-    heading.textContent = '1Warden · 此网站的账号';
+    heading.textContent = title;
     status = document.createElement('p');
     status.className = 'status';
     status.setAttribute('role', 'status');
@@ -177,7 +182,8 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
     buttons.forEach((button) => { button.disabled = true; });
     message('正在填充…');
     try {
-      const reply = await ext.runtime.sendMessage({ type: '1warden:inline-fill', itemId }) as InlineReply;
+      const reply = await ext.runtime.sendMessage({ type: '1warden:inline-fill', itemId, target,
+        nonce: credentials?.nonce, documentUrl: pageUrl }) as InlineReply;
       if (version !== request || !host) return;
       if (!reply || 'error' in reply) throw new Error(reply && 'error' in reply ? reply.error : '扩展没有响应，请重试');
       close();
@@ -200,7 +206,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
 
   async function unlock(): Promise<void> {
     awaitingUnlock = true;
-    message('请在 1Warden 弹窗中解锁，再回到此处选择账号。');
+    message('请在 1Warden 弹窗中解锁，再回到此处选择填充。');
     // Opening a native action popup can leave its Promise pending; observing
     // the completed unlock must not depend on that Promise settling.
     scheduleRefresh();
@@ -217,27 +223,30 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
   async function refresh(quiet = false): Promise<void> {
     if (!host || busy) return;
     const version = ++request;
-    if (!quiet) message('正在查找账号…');
+    if (!quiet) message(target?.kind === 'totp' ? '正在查找验证码…' : '正在查找账号…');
     try {
-      const reply = await ext.runtime.sendMessage({ type: '1warden:inline-accounts' }) as InlineAccounts | { error: string };
+      const reply = await ext.runtime.sendMessage({ type: '1warden:inline-accounts', target,
+        nonce: credentials?.nonce, documentUrl: pageUrl }) as InlineAccounts | { error: string };
       if (version !== request || !host) return;
       if (!reply || 'error' in reply) throw new Error(reply && 'error' in reply ? reply.error : '扩展没有响应，请重试');
       if (!reply.unlocked && quiet) { scheduleRefresh(); return; }
       const hadFocus = document.activeElement === host;
       choices?.replaceChildren();
       buttons = [];
-      host.dataset['state'] = reply.unlocked ? 'accounts' : 'locked';
+      host.dataset['state'] = reply.unlocked ? (reply.accounts.length ? 'accounts' : 'empty') : 'locked';
       if (!reply.unlocked) {
-        message('解锁保险库以查看此网站的账号');
+        message(target?.kind === 'totp' ? '解锁保险库以填入此网站的验证码' : '解锁保险库以查看此网站的账号');
         action('解锁 1Warden', null, () => { void unlock(); });
       } else {
         awaitingUnlock = false;
         if (refreshTimer !== null) clearTimeout(refreshTimer);
         refreshTimer = null;
-        message(reply.accounts.length ? '' : '此网站没有匹配的账号');
+        message(reply.accounts.length ? (target?.kind === 'totp' ? '选择账号，填入当前验证码' : '')
+          : target?.kind === 'totp' ? '此网站没有可用的验证码。请在 1Warden 的对应账号中配置 TOTP，或使用你的验证器。'
+            : '此网站没有匹配的账号。登录后可按提示保存到 1Warden。');
         for (const account of reply.accounts) action(account.title, account.username, () => { void choose(account.id); });
       }
-      if (anchor && credentials?.canGenerate(anchor)) {
+      if (reply.unlocked && anchor && target?.kind === 'login' && credentials?.canGenerate(anchor)) {
         const field = anchor;
         action('生成新密码…', null, () => { close(true); credentials.openGenerator(field); });
       }
@@ -264,8 +273,7 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
     if (credentials?.suppress(target)) return false;
     const fields = readFields();
     const index = Array.from(document.querySelectorAll('input, textarea')).indexOf(target);
-    const plan = classifyFields(fields);
-    return index >= 0 && (index === plan.username || index === plan.password);
+    return focusedPlan(fields, index) !== null;
   }
 
   function show(event: Event): void {
@@ -277,6 +285,8 @@ export function installInlinePicker(readFields: () => FieldDescriptor[], credent
     close();
     credentials?.onOpen();
     anchor = event.target;
+    const index = Array.from(document.querySelectorAll('input, textarea')).indexOf(anchor);
+    target = { index, kind: focusedPlan(readFields(), index)!.kind };
     pageUrl = location.href;
     createHost();
     position();
