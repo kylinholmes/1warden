@@ -189,7 +189,7 @@ export function Select({ value, options, onChange, placeholder = '请选择', cl
         onMouseDown={event => event.preventDefault()}
         onPointerMove={() => { if (!option.disabled) setActive(index); }}
         onClick={event => { event.preventDefault(); choose(index); }}>
-        <span className="min-w-0 flex-1 truncate">{option.label}</span>{option.suffix}<span className="select-check" aria-hidden="true">{option.value === value && <IconCheck size={15} />}</span>
+        <span>{option.label}</span>{option.suffix}<span className="select-check" aria-hidden="true">{option.value === value && <IconCheck size={15} />}</span>
       </div>)}
       {options.length === 0 && <div className="select-empty">暂无可选项</div>}
     </div>}

@@ -38,6 +38,7 @@ export function createApplicationClient(service: ApplicationService, options: Op
   let locking = 0;
   let unsubscribeRemote: (() => void) | null = null;
   let unsubscribeFocus: (() => void) | null = null;
+  let latestRefresh: Promise<void> | null = null;
   const subscriptions = new Set<() => void>();
 
   function publish(snapshot: ApplicationSnapshot) {
@@ -48,13 +49,17 @@ export function createApplicationClient(service: ApplicationService, options: Op
     state.setState(snapshot, true);
   }
 
-  async function refresh(): Promise<void> {
-    if (disposed || locking > 0) return;
+  function refresh(): Promise<void> {
+    if (disposed || locking > 0) return Promise.resolve();
     const version = epoch;
     const sequence = ++request;
-    const snapshot = await service.snapshot();
-    if (disposed || locking > 0 || version !== epoch || sequence !== request) return;
-    publish(snapshot);
+    const pending = (async () => {
+      const snapshot = await service.snapshot();
+      if (disposed || locking > 0 || version !== epoch || sequence !== request) return;
+      publish(snapshot);
+    })();
+    latestRefresh = pending;
+    return pending;
   }
 
   const operations = Object.fromEntries(APPLICATION_METHODS.map((method) => [method, async (...args: unknown[]) => {
@@ -103,13 +108,21 @@ export function createApplicationClient(service: ApplicationService, options: Op
       if (!unsubscribeRemote && options.subscribeRemote) {
         unsubscribeRemote = options.subscribeRemote(() => { void refresh().catch(() => {}); });
       }
-      await refresh();
+      let startup = refresh();
+      await startup;
+      // A remote notification may supersede the first read. Entry routing must
+      // wait for its replacement instead of observing the empty initial state.
+      while (!disposed && latestRefresh && latestRefresh !== startup) {
+        startup = latestRefresh;
+        await startup;
+      }
     },
     refresh,
     dispose() {
       disposed = true;
       epoch++;
       request++;
+      latestRefresh = null;
       unsubscribeRemote?.();
       unsubscribeRemote = null;
       unsubscribeFocus?.(); unsubscribeFocus = null;

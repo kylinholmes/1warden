@@ -11,6 +11,38 @@ function deferred<T>() {
 const unlocked: ApplicationSnapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked', revision: 1 };
 
 describe('application client lifecycle', () => {
+  it.each(['unlocked', 'locked'] as const)('initialization waits for a newer remote %s snapshot before choosing the entry screen', async status => {
+    const first = deferred<ApplicationSnapshot>(), latest = deferred<ApplicationSnapshot>();
+    let notify = () => {}, reads = 0;
+    const client = createApplicationClient({ snapshot: () => ++reads === 1 ? first.promise : latest.promise } as ApplicationService, {
+      ...options, subscribeRemote(listener) { notify = listener; return () => {}; },
+    });
+    const startup = client.initialize().then(() => client.getSnapshot());
+    notify();
+    first.resolve(unlocked);
+    // Let the superseded startup request settle before the authoritative reply.
+    await new Promise(resolve => setTimeout(resolve, 0));
+    const current = { ...unlocked, status, revision: 2 };
+    latest.resolve(current);
+    expect(await startup).toEqual(current);
+    expect(reads).toBe(2);
+    client.dispose();
+  });
+
+  it('reports a failed replacement startup read so the entry screen can offer retry', async () => {
+    const first = deferred<ApplicationSnapshot>();
+    let notify = () => {}, reads = 0;
+    const client = createApplicationClient({ snapshot: () => ++reads === 1 ? first.promise : Promise.reject(new Error('offline')) } as ApplicationService, {
+      ...options, subscribeRemote(listener) { notify = listener; return () => {}; },
+    });
+    const startup = expect(client.initialize()).rejects.toThrow('offline');
+    notify();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    first.resolve(unlocked);
+    await startup;
+    client.dispose();
+  });
+
   it.each(['lock', 'switchAccount'] as const)('never returns an export generated before %s', async boundary => {
     const exported = deferred<Awaited<ReturnType<ApplicationService['exportVault']>>>();
     const client = createApplicationClient({ snapshot: async () => unlocked, exportVault: () => exported.promise,

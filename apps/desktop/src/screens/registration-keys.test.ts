@@ -4,6 +4,7 @@ import { decryptBytes, decryptWithPrivateKey, deriveMasterKey, encryptWithPublic
 import { createRegistrationKeys, validateRegistrationPassword } from './registration-keys';
 
 describe('registration keys interoperate with the existing vault', () => {
+  // Real 600k-round KDFs and RSA generation compete with other tests on CI.
   it('wraps a fresh 64-byte user key, encrypts PKCS#8 RSA, and only returns encrypted credentials', async () => {
     const password = 'a long disposable test passphrase';
     const email = 'person@example.test';
@@ -21,7 +22,7 @@ describe('registration keys interoperate with the existing vault', () => {
     expect(await decryptWithPrivateKey(encrypted, privateKey)).toEqual(fixture);
     expect(payload.masterPasswordHash).toBe(await hashMasterPassword(master, password));
     zeroize(privateKey); zeroize(master); zeroize(bytes); zeroizeKey(stretched); zeroizeKey(userKey);
-  });
+  }, 30_000);
   it('requires the official minimum length and a matching confirmation', () => {
     expect(() => validateRegistrationPassword('short', 'short')).toThrow('12');
     expect(() => validateRegistrationPassword('a long password', 'another password')).toThrow('不一致');

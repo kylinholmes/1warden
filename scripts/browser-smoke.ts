@@ -13,6 +13,7 @@ import type { VaultItem } from '../packages/vault/src/model';
 import { encryptCipher } from '../packages/vault/src/encrypt';
 import { decryptCipher, decryptFolder } from '../packages/vault/src/decrypt';
 import type { CipherDto } from '../packages/api/src/types';
+import type { CapturePreview } from '../apps/desktop/src/application/browser-credentials';
 
 const ROOT = resolve(import.meta.dir, '..');
 const product = process.argv[2];
@@ -289,6 +290,7 @@ try {
   // Firefox does not emit normal network-navigation events for moz-extension
   // URLs. Wait on its BiDi readiness result, then the actual UI selector.
   const openPopup = async (reload = false) => {
+    await popup.bringToFront();
     if (name === 'firefox') {
       const context = popup.mainFrame().browsingContext;
       if (reload) await context.reload({ wait: 'interactive' });
@@ -312,24 +314,31 @@ try {
 
   await popup.evaluate(async (fixture: unknown) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
+    const { serverUrl, email } = (fixture as any).account;
+    // Session injection bypasses the login form's remembered-account write.
+    await api.storage.local.set({ '1warden.accounts': JSON.stringify([{ serverUrl, email }]) });
     await api.storage.session.set({ '1warden.session': fixture, '1warden.account': (fixture as any).account });
     await api.storage.session.remove('1warden.connectionDraft');
   }, seed);
   await openPopup(true);
+  await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
+  check('reopening an unlocked popup resumes the current vault directly', !(await popup.$('[data-add-server]')));
+  // Visit the saved-account picker through its real navigation path.
+  await openNavigation();
+  await click('[aria-label="账户菜单"]');
+  await click('[role="menuitem"]::-p-text(添加账户)');
+  await popup.waitForSelector('input[type="email"]', { visible: true });
+  await click('[aria-label="返回上一级"]');
   await popup.waitForSelector('main li button');
   check('populated home retains account selection and another-account login', await popup.$eval('h1', (node: Element) => node.textContent === '欢迎回来')
     && await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录其他账户'));
-  await enterHome();
+  await click('main li button');
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   check('shared vault renders from background session', true);
   const rpc = async (method: string, args: unknown[] = []) => popup.evaluate(async (m: string, a: unknown[]) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
     return api.runtime.sendMessage({ type: '1warden:application', method: m, args: a });
   }, method, args);
-  async function enterHome() {
-    await popup.waitForSelector('main li button');
-    await popup.$eval('main li button', (b: HTMLButtonElement) => b.click());
-  }
   const snapshot = await rpc('snapshot');
   check('snapshot contains summaries without passwords or keys', snapshot.ok && snapshot.result.items.length === 2
     && !JSON.stringify(snapshot).includes(secret) && !JSON.stringify(snapshot).includes('userKey'));
@@ -715,40 +724,45 @@ try {
   const registeredPassword = 'Synthetic-New-Registration!42';
   const changedPassword = 'Synthetic-Changed-Registration!43';
   async function submitCredentialForm(changing: boolean): Promise<void> {
-    await login.evaluate(({ changing, user, original, changed }) => {
+    await login.bringToFront();
+    await login.evaluate((changing: boolean) => {
       const form = document.querySelector('form')!;
       form.innerHTML = '<label>Email<input id="email" type="email" autocomplete="username"></label>'
         + (changing ? '<label>Current password<input id="current" type="password" autocomplete="current-password"></label>' : '')
         + '<label>New password<input id="new-password" type="password" autocomplete="new-password"></label>'
         + '<label>Confirm password<input id="confirm-password" type="password" autocomplete="new-password"></label>'
         + '<button type="submit">Submit</button>';
-      (form.querySelector('#email') as HTMLInputElement).value = user;
-      if (changing) (form.querySelector('#current') as HTMLInputElement).value = original;
-      (form.querySelector('#new-password') as HTMLInputElement).value = changing ? changed : original;
-      (form.querySelector('#confirm-password') as HTMLInputElement).value = changing ? changed : original;
-      form.requestSubmit();
-    }, { changing, user: registeredUsername, original: registeredPassword, changed: changedPassword });
+    }, changing);
+    // Both engines support trusted keyboard/pointer input on regular web pages.
+    // Scripted requestSubmit alone must not authorize credential capture.
+    await login.type('#email', registeredUsername);
+    if (changing) await login.type('#current', registeredPassword);
+    await login.type('#new-password', changing ? changedPassword : registeredPassword);
+    await login.type('#confirm-password', changing ? changedPassword : registeredPassword);
+    await login.click('button[type="submit"]');
   }
-  async function pendingCapture(action: string) {
-    await popup.waitForFunction(async (id: number, action: string, user: string) => {
+  async function pendingCapture(action: string): Promise<CapturePreview> {
+    const handle = await popup.waitForFunction(async (id: number, action: string, user: string) => {
       const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-      const response = await api.runtime.sendMessage({ type: '1warden:pending', tabId: id });
-      return response.pending?.action === action && response.pending?.username === user;
+      const response = await api.runtime.sendMessage({ type: '1warden:credential-list', application: true });
+      if (!response?.ok) throw new Error(response?.error?.message ?? 'Missing capture response');
+      return response.result.find((row: CapturePreview) => row.tabId === id && row.action === action && row.username === user);
     }, {}, tabId, action, registeredUsername);
-    return popup.evaluate(async (id: number) => {
-      const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-      return api.runtime.sendMessage({ type: '1warden:pending', tabId: id });
-    }, tabId);
+    try { return await handle.jsonValue(); } finally { await handle.dispose(); }
   }
-  const saveCapture = () => popup.evaluate(async (id: number) => {
+  const saveCapture = (capture: CapturePreview) => popup.evaluate(async (capture: CapturePreview) => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
-    return api.runtime.sendMessage({ type: '1warden:save-capture', tabId: id, application: true });
-  }, tabId);
+    return api.runtime.sendMessage({ type: '1warden:credential-save', application: true, choice: {
+      captureId: capture.id, revision: capture.revision, action: capture.action,
+      ...(capture.action === 'update' ? { itemId: capture.itemId,
+        targetUpdatedAt: capture.targets.find(row => row.id === capture.itemId)?.updatedAt } : {}),
+    } });
+  }, capture);
   await submitCredentialForm(false);
   const registration = await pendingCapture('save');
   check('registration with new-password and confirmation prompts before writing',
     cipherCreates.length === 0 && !JSON.stringify(registration).includes(registeredPassword));
-  check('registration save confirmation succeeds', (await saveCapture()).ok === true);
+  check('registration save confirmation succeeds', (await saveCapture(registration)).ok === true);
   const created = seed.items.find(record => record.login?.username === registeredUsername)!;
   check('registration creates one encrypted record with the correct username and new password',
     cipherCreates.length === 1 && created?.login?.password === registeredPassword
@@ -756,15 +770,14 @@ try {
   await submitCredentialForm(true);
   const change = await pendingCapture('update');
   check('change-password targets the existing login and awaits confirmation',
-    change.pending.itemId === created.id && seed.items.find(record => record.id === created.id)?.login?.password === registeredPassword);
-  check('change-password confirmation succeeds', (await saveCapture()).ok === true);
+    change.itemId === created.id && seed.items.find(record => record.id === created.id)?.login?.password === registeredPassword);
+  check('change-password confirmation succeeds', (await saveCapture(change)).ok === true);
   const updatedLogin = seed.items.find(record => record.id === created.id)!;
   check('change-password saves the new password and preserves the old password in history',
     updatedLogin.login?.password === changedPassword && updatedLogin.passwordHistory[0]?.password === registeredPassword
       && cipherCreates.length === 1 && !JSON.stringify(cipherWrites).includes(changedPassword));
 
   await openPopup(true);
-  await enterHome();
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   await screenshot('vault-440');
   // Exercise the complete merge against this loopback server, after unrelated
@@ -786,7 +799,8 @@ try {
     && mergePreview.result.blockers.length === 0
     && mergePasswords.every(value => !JSON.stringify(mergePreview).includes(value)),
     JSON.stringify({ ok: mergePreview.ok, error: mergePreview.error, blockers: mergePreview.result?.blockers }));
-  await openPopup(true); await enterHome();
+  await openPopup(true);
+  await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
   await navigation('整理与分析');
   await selectOption(organizationPicker, 'similar');
   const groupLabel = await popup.$$eval('main[aria-label="整理与分析"] section', (sections: HTMLElement[]) =>
@@ -841,7 +855,6 @@ try {
       popup.setDefaultTimeout(15_000);
       await popup.setViewport({ width: 440, height: 600 });
       await openPopup();
-      await enterHome();
       await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });
     };
     await copyPassword();
@@ -871,7 +884,6 @@ try {
   });
   check('lock removes persisted session keys', stored['1warden.session'] === undefined);
   await openPopup(true);
-  await enterHome();
   await popup.waitForSelector('input[type="password"]', { visible: true });
   check('reopening preserves locked account state', (await rpc('snapshot')).result.status === 'locked');
   check('no uncaught UI errors', errors.length === 0, errors.join('\n'));

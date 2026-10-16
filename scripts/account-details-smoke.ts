@@ -244,9 +244,9 @@ try {
   await second.waitForFunction(() => document.documentElement.dataset.palette === 'dracula' && document.documentElement.dataset.theme === 'dark' && document.documentElement.dataset.iconStyle === 'plate');
   check('fresh second installation decrypts and applies account appearance', true);
   await second.reload();
-  // Reopening intentionally lands on the account picker, even when its saved
-  // session is unlocked. Select our synthetic account before entering settings.
-  await pickAccount(second); await second.waitForSelector('[aria-label="账户菜单"]');
+  // An unlocked popup resumes its current account without another selection.
+  await second.waitForSelector('[aria-label="搜索条目"]', { visible: true });
+  check('reopening an unlocked popup resumes the vault directly', !(await second.$('[data-add-server]')));
   await second.waitForFunction(() => document.documentElement.dataset.iconStyle === 'plate');
   await section(second, 'preferences');
   check('synced icon style survives reopening the isolated second client',
