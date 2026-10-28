@@ -82,6 +82,12 @@ it.each(['', 'Synthetic'])('retains selected detail during sync with query "%s" 
   expect(host.querySelector('.item-detail')?.textContent).toContain('Updated record');
   expect(host.querySelector('.item-detail')?.textContent).not.toContain('Synthetic detail secret');
   expect(getItem).toHaveBeenCalledTimes(1);
+  // The server's partial favorite endpoint does not return a revision date.
+  await act(async () => {
+    vault.getSession().replaceData([{ ...original, name: 'Updated record', updatedAt: '2026-02-01', favorite: true }], folders);
+    await client.refresh();
+  });
+  expect(host.querySelector('[aria-label="取消收藏"]')).not.toBeNull();
   if (query) {
     await act(async () => { vault.getSession().replaceData([], folders); await client.refresh(); });
     expect(host.querySelector('.item-detail')).toBeNull();

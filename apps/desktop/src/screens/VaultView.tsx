@@ -404,7 +404,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
                 const item = session.items.find(item => item.id === id);
                 if (!item) return <div className="p-4"><BackButton onBack={onBack} label="返回安全报告" />
                   <p role="status" className="p-4 text-sm text-[var(--ink-secondary)]">这条记录已不存在，请返回安全报告。</p></div>;
-                return <SelectedDetail key={`${id}:${item.updatedAt}`} client={client} item={item} icons={icons}
+                return <SelectedDetail key={JSON.stringify(item)} client={client} item={item} icons={icons}
                   folders={folders} onError={message => toast.show({ tone: 'danger', message })}
                   onEdit={() => { void edit(id); }} onBack={onBack} backLabel="返回安全报告" site={site}
                   onDelete={() => setConfirmDelete(item)}
@@ -568,7 +568,9 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
             <div className="vault-detail-scroll">
               {shownSelected ? (
                 <SelectedDetail
-                  key={`${shownSelected.id}:${shownSelected.updatedAt}`}
+                  // Partial favorite/folder updates can retain updatedAt. Only
+                  // this record's changed summary should replace its detail.
+                  key={JSON.stringify(shownSelected)}
                   client={client}
                   item={shownSelected}
                   folders={session.folders}
