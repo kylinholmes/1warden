@@ -417,7 +417,7 @@ try {
   const initialRows = await rowNames();
   check('default date sort puts newest first', initialRows[0]?.includes('Zulu smoke login') === true, JSON.stringify(initialRows));
   await click('[aria-label="排序方式"]');
-  await click('button::-p-text(名称)');
+  await click('[data-select-popup] [role="option"][data-value="name"]');
   await popup.waitForFunction(() => document.querySelector('.vault-list li > button')?.textContent?.includes('Alpha smoke login'));
   check('name sort changes list order', true);
   await type('[aria-label="搜索条目"]', 'Alpha');

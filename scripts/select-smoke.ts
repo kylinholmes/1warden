@@ -73,8 +73,11 @@ try {
   for (const mode of ['dark', 'light']) {
     await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: mode }]);
     for (const width of [360, 1080]) {
-      await page.setViewport({ width, height: 720 }); await visit('form');
-      await clickText('信用卡');
+      // The compact type selector shortens the form. Use a short viewport so
+      // the card-brand trigger genuinely has insufficient room below it.
+      await page.setViewport({ width, height: width < 900 ? 520 : 720 }); await visit('form');
+      if (await page.$(picker('条目类型'))) await select('条目类型', 'card');
+      else await clickText('信用卡');
       await page.$eval(picker('卡片品牌'), node => node.scrollIntoView({ block: 'end' }));
       await page.click(picker('卡片品牌'));
       await inspectPopup('卡片品牌', `card-${mode}-${width}`, true);
@@ -124,14 +127,15 @@ try {
     const transfer = new DataTransfer(); transfer.items.add(new File(['name,url,username,password\nFixture,https://fixture.example,synthetic,synthetic-password\n'], 'synthetic.csv', { type: 'text/csv' }));
     (node as HTMLInputElement).files = transfer.files; node.dispatchEvent(new Event('change', { bubbles: true }));
   });
-  await page.waitForSelector('#import-format'); await page.waitForFunction(() => !document.querySelector('[role="status"]'));
+  await page.waitForSelector('#import-format'); await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')]
+    .some(node => node.textContent?.includes('可导入 1 条记录')));
   await page.click('#import-format');
   const importGeometry = await page.$eval('[data-select-popup]', node => ({ width: node.getBoundingClientRect().width, scrollWidth: node.scrollWidth, clientWidth: node.clientWidth,
     wraps: [...node.querySelectorAll<HTMLElement>('[role="option"] > span:first-child')].some(label => label.getBoundingClientRect().height > 30) }));
   check('long import-format labels wrap without horizontal scrolling at 360px', importGeometry.wraps && importGeometry.scrollWidth <= importGeometry.clientWidth, importGeometry);
   await page.screenshot({ path: join(output, 'import-360.png') });
   await page.keyboard.press('End'); await page.keyboard.press('Enter');
-  await page.waitForFunction(() => !document.querySelector('[role="status"]'));
+  await page.waitForFunction(() => [...document.querySelectorAll('[role="status"]')].some(node => node.textContent?.includes('可导入 1 条记录')));
   check('import format choice reparses fixture and leaves the import confirmation pending', await page.$eval('#import-format', node => (node as HTMLButtonElement).value === 'csv')
     && await page.evaluate(() => [...document.querySelectorAll('button')].some(button => button.textContent?.includes('导入这 1 条'))));
   check('no browser runtime errors', errors.length === 0, errors);

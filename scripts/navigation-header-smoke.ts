@@ -69,8 +69,11 @@ async function crumb(label: string) {
   await button.click(); await handle.dispose(); await settle();
 }
 async function formType(label: string) {
-  const handle = await page.evaluateHandle((text: string) => [...document.querySelectorAll<HTMLButtonElement>('[role="dialog"] button')]
-    .find(button => button.textContent?.trim() === text), label);
+  const compact = await page.$('[role="combobox"][aria-label="条目类型"]');
+  if (compact) await compact.click();
+  const handle = await page.evaluateHandle((text: string, compact: boolean) => [...document.querySelectorAll<HTMLElement>(compact
+    ? '[data-select-popup] [role="option"]' : '[role="dialog"] button')]
+    .find(button => button.textContent?.trim() === text), label, Boolean(compact));
   const button = handle.asElement();
   if (!button) throw new Error(`Missing item type: ${label}`);
   await button.click(); await handle.dispose(); await settle();
@@ -98,12 +101,19 @@ async function stackedGeometry(scope: string, editor: boolean) {
       if (!value) return [];
       const l = label.getBoundingClientRect(), v = value.getBoundingClientRect(), r = row.getBoundingClientRect();
       const parent = inner(row.parentElement!);
+      // Detail rows now paint through the card gutter, retaining its border.
+      // Their content still aligns with compound-cell labels. Editor fields
+      // retain the parent content-width contract.
+      const rowContent = inner(row);
+      const fullRow = editor
+        ? Math.abs(r.left - parent.left) < 1 && Math.abs(r.right - parent.right) < 1
+        : Math.abs(rowContent.left - parent.left) < 1 && Math.abs(rowContent.right - parent.right) < 1;
       const actions = row.querySelector<HTMLElement>('[data-field-actions]');
       const c = content.getBoundingClientRect(), a = actions?.getBoundingClientRect();
       const compound = row.closest<HTMLElement>('[data-compound-field]');
       return [{ label: label.textContent?.trim(), labelAbove: l.bottom <= v.top + 1,
         leftAligned: Math.abs(l.left - v.left) < 1 && Math.abs(l.left - c.left) < 1,
-        fullRow: Math.abs(r.left - parent.left) < 1 && Math.abs(r.right - parent.right) < 1,
+        fullRow,
         compound: compound?.getAttribute('data-compound-field') ?? null,
         actionsCentered: editor || !a || Boolean(a && Math.abs(a.top + a.height / 2 - c.top - c.height / 2) < 1),
         actionsBeside: editor || !a || Boolean(a && a.left >= c.right - 1 && a.right <= r.right + 1),
@@ -131,7 +141,7 @@ async function stackedGeometry(scope: string, editor: boolean) {
         labelsTopAligned: !sameRow || labels.every(label => Math.abs(label.top - labels[0]!.top) < 1),
         equalColumns: !sameRow || (Math.max(...cells.map(cell => cell.width)) - Math.min(...cells.map(cell => cell.width)) < 1
           && cells.every((cell, index) => index === 0 || cell.left >= cells[index - 1]!.right - 1)),
-        start: inside.left, width, sameRow, stacked,
+        start: labels[0]?.left, width, sameRow, stacked,
         contained: group.scrollWidth <= group.clientWidth && grid.scrollWidth <= grid.clientWidth };
     });
     return { fields, compounds, documentContained: document.documentElement.scrollWidth <= innerWidth };
@@ -480,9 +490,12 @@ try {
   // second rounded focus frame from the application's global focus rule.
   for (const theme of ['light', 'dark']) {
     size = `quick-${theme}`;
+    await page.bringToFront();
     await page.setViewport({ width: 780, height: 500 });
     await page.goto(`http://127.0.0.1:${server.port}/?screen=quick&theme=${theme}`, { waitUntil: 'domcontentloaded' });
     await page.waitForSelector('.quick-search-input'); await settle();
+    await page.waitForFunction(() => document.activeElement === document.querySelector('.quick-search-input')
+      && getComputedStyle(document.querySelector('.quick-search-head')!).boxShadow !== 'none', { polling: 'raf' });
     const focus = await page.evaluate(() => {
       const input = document.querySelector<HTMLInputElement>('.quick-search-input')!;
       const head = input.closest('.quick-search-head')!;
@@ -495,19 +508,36 @@ try {
       && focus.border === '0px' && focus.radius === '0px' && focus.shadow === 'none', focus);
     check('quick search surface retains a visible keyboard focus indicator', focus.headShadow !== 'none', focus);
     await page.screenshot({ path: join(output, `${size}.png`) });
+    const firstOption = await page.$eval('.quick-search-input', node => node.getAttribute('aria-activedescendant'));
+    await page.keyboard.press('ArrowDown');
+    await page.waitForFunction((before: string) => {
+      const input = document.querySelector('.quick-search-input')!;
+      const id = input.getAttribute('aria-activedescendant');
+      return document.activeElement === input && id !== before && !!id
+        && document.getElementById(id)?.getAttribute('aria-selected') === 'true';
+    }, {}, firstOption);
+    await settle();
+    const selectedOption = await page.evaluate(() => {
+      const input = document.querySelector('.quick-search-input')!;
+      const option = document.getElementById(input.getAttribute('aria-activedescendant')!)!;
+      const rect = option.getBoundingClientRect();
+      return { role: option.getAttribute('role'), top: rect.top, bottom: rect.bottom, height: innerHeight,
+        background: getComputedStyle(option).backgroundColor, parent: getComputedStyle(option.parentElement!).backgroundColor };
+    });
+    check('quick keyboard selection keeps search focus and exposes a visible active option', selectedOption.role === 'option'
+      && selectedOption.top >= 0 && selectedOption.bottom <= selectedOption.height && selectedOption.background !== selectedOption.parent, selectedOption);
     await page.keyboard.press('Tab');
-    check('quick result buttons retain their own keyboard focus indicator', await page.evaluate(() =>
-      document.activeElement?.tagName === 'BUTTON' && getComputedStyle(document.activeElement!).outlineStyle !== 'none'));
     // Key dispatch completion is not a paint boundary. Keep checking the actual
     // rendered focus state; a persistent highlight must still fail the test.
     const blurState = await page.evaluate(() => ({ active: document.activeElement?.tagName,
       inputFocus: document.querySelector('.quick-search-input')!.matches(':focus-visible'),
       shadow: getComputedStyle(document.querySelector('.quick-search-head')!).boxShadow }));
     console.log(`Quick search blur before rendered-state check: ${JSON.stringify(blurState)}`);
-    await page.waitForFunction(() => document.activeElement?.tagName === 'BUTTON'
-      && getComputedStyle(document.activeElement).outlineStyle !== 'none'
+    await page.waitForFunction(() => document.activeElement !== document.querySelector('.quick-search-input')
       && !document.querySelector('.quick-search-input')!.matches(':focus-visible')
       && getComputedStyle(document.querySelector('.quick-search-head')!).boxShadow === 'none', { polling: 'raf' });
+    check('Tab leaves search without trapping focus in active-descendant results', await page.evaluate(() =>
+      document.activeElement?.closest('[role="option"]') === null));
     check('leaving search removes its focus indicator', await page.$eval('.quick-search-head', node => getComputedStyle(node).boxShadow === 'none'));
   }
   check('no uncaught UI errors', errors.length === 0, errors);

@@ -31,14 +31,14 @@ try {
   await page.emulateMediaFeatures([{ name: 'prefers-color-scheme', value: 'dark' }]);
   await appearance(1080, 720);
   await page.click('.palette-trigger');
-  check('all nine palettes exist', await page.$$eval('[role="option"]', (nodes: Element[]) => nodes.length === 9));
+  check('all thirteen palettes exist', await page.$$eval('[role="option"]', (nodes: Element[]) => nodes.length === 13));
   await page.keyboard.press('End'); await page.keyboard.press('Enter');
   check('keyboard chooses the last palette', await page.evaluate(() => document.documentElement.dataset.palette === 'linear'));
   await page.click('.palette-trigger'); await page.keyboard.press('Escape');
   check('Escape closes only the palette picker and restores focus', await page.evaluate(() => !document.querySelector('[role="listbox"]') && !!document.querySelector('[role="dialog"]') && document.activeElement?.classList.contains('palette-trigger')));
   for (const mode of ['light', 'dark']) {
     await page.click(`.appearance-mode:has(.mode-${mode})`);
-    for (const id of ['original', 'graphite', 'ayu', 'catppuccin', 'dracula', 'everforest', 'github', 'gruvbox', 'linear']) {
+    for (const id of ['original', 'jade', 'clear-blue', 'whale', 'brass', 'graphite', 'ayu', 'catppuccin', 'dracula', 'everforest', 'github', 'gruvbox', 'linear']) {
       await page.click('.palette-trigger'); await page.click(`[role="option"][id$="-${id}"]`);
       check(`${id}/${mode}: palette and mode remain independent`, await page.evaluate(({ id, mode }: any) =>
         document.documentElement.dataset.palette === id && document.documentElement.dataset.theme === mode

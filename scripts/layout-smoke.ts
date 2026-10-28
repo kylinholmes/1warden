@@ -95,6 +95,9 @@ try {
     check('narrowing keeps selected detail and guards list focus', await page.$eval('.vault-list', (node: HTMLElement) => node.inert) && Boolean(await page.$('.vault-detail article')));
     await page.setViewport({ width:900, height:1200 });
     await settle();
+    // CSS media layout can precede React's matchMedia render on hosted Edge.
+    // Wait on the interaction guard itself, keeping a bounded assertion.
+    await page.waitForFunction(() => !document.querySelector<HTMLElement>('.vault-list')!.inert);
     check('widening releases list focus guard', !await page.$eval('.vault-list', (node: HTMLElement) => node.inert));
     await visit('vault', 820,1180);
     await page.hover('[aria-label="导航"]');

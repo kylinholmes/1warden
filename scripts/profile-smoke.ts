@@ -89,31 +89,31 @@ try {
   async function open(selector: string) {
     page = await browser.newPage(); await page.setViewport({ width: 440, height: 600 });
     if (firefox) await page.mainFrame().browsingContext.navigate(url, 'interactive'); else await page.goto(url);
-    await page.waitForFunction(() => !!document.querySelector('main button, input[type="email"], input[type="password"], .nav-trigger'));
+    await page.waitForFunction(() => !!document.querySelector('main[aria-label="账户首页"] button, input[type="email"], input[type="password"], .nav-trigger'));
     // Popups now resume the selected account; explicitly navigate when testing Home.
-    if (selector === 'main li button' && !await page.$('main')) {
+    if (selector === 'main[aria-label="账户首页"] li button' && !await page.$('main[aria-label="账户首页"]')) {
       if (await page.$('.nav-trigger')) { await menuAction('添加账户'); await back(); }
       else await back();
     }
-    if (await page.$('main')) {
+    if (await page.$('main[aria-label="账户首页"]')) {
       if (selector === 'input[type="email"]') await page.evaluate(() => document.querySelector<HTMLButtonElement>('[data-add-server]')?.click());
-      else if (selector !== 'main li button') await pickHome();
+      else if (selector !== 'main[aria-label="账户首页"] li button') await pickHome();
     }
     await page.waitForSelector(selector);
   }
   async function pickHome() {
     const s = (await rpc('snapshot')).result;
-    await page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('main li button')].some(b => !b.disabled));
+    await page.waitForFunction(() => [...document.querySelectorAll<HTMLButtonElement>('main[aria-label="账户首页"] li button')].some(b => !b.disabled));
     await page.evaluate((target: any) => {
-      const buttons = [...document.querySelectorAll<HTMLButtonElement>('main li button')];
+      const buttons = [...document.querySelectorAll<HTMLButtonElement>('main[aria-label="账户首页"] li button')];
       const found = buttons.find(b => b.textContent?.includes(target?.email ?? '') && b.textContent?.includes(target ? new URL(target.serverUrl).host : '')) ?? buttons[0];
       found?.click();
     }, s.account);
   }
   async function homeProfile(displayName: string, avatarDataUrl: string, stage: string) {
-    await page.waitForSelector('main li button');
+    await page.waitForSelector('main[aria-label="账户首页"] li button');
     await page.waitForFunction((expected: { email: string; host: string; displayName: string; avatarDataUrl: string }) => {
-      const row = [...document.querySelectorAll<HTMLButtonElement>('main li button')]
+      const row = [...document.querySelectorAll<HTMLButtonElement>('main[aria-label="账户首页"] li button')]
         .find(button => button.textContent?.includes(expected.email) && button.textContent?.includes(expected.host));
       const img = row?.querySelector('img');
       return row?.textContent?.includes(expected.displayName) && img?.complete && img.naturalWidth > 0 && img.src === expected.avatarDataUrl;
@@ -211,7 +211,7 @@ try {
   if (!firefox) { await page.evaluate(() => Promise.all(document.getAnimations().filter((a) => a.effect?.getComputedTiming().iterations !== Infinity).map((a) => a.finished.catch(() => {})))); await page.screenshot({ path: join(output, 'profile-light.png') }); }
   await menuAction('添加账户'); await back();
   await homeProfile('彩色测试用户', saved.profile.avatarDataUrl, 'after profile save and return');
-  await page.close(); await open('main li button');
+  await page.close(); await open('main[aria-label="账户首页"] li button');
   await homeProfile('彩色测试用户', saved.profile.avatarDataUrl, 'after popup reopen');
   if (!firefox) {
     await page.evaluate(() => Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().iterations !== Infinity).map(a => a.finished.catch(() => {}))));
@@ -254,16 +254,16 @@ try {
     await api.storage.local.set({ '1warden.accounts': JSON.stringify(identities),
       [`profile.v1.${JSON.stringify([remote.serverUrl, remote.email])}`]: JSON.stringify(remoteProfile) });
   }, [{ serverUrl, email }, other, remote], remoteProfile);
-  await page.close(); await open('main li button');
+  await page.close(); await open('main[aria-label="账户首页"] li button');
   await homeProfile('更新后的用户', saved.profile.avatarDataUrl, 'multiple saved accounts');
   check(await page.evaluate((targets: { serverUrl: string; email: string }[]) => targets.every(target => {
-    const row = [...document.querySelectorAll<HTMLButtonElement>('main li button')].find(button =>
+    const row = [...document.querySelectorAll<HTMLButtonElement>('main[aria-label="账户首页"] li button')].find(button =>
       button.textContent?.includes(target.email) && button.textContent?.includes(new URL(target.serverUrl).host));
     return !!row && !row.querySelector('img') && !row.textContent?.includes('更新后的用户')
       && row.querySelector('span')?.textContent?.trim() === target.email[0]?.toUpperCase();
   }), [other]), 'home fallback does not borrow another account avatar or name across email identities');
   await page.waitForFunction((expected: { email: string; host: string; name: string; avatar: string }) => {
-    const row = [...document.querySelectorAll<HTMLButtonElement>('main li button')].find(button =>
+    const row = [...document.querySelectorAll<HTMLButtonElement>('main[aria-label="账户首页"] li button')].find(button =>
       button.textContent?.includes(expected.email) && button.textContent?.includes(expected.host));
     const image = row?.querySelector('img');
     return row?.textContent?.includes(expected.name) && !row.textContent?.includes('更新后的用户')
@@ -336,7 +336,7 @@ try {
     return !!values[`profile.v1.${JSON.stringify([account.serverUrl, account.email])}`]
       && !!values[`profile.v1.${JSON.stringify([remote.serverUrl, remote.email])}`];
   }, { serverUrl, email }, remote), 'logout retains display-only caches for remembered accounts on both servers');
-  await page.close(); await open('main li button');
+  await page.close(); await open('main[aria-label="账户首页"] li button');
   await homeProfile('更新后的用户', saved.profile.avatarDataUrl, 'after logout and popup reopen');
   if (!realUpstream) {
     const clickText = (text: string) => page.evaluate((text: string) => {

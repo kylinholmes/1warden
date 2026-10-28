@@ -150,6 +150,9 @@ async function closePanel(selector: string, label: string, narrow: boolean) {
 }
 
 try {
+  // Hosted Windows can default to reduced motion. Exercise normal movement
+  // explicitly here; the reduced-motion branch below remains a separate check.
+  await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'no-preference' }]);
   // Native initPlatform runs before React's first render. Configure this
   // fixture the same way instead of changing its OS after the entrance has
   // settled and immediately sampling invalidated container/pseudo layout.
