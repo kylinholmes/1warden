@@ -32,3 +32,5 @@
 所有账户、密码、条目和服务器均为一次性测试数据；测试只结束自己启动的进程。
 
 本地验证：TypeScript 检查通过；完整 Vitest 2396/2396 通过；Windows Release 构建成功；实际 WebView2 账户回归 37/37、同步压力回归 9/9 通过。完整本地 Vitest 使用 `--testTimeout=15000`，避开 Windows 并行构建负载下已有 Git 发布夹具超过默认 5 秒的问题，未修改测试或 CI 超时配置。
+
+发布验证：[0.2.12](https://github.com/kylinholmes/1warden/releases/tag/v0.2.12) 已发布，[CI 40657713242](https://github.com/kylinholmes/1warden/actions/runs/40657713242) 全部 8 个任务通过，包含标准超时下的完整单测、Edge/Firefox、真实 Vaultwarden 协议和原生 WebView2。下载后的 10 项 SHA256 校验通过，扩展与 EXE 版本均为 0.2.12，更新清单签名与附件一致；正式发布的 Windows 免安装 EXE 再次通过 9/9 同步压力检查。
