@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Failed login -> close popup document -> reopen, using a local fake server and fresh profile. */
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -51,7 +52,7 @@ function check(condition: boolean, message: string) {
   console.log(`PASS ${product}: ${message}`);
 }
 try {
-  browser = await puppeteer.launch({
+  browser = await launchSmokeBrowser(puppeteer, {
     browser: firefox ? 'firefox' : 'chrome', headless: true, userDataDir: profile,
     executablePath: process.env[`ONEWARDEN_${product.toUpperCase()}`] ?? (firefox
       ? '/Applications/Zen.app/Contents/MacOS/zen' : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
@@ -275,7 +276,7 @@ try {
   check(await page.$('input[type="email"]') === null && await page.evaluate(() => document.body.textContent?.includes('first@example.invalid')),
     'a remembered account remains selectable and opens its unlock page after Back');
 } finally {
-  await browser?.close();
+  await closeSmokeBrowser(browser);
   server.stop(true);
   rmSync(profile, { recursive: true, force: true });
 }

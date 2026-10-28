@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 import { selectCustomServer } from './entry-smoke-helpers';
 /** Synthetic local server + disposable, headless Edge/Zen; never reads personal vaults. */
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
@@ -77,7 +78,7 @@ let page: any;
 let checks = 0;
 function check(ok: unknown, name: string) { if (!ok) throw Error(name); checks++; console.log(`PASS ${product}: ${name}`); }
 try {
-  browser = await puppeteer.launch({ browser: firefox ? 'firefox' : 'chrome', headless: true, userDataDir: directory,
+  browser = await launchSmokeBrowser(puppeteer, { browser: firefox ? 'firefox' : 'chrome', headless: true, userDataDir: directory,
     executablePath: firefox ? process.env.ONEWARDEN_ZEN ?? '/Applications/Zen.app/Contents/MacOS/zen'
       : process.env.ONEWARDEN_EDGE ?? (process.platform === 'win32' ? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe' : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
     enableExtensions: true, ...(firefox ? { args: ['--remote-allow-system-access'], extraPrefsFirefox: {
@@ -381,5 +382,5 @@ try {
     if (!removed.ok) throw Error(`Could not clean temporary Profile: ${removed.status}`);
     console.log('Removed temporary real-server Profile');
   }
-  await browser?.close(); server.stop(true); rmSync(directory, { recursive: true, force: true });
+  await closeSmokeBrowser(browser); server.stop(true); rmSync(directory, { recursive: true, force: true });
 }

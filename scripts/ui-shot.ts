@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { spawn } from 'node:child_process';
+import { ownSmokeProcess, stopSmokeProcess } from './smoke-processes.mjs';
 /**
  * 给静态页面截图 —— 界面验证用。
  *
@@ -63,8 +65,7 @@ const server = Bun.serve({
 const pageUrl = `http://127.0.0.1:${server.port}${relPath}`;
 const profile = mkdtempSync(join(tmpdir(), 'onewarden-shot-'));
 
-const edge = Bun.spawn([
-  EDGE,
+const edge = ownSmokeProcess(spawn(EDGE, [
   `--user-data-dir=${profile}`,
   `--remote-debugging-port=${PORT}`,
   `--window-size=${width},${height}`,
@@ -72,10 +73,10 @@ const edge = Bun.spawn([
   '--no-first-run', '--no-default-browser-check',
   '--hide-scrollbars',
   'about:blank',
-], { stdout: 'ignore', stderr: 'ignore' });
+], { windowsHide: true, stdio: 'ignore' }));
 
 function cleanup(): void {
-  try { edge.kill(); } catch { /* 已经退了 */ }
+  stopSmokeProcess(edge);
   server.stop(true);
   rmSync(profile, { recursive: true, force: true });
 }

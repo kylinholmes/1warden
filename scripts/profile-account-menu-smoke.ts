@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Exercise the real account-menu component with disposable storage and a headless browser. */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -61,7 +62,7 @@ function check(name: string, passed: boolean, data?: unknown) {
   checks.push(name); console.log(`✓ ${name}`);
 }
 try {
-  browser = await puppeteer.launch({ executablePath: process.env.ONEWARDEN_EDGE
+  browser = await launchSmokeBrowser(puppeteer, { executablePath: process.env.ONEWARDEN_EDGE
     ?? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge', headless: true });
   const page = await browser.newPage(); page.setDefaultTimeout(5000);
   page.on('pageerror', (error: Error) => errors.push(error.message));
@@ -144,5 +145,5 @@ try {
   check('no browser runtime errors', errors.length === 0, errors);
   writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, errors }, null, 2));
 } finally {
-  await browser?.close(); server.stop(true); rmSync(fixture, { recursive: true, force: true });
+  await closeSmokeBrowser(browser); server.stop(true); rmSync(fixture, { recursive: true, force: true });
 }

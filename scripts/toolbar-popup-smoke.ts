@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Real browser action popup geometry. Never emulate or set the popup viewport. */
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -33,7 +34,7 @@ let failure = '';
 let version = '';
 let browserEnvironment: unknown;
 try {
-  browser = await puppeteer.launch({
+  browser = await launchSmokeBrowser(puppeteer, {
     browser: engine, executablePath: executable, userDataDir: profile,
     headless,
     // Puppeteer must not resize a newly discovered native action popup.
@@ -156,7 +157,7 @@ try {
   failure = error instanceof Error ? error.stack ?? error.message : String(error);
   console.error(failure);
 } finally {
-  await browser?.close().catch(() => {});
+  await closeSmokeBrowser(browser);
   rmSync(profile, { recursive: true, force: true });
   writeFileSync(join(output, `${product}-toolbar-report.json`), JSON.stringify({ product, version, executable,
     extension: dist, buildHashes, headless, viewportOverridden: false, browserEnvironment, observations, passed: !failure, failure,

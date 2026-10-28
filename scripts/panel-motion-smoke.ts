@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Shared-screen motion checks against an isolated preview build and disposable headless browser. */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -18,7 +19,7 @@ const server = Bun.serve({
   },
 });
 let browser: any;
-try { browser = await puppeteer.launch({
+try { browser = await launchSmokeBrowser(puppeteer, {
   executablePath: process.env.ONEWARDEN_EDGE
     ?? '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
   headless: true,
@@ -321,6 +322,6 @@ try {
   throw error;
 } finally {
   writeFileSync(join(output, 'report.json'), JSON.stringify({ browserVersion, checks, errors, safeAreaSamples, exitTraces }, null, 2));
-  await browser.close();
+  await closeSmokeBrowser(browser);
   server.stop(true);
 }

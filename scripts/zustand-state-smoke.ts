@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Real React/Zustand lifecycle checks in a disposable headless browser. */
 import { resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -21,7 +22,7 @@ let browser: any;
 const errors: string[] = []; const checks: string[] = [];
 function check(name: string, passed: boolean) { if (!passed) throw new Error(name); checks.push(name); console.log(`PASS ${name}`); }
 try {
-  browser = await puppeteer.launch({ headless: true, executablePath: process.env.ONEWARDEN_EDGE, pipe: false });
+  browser = await launchSmokeBrowser(puppeteer, { headless: true, executablePath: process.env.ONEWARDEN_EDGE, pipe: false });
   const page = await browser.newPage(); page.setDefaultTimeout(5000);
   page.on('pageerror', (e: Error) => errors.push(e.message));
   page.on('console', (message: any) => { if (message.type() === 'error') errors.push(message.text()); });
@@ -61,4 +62,4 @@ try {
   check('update render exception also shows the fallback', true);
   check('only expected synthetic errors were logged', errors.every(message => message.includes('synthetic render failure') || message.includes('above error occurred in the <Thrower>')));
   console.log(JSON.stringify({ checks: checks.length, expectedRenderErrors: errors.length }));
-} finally { await browser?.close(); server.stop(true); }
+} finally { await closeSmokeBrowser(browser); server.stop(true); }

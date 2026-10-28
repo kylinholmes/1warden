@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Headless, disposable-profile UI checks for the real content bundle.
  * Build content to a temporary outDir, then pass its content.js path.
  * ONEWARDEN_PUPPETEER points to an external puppeteer-core module when needed.
@@ -63,7 +64,7 @@ function check(label: string, ok: boolean): void {
   console.log(`✓ ${label}`);
 }
 try {
-  browser = await puppeteer.launch({ browser: product === 'edge' ? 'chrome' : 'firefox',
+  browser = await launchSmokeBrowser(puppeteer, { browser: product === 'edge' ? 'chrome' : 'firefox',
     executablePath: executable, headless: true, userDataDir: profile });
   page = await browser.newPage();
   const errors: string[] = [];
@@ -259,7 +260,7 @@ try {
     active: { tag: document.activeElement?.tagName, id: document.activeElement?.id },
     chooserState: document.querySelector('[data-onewarden-inline]')?.getAttribute('data-state') })).catch(() => ({})));
 } finally {
-  await browser?.close().catch(() => {});
+  await closeSmokeBrowser(browser);
   site.stop(true);
   rmSync(profile, { recursive: true, force: true });
   writeFileSync(join(artifacts, `${product}-inline-ui-report.json`), JSON.stringify({

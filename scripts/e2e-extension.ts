@@ -1,4 +1,6 @@
 #!/usr/bin/env bun
+import { spawn } from 'node:child_process';
+import { ownSmokeProcess, stopSmokeProcess } from './smoke-processes.mjs';
 /**
  * 扩展的端到端验证 —— 在**真实 Chromium** 里跑完整的填充与保存链路。
  *
@@ -333,8 +335,7 @@ async function main(): Promise<void> {
   const site = startSiteServer();
   const profile = mkdtempSync(join(tmpdir(), 'onewarden-e2e-'));
 
-  const edge = Bun.spawn([
-    EDGE,
+  const edge = ownSmokeProcess(spawn(EDGE, [
     `--user-data-dir=${profile}`,
     `--remote-debugging-port=${PORT}`,
     '--disable-features=DisableLoadExtensionCommandLineSwitch',
@@ -343,10 +344,10 @@ async function main(): Promise<void> {
     '--no-first-run', '--no-default-browser-check',
     '--headless=new',
     PAGE_URL,
-  ], { stdout: 'ignore', stderr: 'ignore' });
+  ], { windowsHide: true, stdio: 'ignore' }));
 
   const cleanup = (): void => {
-    try { edge.kill(); } catch { /* 已经退了 */ }
+    stopSmokeProcess(edge);
     site.stop();
     rmSync(profile, { recursive: true, force: true });
   };

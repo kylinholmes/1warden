@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser, ownSmokeProcess, stopSmokeProcess } from './smoke-processes.mjs';
 import { selectCustomServer } from './entry-smoke-helpers';
 /** Isolated Edge/native WebView + synthetic loopback vault. Never opens personal vault data. */
 import { mkdtempSync, writeFileSync } from 'node:fs';
@@ -128,7 +129,7 @@ async function homeProfile(page: any, profile: { displayName: string | null; ava
 }
 async function extensionPage(name: string) {
   console.log(`Starting isolated extension: ${name}`);
-  const browser = await puppeteer.launch({ headless: true, executablePath: process.env.ONEWARDEN_EDGE ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
+  const browser = await launchSmokeBrowser(puppeteer, { headless: true, executablePath: process.env.ONEWARDEN_EDGE ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe',
     userDataDir: join(output, name), enableExtensions: true, pipe: process.platform !== 'win32' }); browsers.push(browser);
   console.log('Browser ready');
   const id = await browser.installExtension(resolve('apps/desktop/dist-extension'));
@@ -140,8 +141,8 @@ async function extensionPage(name: string) {
 }
 async function nativePage() {
   const portServer = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch: () => new Response('') }); const port = portServer.port; portServer.stop(true);
-  ownApp = spawn(process.env.ONEWARDEN_NATIVE_EXE!, [], { windowsHide: true, env: { ...process.env,
-    WEBVIEW2_USER_DATA_FOLDER: join(output, 'native-profile'), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` } });
+  ownApp = ownSmokeProcess(spawn(process.env.ONEWARDEN_NATIVE_EXE!, [], { windowsHide: true, env: { ...process.env,
+    WEBVIEW2_USER_DATA_FOLDER: join(output, 'native-profile'), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` } }));
   const browser = await connectNativeBrowser({ app: ownApp, connect: (options: any) => puppeteer.connect(options), browserURL: `http://127.0.0.1:${port}` });
   browsers.push(browser);
   let page: any; await until(async () => { page = (await browser.pages()).find((p: any) => p.url() === 'http://tauri.localhost/'); return page; }, 'native main page');
@@ -311,6 +312,6 @@ try {
   }
   throw error;
 } finally {
-  for (const browser of browsers.reverse()) { if (native && !browser.process()) await browser.disconnect(); else await browser.close(); }
-  if (ownApp && ownApp.exitCode === null) ownApp.kill(); server.stop(true);
+  try { for (const browser of browsers.reverse()) await closeSmokeBrowser(browser); }
+  finally { stopSmokeProcess(ownApp); server.stop(true); }
 }

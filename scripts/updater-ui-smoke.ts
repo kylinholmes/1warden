@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Real update components/controller with an injected download, using a disposable headless Edge profile. */
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -72,7 +73,7 @@ function check(name: string, passed: boolean) {
   checks.push(name); console.log(`PASS: ${name}`);
 }
 try {
-  browser = await puppeteer.launch({ executablePath: process.env.ONEWARDEN_EDGE
+  browser = await launchSmokeBrowser(puppeteer, { executablePath: process.env.ONEWARDEN_EDGE
     ?? (process.platform === 'win32' ? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
       : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'), headless: true, userDataDir: profile });
   const page = await browser.newPage(); page.setDefaultTimeout(5000);
@@ -181,7 +182,7 @@ try {
   writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, errors }, null, 2));
   console.log(`${checks.length} updater UI checks passed. Report: ${join(output, 'report.json')}`);
 } finally {
-  await browser?.close(); server.stop(true);
+  await closeSmokeBrowser(browser); server.stop(true);
   for (const directory of [fixture, profile]) {
     if (dirname(resolve(directory)) !== resolve(tmpdir())) throw Error('Unsafe temporary directory cleanup');
     rmSync(directory, { recursive: true, force: true });

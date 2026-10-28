@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Real shared UI, synthetic vault, isolated headless Edge. No personal storage. */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -13,10 +14,11 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) 
   const file = Bun.file(join(root, 'apps/desktop/dist-preview', path === '/' ? 'index.html' : path));
   return await file.exists() ? new Response(file) : new Response('', { status: 404 });
 } });
-const browser = await puppeteer.launch({ headless: true, executablePath: process.env.ONEWARDEN_EDGE
+const browser = await launchSmokeBrowser(puppeteer, { headless: true, executablePath: process.env.ONEWARDEN_EDGE
   ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe' });
 const page = await browser.newPage(); page.setDefaultTimeout(5000);
 const checks: string[] = []; const errors: string[] = []; const dropdownGeometry: unknown[] = [];
+const noteGeometry: unknown[] = [];
 page.on('pageerror', (e: Error) => errors.push(e.message));
 const base = `http://127.0.0.1:${server.port}/`;
 function check(label: string, pass: boolean, data?: unknown) {
@@ -100,12 +102,69 @@ try {
   const geometry = await page.$eval('.account-menu-current', (node: HTMLElement) => ({ height: node.getBoundingClientRect().height, background: getComputedStyle(node).backgroundColor }));
   check('current identity uses a compact neutral row', geometry.height < 100 && geometry.background === 'rgba(0, 0, 0, 0)', geometry);
   await page.screenshot({ path: join(output, 'account-menu.png') });
+  for (const mode of ['light', 'dark']) for (const palette of ['original', 'jade', 'clear-blue', 'whale', 'brass', 'graphite', 'ayu', 'catppuccin', 'dracula', 'everforest', 'github', 'gruvbox', 'linear']) {
+    await page.setViewport({ width: 1080, height: 720 });
+    await page.goto(base + `?screen=vault&fixture=note-icons&palette=${palette}&theme=${mode}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.tile-note');
+    await settle();
+    const metrics = await page.$$eval('.vault-list .tile-note', (nodes: HTMLElement[]) => {
+      const context = document.createElement('canvas').getContext('2d')!;
+      function luminance(color: string) {
+        context.clearRect(0, 0, 1, 1); context.fillStyle = color; context.fillRect(0, 0, 1, 1);
+        const [r, g, b] = [...context.getImageData(0, 0, 1, 1).data].slice(0, 3).map(n => {
+          const value = n / 255; return value <= .04045 ? value / 12.92 : ((value + .055) / 1.055) ** 2.4;
+        });
+        return r! * .2126 + g! * .7152 + b! * .0722;
+      }
+      function contrast(a: string, b: string) { const values = [luminance(a), luminance(b)].sort((a, b) => a - b); return (values[1]! + .05) / (values[0]! + .05); }
+      return nodes.map(node => {
+        const style = getComputedStyle(node), rect = node.getBoundingClientRect();
+        const text = node.querySelector('.tile-note-text')!.getBoundingClientRect(), mark = node.querySelector('.tile-note-mark')!.getBoundingClientRect();
+        return { width: rect.width, height: rect.height, textContrast: contrast(style.color, style.backgroundColor),
+          markerContrast: contrast(style.color, getComputedStyle(node.querySelector('.tile-note-mark')!).backgroundColor),
+          overlap: Math.min(text.right, mark.right) - Math.max(text.left, mark.left) > .1 && Math.min(text.bottom, mark.bottom) - Math.max(text.top, mark.top) > .1 };
+      });
+    });
+    noteGeometry.push({ mode, palette, metrics });
+    check(`${palette}/${mode}: note abbreviations and type markers stay readable without overlap`, metrics.length === 9
+      && metrics.every((entry: any) => Math.abs(entry.width - 34) < .05 && Math.abs(entry.height - 34) < .05 && entry.textContrast >= 4.5 && entry.markerContrast >= 3 && !entry.overlap), metrics);
+    if (palette === 'original' || palette === 'whale') await page.screenshot({ path: join(output, `note-icons-${palette}-${mode}.png`) });
+    await page.setViewport({ width: 360, height: 720 });
+    await page.click('.vault-list li > button'); await page.waitForSelector('.item-detail .tile-note'); await settle();
+    const header = await page.$eval('.item-detail .tile-note', (node: HTMLElement) => {
+      const rect = node.getBoundingClientRect(), text = node.querySelector('.tile-note-text')!.getBoundingClientRect(), mark = node.querySelector('.tile-note-mark')!.getBoundingClientRect();
+      const detail = node.closest('.vault-detail')!;
+      return { width: rect.width, height: rect.height, fits: detail.scrollWidth <= detail.clientWidth + 1,
+        overlap: Math.min(text.right, mark.right) - Math.max(text.left, mark.left) > .1 && Math.min(text.bottom, mark.bottom) - Math.max(text.top, mark.top) > .1 };
+    });
+    check(`${palette}/${mode}: 360px note detail retains its 36px icon and readable marker`, Math.abs(header.width - 36) < .05 && Math.abs(header.height - 36) < .05 && header.fits && !header.overlap, header);
+    if (palette === 'original' || palette === 'whale') await page.screenshot({ path: join(output, `note-detail-${palette}-${mode}.png`) });
+  }
+  for (const width of [360, 720, 1080]) for (const mode of ['light', 'dark']) {
+    await page.setViewport({ width, height: 720 });
+    await page.goto(base + `?screen=vault&fixture=passkey-visibility&theme=${mode}`, { waitUntil: 'domcontentloaded' });
+    await page.waitForSelector('.vault-list li > button');
+    for (const saved of [false, true]) {
+      if (await page.$('.item-detail') && width < 900) { await page.click('.detail-back'); await settle(); }
+      const label = saved ? '已保存通行密钥的登录' : '未保存通行密钥的登录';
+      const row = await page.evaluateHandle((label: string) => [...document.querySelectorAll('.vault-list li > button')].find(node => node.textContent?.includes(label)), label);
+      await row.asElement().click(); await row.dispose(); await page.waitForFunction((label: string) => document.querySelector('.item-detail h2')?.textContent?.trim() === label, {}, label);
+      await settle();
+      check(`${width}/${mode}: ${saved ? 'saved passkey shows metadata' : 'missing passkey has no empty row'}`, await page.$eval('.item-detail', (node: Element, saved: boolean) => {
+        const row = node.querySelector('[data-login-passkeys]');
+        return saved ? !!row?.textContent?.includes('已保存 1 个') && row.textContent.includes('Synthetic website') && row.textContent.includes('fixture@example.invalid')
+          : !row;
+      }, saved));
+      check(`${width}/${mode}: passkey detail does not overflow`, await page.$eval('.vault-detail', (node: HTMLElement) => node.scrollWidth <= node.clientWidth + 1));
+      if (width === 360) await page.screenshot({ path: join(output, `passkey-${saved ? 'saved' : 'absent'}-${mode}.png`) });
+    }
+  }
   check('no runtime errors', errors.length === 0, errors);
   console.log(`PASS appearance: ${checks.length} checks; ${output}`);
 } catch (error) {
   await page.screenshot({ path: join(output, 'failure.png') });
   throw error;
 } finally {
-  writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, errors, dropdownGeometry, browser: await browser.version() }, null, 2));
-  await browser.close(); server.stop(true);
+  writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, errors, dropdownGeometry, noteGeometry, browser: await browser.version() }, null, 2));
+  await closeSmokeBrowser(browser); server.stop(true);
 }

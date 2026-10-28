@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Real extension/content/background integration, headless Edge or Zen only.
  * Uses a disposable browser profile and synthetic credentials served locally.
  */
@@ -85,7 +86,7 @@ function check(label: string, ok: boolean, details = ''): void {
   console.log(`✓ ${label}`);
 }
 try {
-  browser = await puppeteer.launch({ browser: engine, executablePath: executable, headless: true,
+  browser = await launchSmokeBrowser(puppeteer, { browser: engine, executablePath: executable, headless: true,
     userDataDir: profile, enableExtensions: true, ...(engine === 'chrome' ? { pipe: true } : {
       args: ['--remote-allow-system-access'],
       extraPrefsFirefox: { 'extensions.webextensions.uuids': JSON.stringify({ '1warden@1warden.app': uuid }) },
@@ -246,7 +247,7 @@ try {
   }, url).catch(() => ({})));
   await login?.screenshot({ path: join(artifacts, `${product}-inline-failure.png`) }).catch(() => {});
 } finally {
-  await browser?.close().catch(() => {});
+  await closeSmokeBrowser(browser);
   site.stop(true);
   rmSync(profile, { recursive: true, force: true });
   writeFileSync(join(artifacts, `${product}-inline-report.json`), JSON.stringify({ product, engine, version, executable,

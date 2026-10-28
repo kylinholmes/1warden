@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Shared navigation and stacked-field checks against synthetic data in an isolated Edge. */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -16,7 +17,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) 
   const file = Bun.file(join(preview, pathname === '/' ? 'index.html' : pathname));
   return await file.exists() ? new Response(file) : new Response('', { status: 404 });
 } });
-const browser = await puppeteer.launch({ headless: true, executablePath: process.env.ONEWARDEN_EDGE
+const browser = await launchSmokeBrowser(puppeteer, { headless: true, executablePath: process.env.ONEWARDEN_EDGE
   ?? (process.platform === 'win32' ? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe'
     : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge') });
 const page = await browser.newPage();
@@ -547,5 +548,5 @@ try {
   throw error;
 } finally {
   writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, errors }, null, 2));
-  await browser.close(); server.stop(true);
+  await closeSmokeBrowser(browser); server.stop(true);
 }

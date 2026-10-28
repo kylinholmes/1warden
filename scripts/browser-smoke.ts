@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /**
  * Built-extension smoke in real Chrome/Firefox, with disposable profiles and an
  * in-memory synthetic vault. No development server/account or personal profile.
@@ -283,7 +284,7 @@ async function openNavigation(): Promise<void> {
   }
 }
 try {
-  browser = await puppeteer.launch({
+  browser = await launchSmokeBrowser(puppeteer, {
     browser: name, executablePath: executable, userDataDir: profile, headless: process.env.ONEWARDEN_SMOKE_HEADED !== '1',
     enableExtensions: true, ...(name === 'chrome' ? { pipe: process.platform !== 'win32', downloadBehavior: { policy: 'allow', downloadPath: downloads } } : {
       // Firefox 153+ requires this opt-in to automate moz-extension pages.
@@ -1030,7 +1031,7 @@ try {
     console.error(`UI at failure: ${text}`);
   }
 } finally {
-  await browser?.close().catch(() => {});
+  await closeSmokeBrowser(browser);
   site.stop(true);
   rmSync(profile, { recursive: true, force: true });
   writeFileSync(join(artifacts, `${product}-report.json`), JSON.stringify({

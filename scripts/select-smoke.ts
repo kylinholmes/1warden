@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** The real shared Select in disposable Edge, using synthetic preview records.
  * No real account, clipboard, profile, server, or persistence writes are used. */
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -15,7 +16,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) 
   return await file.exists() ? new Response(file) : new Response('', { status: 404 });
 } });
 // Puppeteer creates and removes its own temporary browser profile by default.
-const browser = await puppeteer.launch({ headless: true, executablePath: process.env.ONEWARDEN_EDGE
+const browser = await launchSmokeBrowser(puppeteer, { headless: true, executablePath: process.env.ONEWARDEN_EDGE
   ?? 'C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe' });
 const page = await browser.newPage(); page.setDefaultTimeout(5000);
 const base = `http://127.0.0.1:${server.port}`;
@@ -144,4 +145,4 @@ try {
   await page.screenshot({ path: join(output, 'failure.png') });
   writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, geometry, errors, error: String(error) }, null, 2));
   throw error;
-} finally { await browser.close(); server.stop(true); console.log(`Select evidence: ${output}`); }
+} finally { await closeSmokeBrowser(browser); server.stop(true); console.log(`Select evidence: ${output}`); }

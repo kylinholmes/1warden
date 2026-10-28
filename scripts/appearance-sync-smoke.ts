@@ -11,6 +11,7 @@ import { decryptCipher, parseProfileSettings } from '../packages/vault/src/index
 import { createFakeServer } from '../packages/vault/src/testing/fake-server';
 import { selectCustomServer } from './entry-smoke-helpers';
 import { connectNativeBrowser } from './native-smoke-startup.mjs';
+import { ownSmokeProcess, stopSmokeProcess, closeSmokeBrowser } from './smoke-processes.mjs';
 
 const { MessagePackHubProtocol } = await import(pathToFileURL(Bun.resolveSync('@microsoft/signalr-protocol-msgpack', resolve('packages/api'))).href);
 const { default: puppeteer } = await import(pathToFileURL(process.env.ONEWARDEN_PUPPETEER!).href);
@@ -72,8 +73,8 @@ try {
   const port = portServer.port; portServer.stop(true);
   const roaming = join(output, 'native-config/roaming'), local = join(output, 'native-config/local');
   mkdirSync(roaming, { recursive: true }); mkdirSync(local, { recursive: true });
-  app = spawn(process.env.ONEWARDEN_NATIVE_EXE!, [], { windowsHide: true, env: { ...process.env, APPDATA: roaming, LOCALAPPDATA: local,
-    WEBVIEW2_USER_DATA_FOLDER: join(output, 'webview'), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` } });
+  app = ownSmokeProcess(spawn(process.env.ONEWARDEN_NATIVE_EXE!, [], { windowsHide: true, env: { ...process.env, APPDATA: roaming, LOCALAPPDATA: local,
+    WEBVIEW2_USER_DATA_FOLDER: join(output, 'webview'), WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS: `--remote-debugging-port=${port} --remote-debugging-address=127.0.0.1` } }));
   browser = await connectNativeBrowser({ app, connect: (options: any) => puppeteer.connect(options), browserURL: `http://127.0.0.1:${port}` });
   await until(async () => { page = (await browser.pages()).find((p: any) => p.url() === 'http://tauri.localhost/'); return page; }, 'main WebView');
   page.setDefaultTimeout(10000); page.on('pageerror', (error: Error) => errors.push(error.message));
@@ -139,6 +140,6 @@ try {
   writeFileSync(join(output, 'report.json'), JSON.stringify({ checks, errors, syncs, writes, error: String(error) }, null, 2));
   console.log(`Failure evidence: ${output}`); throw error;
 } finally {
-  clearInterval(pushTimer); if (browser) await browser.disconnect();
-  if (app && app.exitCode === null) app.kill(); server.stop(true);
+  clearInterval(pushTimer);
+  try { await closeSmokeBrowser(browser); } finally { stopSmokeProcess(app); server.stop(true); }
 }

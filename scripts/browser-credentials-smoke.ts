@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 /** Local-only production-extension smoke. All keyboard/mouse actions go through CDP. */
 import puppeteer, { type Page, type Frame, type Browser } from 'puppeteer-core';
 import { createHash, randomBytes } from 'node:crypto';
@@ -112,7 +113,7 @@ async function grantInfo(page: Page): Promise<any> {
 async function screenshot(page: Page, name: string): Promise<void> { await page.screenshot({ path: join(artifacts, `${name}.png`), fullPage: true, timeout: 8000 }); }
 
 try {
-  browser = await puppeteer.launch({ executablePath, headless: true, userDataDir: profile,
+  browser = await launchSmokeBrowser(puppeteer, { executablePath, headless: true, userDataDir: profile,
     args: ['--disable-features=DisableLoadExtensionCommandLineSwitch', `--disable-extensions-except=${dist}`, `--load-extension=${dist}`,
       '--no-first-run', '--no-default-browser-check', '--no-proxy-server', '--host-resolver-rules=MAP credential-smoke.test 127.0.0.1'],
     ignoreDefaultArgs: ['--disable-extensions'],
@@ -196,8 +197,7 @@ try {
   }
   console.error(`Screenshots: ${artifacts}`); process.exitCode = 1;
 } finally {
-  const cleanupTimeout = setTimeout(() => browser?.process()?.kill(), 5000); cleanupTimeout.unref();
-  await browser?.close().catch(() => {}); clearTimeout(cleanupTimeout); server.stop(true);
+  await closeSmokeBrowser(browser); server.stop(true);
   // Delete only the verified, task-created profile directory; keep screenshots for review.
   if (resolve(profile).startsWith(resolve(tmpdir()) + '\\') || resolve(profile).startsWith(resolve(tmpdir()) + '/')) rmSync(profile, { recursive: true, force: true, maxRetries: 5, retryDelay: 100 });
 }

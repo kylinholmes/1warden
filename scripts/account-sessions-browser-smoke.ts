@@ -1,4 +1,5 @@
 #!/usr/bin/env bun
+import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
 import { selectCustomServer } from './entry-smoke-helpers';
 /** Actual extension background, two encrypted loopback vaults, disposable headless browsers. */
 import { cpSync, mkdtempSync, rmSync } from 'node:fs';
@@ -81,7 +82,7 @@ function check(ok: unknown, name: string) {
   checks++; console.log(`PASS ${product}: ${name}`);
 }
 try {
-  browser = await puppeteer.launch({ browser: firefox ? 'firefox' : 'chrome', headless: true, userDataDir: directory,
+  browser = await launchSmokeBrowser(puppeteer, { browser: firefox ? 'firefox' : 'chrome', headless: true, userDataDir: directory,
     executablePath: process.env[`ONEWARDEN_${product.toUpperCase()}`] ?? (firefox
       ? '/Applications/Zen.app/Contents/MacOS/zen' : '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge'),
     enableExtensions: true, protocolTimeout: 30_000,
@@ -245,6 +246,6 @@ try {
   check(errors.length === 0, 'no browser runtime errors');
   console.log(`${checks} account-session checks passed across two encrypted loopback backends; ${totalAuthentications()} authentication requests`);
 } finally {
-  await browser?.close(); a.server.stop(true); b.server.stop(true);
+  await closeSmokeBrowser(browser); a.server.stop(true); b.server.stop(true);
   rmSync(directory, { recursive: true, force: true });
 }
