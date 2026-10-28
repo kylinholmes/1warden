@@ -23,3 +23,10 @@ One orphaned headless Edge process was confirmed by its disposable Puppeteer pro
 - Rendered screenshots reviewed for both light/dark Blue Whale note details and list tiles. Only synthetic fixtures were used; personal vault data and logo drafts were not changed.
 
 Local evidence is retained under `artifacts/credential-icons-2026-10-28` and the corresponding `artifacts/credential-icons-*.log` files (ignored by Git).
+
+## Published release verification
+
+- Source commits: `528a242` (credential UI), `35c2231` (smoke cleanup). Release commit: `a1e0d55`.
+- [CI run 40665194181](https://github.com/kylinholmes/1warden/actions/runs/40665194181): all eight jobs passed, including actual Edge/Firefox extension checks and Windows native WebView2 regression.
+- [v0.2.13](https://github.com/kylinholmes/1warden/releases/tag/v0.2.13) is published with all 11 assets. All 10 entries in `SHA256SUMS.txt` were downloaded and verified. Portable ProductVersion, both extension manifests and updater manifest report `0.2.13`; updater signatures match the published `.sig` files.
+- The downloaded official Windows portable executable passed all nine native appearance/background-sync checks using a disposable profile. Its test-owned application and WebView processes exited after the run.
