@@ -150,7 +150,7 @@ const validators: Record<ApplicationMethod, (args: unknown[]) => boolean> = {
   uploadAttachment: strings(3), deleteAttachment: strings(2), removePasskey: strings(2), clearPasswordHistory: strings(1),
   exportVault: (a) => a.length === 1 && object(a[0]) && ['encrypted-json', 'json', 'csv'].includes(String(a[0]['format']))
     && (a[0]['password'] === undefined || string(a[0]['password'])),
-  checkBreaches: none, parseImport: (a) => a.length === 1 && file(a[0]), importData: (a) => a.length === 1 && file(a[0]),
+  checkBreaches: (a) => a.length === 1 && number(a[0]), parseImport: (a) => a.length === 1 && file(a[0]), importData: (a) => a.length === 1 && file(a[0]),
   previewAccountImport: (a) => a.length === 1 && account(a[0]),
   importAccount: (a) => a.length === 2 && account(a[0]) && object(a[1]) && typeof a[1]['skipExisting'] === 'boolean',
   previewBulkDelete: (a) => a.length === 1 && ['vault', 'trash'].includes(String(a[0])),

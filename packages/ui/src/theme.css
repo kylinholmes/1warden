@@ -100,6 +100,7 @@
   --border-subtle: #d7e0ee;
   --border-overlay: #bbcee8;
   --border-strong: #94abc9;
+  --border-control: #7086a3;
   --accent: #0667e8;
   --accent-hover: #0055c8;
   --accent-tint: #ecf3ff;
@@ -142,6 +143,7 @@
     --border-subtle: #374b65;
     --border-overlay: #4b6382;
     --border-strong: #607b9d;
+    --border-control: #819bbd;
     --accent: #8ac0ff;
     --accent-hover: #acd1ff;
     --accent-tint: #243f62;
@@ -184,6 +186,7 @@
   --border-subtle: #374b65;
   --border-overlay: #4b6382;
   --border-strong: #607b9d;
+  --border-control: #819bbd;
   --accent: #8ac0ff;
   --accent-hover: #acd1ff;
   --accent-tint: #243f62;
@@ -206,13 +209,16 @@
   --elev-modal: var(--edge-top), 0 20px 64px rgb(3 11 29 / 0.55), 0 2px 8px rgb(3 11 29 / 0.3);
 }
 
-/* 尊重用户的动效偏好 —— 全部降为 0 */
+/* Keep color/focus feedback, but remove spatial and repeating motion. Presence
+   cleanup also observes this preference instead of waiting for animationend. */
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.01ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
-  }
+  :root { --dur-fast: 80ms; --dur-base: 100ms; --dur-slow: 120ms; }
+  .panel-in, .panel-out, .scrim-in, .scrim-out,
+  .vault-detail[data-state], .screen-in, .fade-in,
+  .code-turn, .toast-in, .toast-out, .spin, .breathe { animation: none !important; }
+  .nav-drawer-panel, .vault-rail, .transition-transform,
+  .transition-\[width\], [role='timer'] circle { transition: none !important; }
+  *, *::before, *::after { scroll-behavior: auto !important; }
 }
 
 /*

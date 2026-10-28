@@ -22,7 +22,8 @@ import { Unlock } from '../src/screens/Unlock';
 import { ToastProvider, useToast, type ToastInput } from '../src/components/Toast';
 import { ItemEditor, installHost } from '@1warden/ui';
 import { initPlatform } from '../src/platform';
-import { initTheme, setThemeMode, type ThemeMode } from '../src/theme';
+import { initTheme, setThemeMode, setThemePalette, type ThemeMode } from '../src/theme';
+import { isPalette } from '../src/theme-palettes';
 import { emptyLogin, emptyIdentity, VaultClient, type VaultItem, type VaultFolder } from '@1warden/vault';
 import { createApplicationClient } from '../src/application/client';
 import { createVaultService, itemDetail } from '../src/application/service';
@@ -220,6 +221,8 @@ if (params.has('accounts')) {
  * 好让左栏的玻璃有东西可透（见 preview.css）。
  */
 const themeParam = params.get('theme');
+const paletteParam = params.get('palette');
+if (isPalette(paletteParam)) setThemePalette(paletteParam);
 if (themeParam === 'light' || themeParam === 'dark' || themeParam === 'system') {
   setThemeMode(themeParam as ThemeMode);
 }

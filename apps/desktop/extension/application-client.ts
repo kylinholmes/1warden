@@ -76,7 +76,7 @@ export function createExtensionApplicationClient(): ApplicationClient {
     deleteAttachment: (...args) => call('deleteAttachment', ...args),
     removePasskey: (...args) => call('removePasskey', ...args),
     clearPasswordHistory: (...args) => call('clearPasswordHistory', ...args),
-    securityReport: (...args) => call('securityReport', ...args), organizationReport: () => call('organizationReport'), checkBreaches: () => call('checkBreaches'),
+    securityReport: (...args) => call('securityReport', ...args), organizationReport: () => call('organizationReport'), checkBreaches: (...args) => call('checkBreaches', ...args),
     previewMerge: (...args) => call('previewMerge', ...args), mergeItems: (...args) => call('mergeItems', ...args),
     revealMergeValue: (...args) => call('revealMergeValue', ...args),
     exportVault: (...args) => call('exportVault', ...args),

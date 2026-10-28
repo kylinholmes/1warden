@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { ImportPreviewCard, ImportResult, Select, type ImportOutcome, type ImportPreview } from '@1warden/ui';
 import { accountKey, lockedAccount, type AccountTarget } from '../application/account-target';
@@ -34,12 +34,21 @@ export function AccountImport({ client, onImported, onBusyChange }: {
   const [error, setError] = useStoreField(store, 'error');
   const [busy, setBusy] = useStoreField(store, 'busy');
   const [writing, setWriting] = useStoreField(store, 'writing');
+  const stageHeading = useRef<HTMLHeadingElement>(null);
+  const errorMessage = useRef<HTMLParagraphElement>(null);
+  const previewButton = useRef<HTMLButtonElement>(null);
+  const resetFocus = useRef(false);
+  useEffect(() => {
+    if (busy) stageHeading.current?.focus({ preventScroll: true });
+    else if (error) errorMessage.current?.focus({ preventScroll: true });
+    else if (resetFocus.current) { previewButton.current?.focus({ preventScroll: true }); resetFocus.current = false; }
+  }, [busy, writing, error, preview, result]);
   const request = useTransferLifetime(client);
   useEffect(() => client.subscribe(() => setAccounts(sources(client))), [client]);
   const source = accounts.find(account => accountKey(account) === selected);
   const target = client.getSnapshot().account;
 
-  function reset() { request.current++; setPreview(null); setResult(null); setError(null); }
+  function reset() { request.current++; resetFocus.current = true; setPreview(null); setResult(null); setError(null); }
   async function perform(write: boolean, retry = false) {
     if (store.getState().busy || !source || (write && !preview)) return;
     const current = ++request.current;
@@ -73,11 +82,11 @@ export function AccountImport({ client, onImported, onBusyChange }: {
     {!accounts.length && <p className="mt-3 text-sm text-[var(--ink-tertiary)]">请先添加并解锁另一个账户，再切回此账户进行迁移。</p>}
     {selected && !source && <p role="alert" className="mt-3 text-sm text-[var(--risk)]">来源账户已锁定，请重新解锁并选择。</p>}
     <ImportOptions skipExisting={skipExisting} onChange={setSkipExisting} disabled={busy} />
-    {error && <p role="alert" className="mb-4 text-sm text-[var(--risk)]">{error}</p>}
-    {busy ? <p role="status" className="text-sm">{writing ? '正在迁移，请稍候…' : '正在读取来源账户…'}</p>
+    {error && <p ref={errorMessage} tabIndex={-1} role="alert" className="mb-4 text-sm text-[var(--risk)]">{error}</p>}
+    {busy ? <div><h2 ref={stageHeading} tabIndex={-1} className="mb-3 text-md font-semibold">{writing ? '正在迁移' : '正在读取来源账户'}</h2><p role="status" className="text-sm">{writing ? '正在迁移，请稍候…' : '正在读取来源账户…'}</p></div>
       : result ? <ImportResult result={result} onAgain={reset} onRetry={source ? () => { void perform(true, true); } : undefined} />
       : preview ? <ImportPreviewCard preview={preview} disabled={!source || (preview.total === 0 && preview.folders === 0)}
         onRun={() => { void perform(true); }} onCancel={reset} cancelLabel="重新选择" />
-      : <button className="btn btn-primary" disabled={!source} onClick={() => { void perform(false); }}>预览迁移</button>}
+      : <button ref={previewButton} className="btn btn-primary" disabled={!source} onClick={() => { void perform(false); }}>预览迁移</button>}
   </div>;
 }

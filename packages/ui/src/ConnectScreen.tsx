@@ -149,11 +149,9 @@ export function ConnectScreen({
     <>
       {brand !== undefined && <div className="mb-7 flex items-center gap-2.5">{brand}</div>}
 
-      {!inFlow && view !== null && (
-        <h1 className="text-md font-medium text-[var(--ink-secondary)]">
-          {view === 'pick' ? '选择要登录的账户' : '登录你的保险库'}
-        </h1>
-      )}
+      <h1 className={inFlow || view === null ? 'sr-only' : 'text-md font-medium text-[var(--ink-secondary)]'}>
+        {cert !== undefined ? '确认服务器证书' : challenge ? '两步验证' : view === 'pick' ? '选择要登录的账户' : '登录你的保险库'}
+      </h1>
 
       <div className="mt-5">
         {(view === 'form' || inFlow) && (canGoBack || Boolean(accounts?.length)) && (

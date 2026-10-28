@@ -2,7 +2,7 @@ import { Children, type ReactNode } from 'react';
 
 /** Labels above content, shared by independent editor and detail fields. */
 export const FIELD_ROW_CLASS = 'flex flex-col min-w-0 gap-1';
-export const FIELD_LABEL_CLASS = 'break-words [overflow-wrap:anywhere] text-xs text-[var(--violet)]';
+export const FIELD_LABEL_CLASS = 'break-words [overflow-wrap:anywhere] text-xs text-[var(--ink-secondary)]';
 
 /** Related native fields share one divider and use equal columns when the whole
  * group fits. Only surviving children count: an omitted detail field must not
@@ -21,8 +21,8 @@ export function CompoundFieldRow({ label, fieldId, editor = false, children }: {
   const columns = cells.length === 2 ? ' @[240px]:grid-cols-2'
     : cells.length === 3 ? ' @[360px]:grid-cols-3' : '';
   return <div role="group" aria-label={label} data-compound-field={fieldId} data-editor-field={editor ? fieldId : undefined}
-    className="@container min-w-0 border-b border-[var(--border-subtle)] py-2 last:border-b-0">
-    <div data-compound-cells className={`grid min-w-0 grid-cols-1 gap-x-3 gap-y-4${columns}`}>
+    className={`@container min-w-0 border-b border-[var(--border-subtle)] ${editor ? 'py-2 ' : ''}last:border-b-0`}>
+    <div data-compound-cells className={`grid min-w-0 grid-cols-1${editor ? ' gap-x-3 gap-y-4' : ''}${columns}`}>
       {cells}
     </div>
   </div>;

@@ -30,7 +30,7 @@ const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
     <label>Password<input id="password" type="password" autocomplete="current-password"></label>
     <button id="outside" type="button">Outside</button></form>
     <script>
-      window.fixture={locked:false,selected:null,unlockRequests:0,submissions:0,requests:[],focus:[],accountErrorOnce:null,pendingUnlock:false,
+      window.fixture={locked:false,selected:null,unlockRequests:0,submissions:0,requests:[],focus:[],accountErrorOnce:null,fillErrorOnce:null,pendingUnlock:false,
         shadows:new WeakMap(),clockOffset:0,otpCode:'123456',otpExpiresAt:Date.now()+30000,holdAccounts:false,listeners:[],lockedReads:0};
       const realNow=Date.now.bind(Date);Date.now=()=>realNow()+fixture.clockOffset;
       const attach=Element.prototype.attachShadow;
@@ -46,7 +46,7 @@ const site = Bun.serve({ hostname: '127.0.0.1', port: 0, fetch(request) {
           if(fixture.accountErrorOnce){const error=fixture.accountErrorOnce;fixture.accountErrorOnce=null;return{error}};
           return {unlocked:!fixture.locked,accounts:fixture.locked?[]:accounts.map(account=>message.target?.kind==='totp'
             ?{...account,otp:{code:fixture.otpCode,period:30,expiresAt:fixture.otpExpiresAt}}:account)}};
-        if(message.type==='1warden:inline-fill'){fixture.selected=message.itemId;document.querySelector('#email').value=accounts.find(a=>a.id===message.itemId).username;return{ok:true}};
+        if(message.type==='1warden:inline-fill'){if(fixture.fillErrorOnce){const error=fixture.fillErrorOnce;fixture.fillErrorOnce=null;return{error}};fixture.selected=message.itemId;document.querySelector('#email').value=accounts.find(a=>a.id===message.itemId).username;return{ok:true}};
         if(message.type==='1warden:inline-unlock'){fixture.unlockRequests++;if(fixture.pendingUnlock)return new Promise(()=>{});return{error:'请点击浏览器工具栏中的 1Warden 图标解锁，然后回到此输入框选择账号。'}};
         if(message.type==='1warden:submitted')fixture.submissions++;
       }}};
@@ -81,6 +81,24 @@ try {
   await page.waitForFunction(() => (window as any).fixture.selected === 'b');
   check('keyboard selects the second account and dismisses the chooser', await page.$('[data-onewarden-inline]') === null);
   check('chooser Enter does not signal a submitted password form', await page.evaluate(() => (window as any).fixture.submissions === 0));
+
+  await page.evaluate(() => { const f = (window as any).fixture; f.selected = null; f.fillErrorOnce = 'Synthetic fill failure — retry'; });
+  await page.click('#email');
+  await page.waitForSelector('[data-onewarden-inline][data-state="accounts"]', { visible: true });
+  await page.keyboard.press('ArrowDown'); await page.keyboard.press('ArrowDown');
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => {
+    const f = (window as any).fixture;
+    const root = f.shadows.get(document.querySelector('[data-onewarden-inline]'));
+    return root?.querySelector('[role="status"]')?.textContent.includes('Synthetic fill failure');
+  });
+  check('failed fill restores the original account button for Enter retry', await page.evaluate(() => {
+    const root = (window as any).fixture.shadows.get(document.querySelector('[data-onewarden-inline]'));
+    return root.activeElement === root.querySelectorAll('button')[1] && !root.activeElement.disabled;
+  }));
+  await page.keyboard.press('Enter');
+  await page.waitForFunction(() => (window as any).fixture.selected === 'b');
+  check('Enter immediately retries the failed account without another focus movement', await page.$('[data-onewarden-inline]') === null);
 
   await page.click('#password');
   await page.waitForSelector('[data-onewarden-inline]', { visible: true });

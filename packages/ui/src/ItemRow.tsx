@@ -56,6 +56,7 @@ export function ItemRow({
     <button
       type="button"
       onClick={onClick}
+      aria-current={selected ? true : undefined}
       /*
        * `items-start` 而不是 `items-center` —— 有摘要的那几行比没摘要的高一截，
        * 居中对齐会让图标在列表里上下跳动。
@@ -77,7 +78,7 @@ export function ItemRow({
           </span>
         )}
       </span>
-      {favorite && <IconStar size={13} filled className="mt-1.5 shrink-0 text-[var(--favorite)]" />}
+      {favorite && <><IconStar size={13} filled aria-hidden="true" className="mt-1.5 shrink-0 text-[var(--favorite)]" /><span className="sr-only">已收藏</span></>}
       {trailing}
     </button>
   );

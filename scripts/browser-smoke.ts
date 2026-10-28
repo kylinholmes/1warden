@@ -424,13 +424,13 @@ try {
   await popup.waitForFunction(() => document.querySelectorAll('.vault-list li > button').length === 1);
   check('search filters shared list', (await rowNames())[0]?.includes('Alpha smoke login') === true);
   await click('.vault-list li > button');
-  await popup.waitForSelector('[aria-label="显示"]', { visible: true });
+  await popup.waitForSelector('[aria-label="显示密码"]', { visible: true });
   check('detail starts masked', !(await popup.evaluate(() => document.body.textContent)).includes(secret));
-  await click('[aria-label="显示"]');
+  await click('[aria-label="显示密码"]');
   await popup.waitForFunction((value: string) => document.body.textContent?.includes(value), {}, secret);
   check('explicit reveal obtains password through background RPC', true);
   await screenshot('detail-440');
-  await click('[aria-label="隐藏"]');
+  await click('[aria-label="隐藏密码"]');
   check('hide removes revealed value', !(await popup.evaluate(() => document.body.textContent)).includes(secret));
   const openFolderEditor = () => click('[aria-label="更改文件夹归类"]');
   const waitForFolder = (target: string) => popup.waitForFunction((value: string) => {

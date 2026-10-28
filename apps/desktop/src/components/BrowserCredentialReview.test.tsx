@@ -40,8 +40,47 @@ it('offers new-item saving, keeps a failed capture available and allows retry', 
   await act(() => root.render(createElement(BrowserCredentialReview, { actions: api, revision: 1 })));
   await act(() => button('保存密码').click());
   expect(node.textContent).toContain('网络未连接'); expect(button('保存密码').disabled).toBe(false);
+  expect(document.activeElement).toBe(button('保存密码'));
   await act(() => button('保存密码').click());
   expect(api.save).toHaveBeenLastCalledWith({ captureId: 'capture', revision: 2, action: 'save', username: 'alice' });
+});
+
+it('moves focus to the next capture after saving or ignoring and keeps a concise completion status', async () => {
+  const first = capture({ action: 'save' }); const second = capture({ id: 'second', action: 'save' });
+  const api = actions(first); let rows = [first, second];
+  vi.mocked(api.list).mockImplementation(async () => rows);
+  vi.mocked(api.save).mockImplementation(async () => { rows = rows.filter(row => row.id !== first.id); });
+  vi.mocked(api.dismiss).mockImplementation(async id => { rows = rows.filter(row => row.id !== id); });
+  await act(() => root.render(createElement(BrowserCredentialReview, { actions: api, revision: 1 })));
+  await act(() => button('保存密码').click());
+  expect(document.activeElement).toBe(node.querySelector('[data-capture-id="second"] h3'));
+  expect(node.querySelector('[role="status"]')?.textContent).toBe('密码已保存；剩余 1 项待检查。');
+  await act(() => button('不保存').click());
+  expect(document.activeElement).toBe(node.querySelector('h2'));
+  expect(node.querySelector('[role="status"]')?.textContent).toBe('已忽略此项；剩余 0 项待检查。');
+});
+
+it('restores the original action after a failed dismiss refresh replaces a revised capture', async () => {
+  const api = actions(capture({ action: 'save' }));
+  vi.mocked(api.dismiss).mockRejectedValueOnce(new Error('Offline synthetic'));
+  await act(() => root.render(createElement(BrowserCredentialReview, { actions: api, revision: 1 })));
+  vi.mocked(api.list).mockResolvedValue([capture({ action: 'save', revision: 3 })]);
+  await act(() => button('不保存').click());
+  expect(document.activeElement).toBe(button('不保存'));
+  expect(api.dismiss).toHaveBeenCalledOnce();
+  expect(node.querySelector('[role="status"]')?.textContent).toContain('操作未完成，请检查后重试');
+});
+
+it('ignores a pending save after the account-owned review unmounts without moving new-session focus', async () => {
+  const api = actions(capture({ action: 'save' })); let resolve!: () => void;
+  vi.mocked(api.save).mockImplementation(() => new Promise<void>(done => { resolve = done; }));
+  await act(() => root.render(createElement(BrowserCredentialReview, { actions: api, revision: 1 })));
+  await act(() => button('保存密码').click());
+  await act(() => root.render(createElement('button', { id: 'new-session' }, 'New session fixture')));
+  const next = node.querySelector<HTMLButtonElement>('#new-session')!; next.focus();
+  await act(() => resolve());
+  expect(document.activeElement).toBe(next);
+  expect(node.querySelector('[role="status"]')).toBeNull();
 });
 it('supplements an empty target username with exactly the value shown for explicit consent', async () => {
   const api = actions(capture({ action: 'save', username: 'alice', targets: [{ id: 'one', title: 'Example', username: '', updatedAt: 'v1' }] }));
@@ -74,6 +113,21 @@ it('loads only history metadata; revealing and restoring require separate clicks
   await act(() => button('隐藏').click()); expect(node.textContent).not.toContain('generated-secret');
   await act(() => button('恢复为条目').click());
   expect(api.recoverHistory).toHaveBeenCalledExactlyOnceWith('generated'); expect(api.save).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(node.querySelector('[data-capture-id] h3'));
   expect(button('保存密码').disabled).toBe(true);
   await select('new'); await act(() => button('保存密码').click()); expect(api.save).toHaveBeenCalledOnce();
+  expect(document.activeElement).toBe(button('恢复为条目'));
+  expect(node.textContent).toContain('密码已保存。');
+});
+
+it('keeps generated-history recover failures retryable and focuses the title when its last row is deleted', async () => {
+  const api = actions();
+  vi.mocked(api.recoverHistory).mockRejectedValueOnce(new Error('Synthetic history failure'));
+  await act(() => root.render(createElement(GeneratedPasswordHistory, { actions: api })));
+  await act(() => button('恢复为条目').click());
+  expect(document.activeElement).toBe(button('恢复为条目'));
+  expect(node.querySelector('[role="alert"]')?.textContent).toBe('Synthetic history failure');
+  await act(() => button('删除').click());
+  expect(document.activeElement).toBe(node.querySelector('h2'));
+  expect(node.textContent).toContain('已删除生成记录；剩余 0 条。');
 });

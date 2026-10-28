@@ -25,7 +25,7 @@
  * 「跟随系统」这个选项会在下一次启动时消失。
  */
 
-import { isPalette, paletteTokens, type ThemePalette } from './theme-palettes';
+import { DEFAULT_PALETTE, isPalette, paletteTokens, type ThemePalette } from './theme-palettes';
 import { createStore } from '@1warden/state';
 import { isIconStyle, type IconStyle } from '@1warden/vault';
 export type { IconStyle } from '@1warden/vault';
@@ -58,8 +58,8 @@ function readStored(): ThemeMode {
 }
 
 function readPalette(): ThemePalette {
-  try { const raw = localStorage.getItem(PALETTE_KEY); return isPalette(raw) ? raw : 'original'; }
-  catch { return 'original'; }
+  try { const raw = localStorage.getItem(PALETTE_KEY); return isPalette(raw) ? raw : DEFAULT_PALETTE; }
+  catch { return DEFAULT_PALETTE; }
 }
 function readIconStyle(): IconStyle {
   try { const value = localStorage.getItem(ICON_STYLE_KEY); return isIconStyle(value) ? value : 'original'; }

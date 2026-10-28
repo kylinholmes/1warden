@@ -2,9 +2,11 @@ import { useStoreSnapshot } from '@1warden/state/react';
 import { IconSpinner } from '@1warden/ui';
 import type { AppUpdater } from '../updates/controller';
 import ManualUpdateAction from './ManualUpdateAction';
+import { safeRestart } from '../updates/safe-restart';
 
 export default function AppUpdates({ updater }: { updater: AppUpdater }) {
   const state = useStoreSnapshot(updater.subscribe, updater.getSnapshot, updater.getSnapshot);
+  const restart = useStoreSnapshot(safeRestart.subscribe, safeRestart.getSnapshot, safeRestart.getSnapshot);
   const ready = state.phase === 'ready' || state.phase === 'restarting';
   const busy = ['checking', 'downloading', 'installing', 'restarting'].includes(state.phase);
   const percent = state.totalBytes ? Math.min(100, Math.floor(state.downloadedBytes / state.totalBytes * 100)) : null;
@@ -23,10 +25,10 @@ export default function AppUpdates({ updater }: { updater: AppUpdater }) {
         <h4 id="app-updates-heading" className="text-md">应用更新</h4>
         <p className="mt-0.5 text-xs text-[var(--ink-secondary)]">当前版本 {state.currentVersion ?? '正在读取…'}</p>
       </div>
-      <button type="button" className={`btn ${ready ? 'btn-primary' : 'btn-quiet'} gap-1.5`} disabled={busy}
-        onClick={() => { void (ready ? updater.restart() : updater.check()); }}>
+      <button type="button" className={`btn ${ready ? 'btn-primary' : 'btn-quiet'} gap-1.5`} disabled={busy || restart.busy}
+        onClick={() => { void (ready ? safeRestart.restart(updater) : updater.check()); }}>
         {busy && <IconSpinner size={13} />}
-        {ready ? state.phase === 'restarting' ? '正在重启…' : state.installOnRestart ? '安装并重启' : '重启更新' : state.phase === 'error' ? '重试更新' : '检查更新'}
+        {restart.busy && state.phase !== 'restarting' ? '正在确认重启…' : ready ? state.phase === 'restarting' ? '正在重启…' : state.installOnRestart ? '安装并重启' : '重启更新' : state.phase === 'error' ? '重试更新' : '检查更新'}
       </button>
     </div>
     {status && <p role="status" className="mt-2 text-xs leading-relaxed text-[var(--ink-secondary)]">{status}</p>}
@@ -36,6 +38,7 @@ export default function AppUpdates({ updater }: { updater: AppUpdater }) {
       <div className="h-full rounded-full bg-[var(--accent)]" style={{ width: `${percent ?? 0}%` }} />
     </div>}
     {state.error && <p role="alert" className="mt-2 text-xs text-[var(--risk)]">{state.error}</p>}
+    {restart.error && <p role="alert" className="mt-2 text-xs text-[var(--risk)]">{restart.error}</p>}
     {(state.phase === 'available' || state.error) && <div className="mt-2"><ManualUpdateAction /></div>}
   </section>;
 }

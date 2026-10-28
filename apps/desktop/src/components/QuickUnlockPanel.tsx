@@ -93,6 +93,7 @@ export function QuickUnlockPanel({ accounts, loading, autoSelect = true, reset =
       if (id === null) onLogin();
       else { const selected = accounts.find(value => value.id === id); if (selected) void select(selected); }
     }} /> : <div className="relative flex min-h-0 flex-1 flex-col overflow-y-auto px-6 py-3">
+      <h1 className="sr-only">解锁保险库</h1>
       <button type="button" className="btn btn-ghost absolute left-3 top-3 h-8 px-2 text-xs" onClick={back}
         aria-label={stage === 'twoFactor' ? '返回密码解锁' : accounts.length > 1 || !autoSelect ? '返回选择账户' : '关闭快速搜索'}>← 返回</button>
       <div className="my-auto mx-auto w-full max-w-[320px] shrink-0 text-center">

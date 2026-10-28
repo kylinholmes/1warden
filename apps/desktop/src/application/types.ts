@@ -143,7 +143,7 @@ export interface ApplicationService {
   previewMerge(request: OrganizationMergeRequest): Promise<OrganizationMergePreview>;
   revealMergeValue(request: OrganizationMergeReveal): Promise<string>;
   mergeItems(request: OrganizationMergeCommit): Promise<OrganizationMergeResult>;
-  checkBreaches(): Promise<ReportBrief['breached']>;
+  checkBreaches(now: number): Promise<ReportBrief>;
   exportVault(request: ExportRequest): Promise<ExportFile>;
   parseImport(file: ImportFile): Promise<ImportPreview>;
   importData(file: ImportFile): Promise<ImportOutcome>;

@@ -1,9 +1,10 @@
 import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
 import { subscribeFileDrops, type DroppedFile } from '../file-drop';
+import { safeRestart } from '../updates/safe-restart';
 import { Sidebar } from '../components/VaultSidebar';
 import { primaryShortcut } from '../platform';
 import { useEffect, useMemo, useRef, useCallback, type ReactNode } from 'react';
-import { SORT_BY, SORT_LABEL, type SortBy, type VaultItem, type VaultFolder } from '@1warden/vault';
+import { SORT_BY, SORT_LABEL, type SortBy, type ItemType, type VaultItem, type VaultFolder } from '@1warden/vault';
 import type { IconStore } from '@1warden/vault';
 import type { ApplicationClient, ItemDetailData, SiteContext, SecretRef } from '../application/types';
 /* `IS_DESKTOP` 是**编译期常量**（`__PLATFORM__`），打包时被替换成字面量 ——
@@ -31,9 +32,9 @@ import { FloatingPanel, useRetainedPresence } from '@1warden/ui';
 import { useToast } from '../components/Toast';
 import {
   BackButton, IconAlert, IconKeyboard, IconPencil, IconPlus,
-  CopyField, IconChevronDown, IconSearch, IconSpinner, IconStar, IconTrash,
+  CopyField, IconSearch, IconSpinner, IconStar, IconTrash,
   CompoundFieldRow, FIELD_LABEL_CLASS, FIELD_ROW_CLASS, nativeEditorFields,
-  ItemEditor, ItemRow, NavDrawerProvider, NavTrigger, SecretField, Section,
+  ItemEditor, ItemRow, Select, NavDrawerProvider, NavTrigger, SecretField, Section,
   TYPE_LABEL, countByType, formatCardExpiry, formatRecordDate,
   typeDestinations, type ItemSummary,
 } from '@1warden/ui';
@@ -63,7 +64,6 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
     const settingsOpen = false;
     const generatorOpen = false;
     const folderError = (null) as string | null;
-    const sortOpen = false;
     const saved = localStorage.getItem('1warden.pref.sortBy');
     const sortBy: SortBy = saved === SORT_BY.name || saved === SORT_BY.created ? saved : SORT_BY.updated;
     const site = (null) as SiteContext | null;
@@ -72,11 +72,20 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
     const search = (null) as { query: string; revision: number; items: ItemSummary[] } | null;
     const searchError = (null) as string | null;
     const searchAttempt = 0;
-    return { draggingFile, droppedFile, query, category, selectedId, mode, confirmDelete, settingsOpen, generatorOpen, folderError, sortOpen, sortBy, site, siteError, contextAttempt, search, searchError, searchAttempt };
+    return { draggingFile, droppedFile, query, category, selectedId, mode, confirmDelete, settingsOpen, generatorOpen, folderError, sortBy, site, siteError, contextAttempt, search, searchError, searchAttempt };
   });
   const [draggingFile, setDraggingFile] = useStoreField(viewStore, 'draggingFile');
   const [droppedFile, setDroppedFile] = useStoreField(viewStore, 'droppedFile');
   const transferBusy = useRef(false);
+  useEffect(() => {
+    const validate = () => {
+      if (transferBusy.current) throw new Error('正在导入或导出，请完成后再重启更新。');
+      if (viewStore.getState().mode.kind === 'loading') throw new Error('正在载入编辑内容，请稍后再重启更新。');
+    };
+    return safeRestart.register({ priority: -10, prepare: () => { validate(); return true; }, validate });
+  }, [viewStore]);
+  const registerRestartCheck = useCallback((prepare: (signal: AbortSignal) => Promise<boolean>, finish: () => void) =>
+    safeRestart.register({ prepare, finish }), []);
   useEffect(() => {
     const initial = client.getSnapshot();
     const allowed = () => {
@@ -133,7 +142,6 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
    * 存在这里而不是 `prefs.ts`：它只被这一屏用，没有第二个读者，
    * 加进那个模块只会让「什么时候该用 prefs」这条线变模糊。
    */
-  const [sortOpen, setSortOpen] = useStoreField(viewStore, 'sortOpen');
   const [sortBy, setSortBy] = useStoreField(viewStore, 'sortBy');
   function changeSort(v: SortBy): void {
     setSortBy(v);
@@ -384,7 +392,19 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
           : category.kind === 'organization' ? <Organization client={client} onBack={() => setCategory({ kind: 'all' })}
             onEditItem={edit} editing={mode.kind !== 'browse'} />
           : category.kind === 'profile' ? <ProfilePage client={client} onBack={() => setCategory({ kind: 'all' })} /> : category.kind === 'security' ? (
-            <SecurityReportView client={client} onBack={() => setCategory({ kind: 'all' })} />
+            <SecurityReportView client={client} onBack={() => setCategory({ kind: 'all' })}
+              renderItem={(id, onBack) => {
+                const item = session.items.find(item => item.id === id);
+                if (!item) return <div className="p-4"><BackButton onBack={onBack} label="返回安全报告" />
+                  <p role="status" className="p-4 text-sm text-[var(--ink-secondary)]">这条记录已不存在，请返回安全报告。</p></div>;
+                return <SelectedDetail key={`${id}:${session.revision}`} client={client} item={item} icons={icons}
+                  folders={folders} onError={message => toast.show({ tone: 'danger', message })}
+                  onEdit={() => { void edit(id); }} onBack={onBack} backLabel="返回安全报告" site={site}
+                  onDelete={() => setConfirmDelete(item)}
+                  onToggleFavorite={() => { void client.toggleFavorite(id).catch((e: unknown) => {
+                    toast.show({ tone: 'danger', message: `没能更改收藏：${e instanceof Error ? e.message : '未知错误'}` });
+                  }); }} />;
+              }} />
           ) : (
             <ImportScreen client={client} onImported={() => {}} onBack={() => { if (!transferBusy.current) setCategory({ kind: 'all' }); }}
               droppedFile={droppedFile} onDropConsumed={() => setDroppedFile(null)} onBusyChange={busy => { transferBusy.current = busy; }} />
@@ -396,7 +416,8 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
           可用宽度决定：宽窗口分栏，窄窗口详情盖住列表，和焦点/inert 判断一致。
           这里不再写死 `w-[var(--list-w)]`，那是布局类的事。
         */
-        <div className="vault-content" data-detail={selected !== null} data-detail-mounted={detailPresence.mounted}>
+        <main aria-label="保险库" className="vault-content" data-detail={selected !== null} data-detail-mounted={detailPresence.mounted}>
+          <h1 className="sr-only">保险库</h1>
           <div inert={detailOpen} className="below-titlebar vault-list bg-[var(--surface-content)]">
             {/* 这一条也是标题栏的一部分 —— 整条顶部带子都可以拖窗口 */}
             <div className="band vault-list-toolbar" data-tauri-drag-region="deep">
@@ -427,41 +448,10 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
                 按钮上显示**当前档**（而不是一个抽象的排序图标）：
                 用户不用点开就知道现在按什么排。
               */}
-              <div className="relative shrink-0">
-                <button
-                  onClick={() => setSortOpen((v) => !v)}
-                  title="排序方式"
-                  aria-label="排序方式"
-                  aria-expanded={sortOpen}
-                  className="btn btn-ghost gap-1 px-2 py-1 text-xs"
-                >
-                  {SORT_LABEL[sortBy]}
-                  <IconChevronDown size={11} />
-                </button>
-                {sortOpen && (
-                  <>
-                    {/* 点别处关掉。透明铺满全屏，比 document 监听简单且不会漏 */}
-                    <div className="fixed inset-0 z-20" onClick={() => setSortOpen(false)} />
-                    <div
-                      className="absolute right-0 top-full z-30 mt-1 min-w-[104px] rounded-[var(--radius-md)] border border-[var(--border-overlay)] bg-[var(--surface-overlay)] p-1"
-                      style={{ boxShadow: 'var(--elev-pop)' }}
-                    >
-                      {([SORT_BY.updated, SORT_BY.created, SORT_BY.name] as const).map((v) => (
-                        <button
-                          key={v}
-                          onClick={() => { changeSort(v); setSortOpen(false); }}
-                          className={`flex w-full items-center rounded-[var(--radius-sm)] px-2 py-1 text-left text-xs transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${
-                            v === sortBy ? 'text-[var(--accent)]' : 'text-[var(--ink-secondary)]'
-                          }`}
-                        >
-                          {SORT_LABEL[v]}
-                        </button>
-                      ))}
-                    </div>
-                  </>
-                )}
-              </div>
-              <button onClick={() => setMode({ kind: 'new' })} title={`新建条目  ${primaryShortcut('N')}`} className="btn btn-primary">
+              <Select aria-label="排序方式" title="排序方式" value={sortBy}
+                options={([SORT_BY.updated, SORT_BY.created, SORT_BY.name] as const).map(value => ({ value, label: SORT_LABEL[value] }))}
+                onChange={value => changeSort(value as SortBy)} className="vault-sort shrink-0" />
+              <button onClick={() => setMode({ kind: 'new' })} aria-label="新建条目" title={`新建条目  ${primaryShortcut('N')}`} className="btn btn-primary">
 <IconPlus size={15} />
 </button>
             </div>
@@ -516,9 +506,10 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
                 <li className="px-4 py-10 text-center">
                   {session.syncError && items.length === 0 ? <p className="text-sm text-[var(--ink-secondary)]">保险库尚未载入，不能确认是否有匹配条目。</p>
                   : searching ? <p role="status" className="text-sm text-[var(--ink-tertiary)]">正在搜索…</p> : searchError ? null : query ? (
-                    <p className="text-sm text-[var(--ink-tertiary)]">
-                      没有匹配「{query}」的条目
-                    </p>
+                    <>
+                      <p role="status" className="text-sm text-[var(--ink-secondary)]">没有匹配「{query}」的条目</p>
+                      <button type="button" className="btn btn-quiet mt-3" onClick={() => { setQuery(''); searchRef.current?.focus(); }}>清除搜索</button>
+                    </>
                   ) : session.syncing && items.length === 0 ? (
                     /*
                      * ⚠️ **「还在载入」和「真的是空的」必须分开说。**
@@ -542,10 +533,13 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
                     </>
                   ) : (
                     <>
-                      <p className="text-sm text-[var(--ink-secondary)]">这里还是空的</p>
-                      <p className="mt-1 text-xs text-[var(--ink-tertiary)]">
-                        点上面的「新建」加第一条
-                      </p>
+                      <p role="status" className="text-sm text-[var(--ink-secondary)]">{category.kind === 'favorites' ? '还没有收藏条目'
+                        : category.kind === 'folder' ? '这个文件夹还是空的' : category.kind === 'site' ? '没有与当前网站匹配的条目'
+                        : category.kind === 'type' ? `还没有${TYPE_LABEL[category.type as ItemType] ?? '此类型'}条目` : '这里还是空的'}</p>
+                      {category.kind === 'favorites' || category.kind === 'site'
+                        ? <button type="button" className="btn btn-quiet mt-3" onClick={() => setCategory({ kind: 'all' })}>浏览全部条目</button>
+                        : <button type="button" className="btn btn-primary mt-3" onClick={() => setMode({ kind: 'new' })}>{category.kind === 'folder' ? '在此文件夹新建条目' : '新建条目'}</button>}
+                      {category.kind === 'all' && <button type="button" className="btn btn-quiet mt-2" onClick={() => setCategory({ kind: 'import' })}>导入条目</button>}
                     </>
                   )}
                 </li>
@@ -594,7 +588,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
               ) : <EmptyDetail hasItems={filtered.length > 0} />}
             </div>
           </div>
-        </div>
+        </main>
       )}
 
       <DeleteDialog
@@ -650,6 +644,9 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
         <button onClick={closeEditor} className="btn btn-quiet mt-4 self-start">取消</button>
       </FloatingPanel>
       <ItemEditor
+        newItemDefaults={category.kind === 'folder' ? { folderId: category.id }
+          : category.kind === 'type' ? { type: category.type as ItemType } : category.kind === 'favorites' ? { favorite: true } : {}}
+        registerRestartCheck={registerRestartCheck}
         folders={folders}
         onSave={(d) => client.saveItem(d)}
         onCreateFolder={name => client.createFolder(name)}
@@ -664,6 +661,10 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
               // the read-only analysis after the user's explicit edit is saved.
               setSelectedId(null);
               toast.show({ tone: 'success', message: `已保存「${saved.name}」，正在更新整理建议` });
+              return;
+            }
+            if (category.kind === 'security') {
+              toast.show({ tone: 'success', message: `已保存「${saved.name}」，正在更新安全报告` });
               return;
             }
             // A successful save must remain discoverable, even if its new values
@@ -848,11 +849,12 @@ interface DetailProps {
   onDelete: () => void;
   onToggleFavorite: () => void;
   onBack: () => void;
+  backLabel?: string;
   site?: SiteContext | null;
 }
 
-function DetailBack({ onBack }: { onBack: () => void }) {
-  return <BackButton onBack={onBack} label="返回列表" className="detail-back" />;
+function DetailBack({ onBack, label }: { onBack: () => void; label?: string | undefined }) {
+  return <BackButton onBack={onBack} label={label ?? '返回列表'} className={label ? '' : 'detail-back'} />;
 }
 
 function SelectedDetail({ item, ...props }: Omit<DetailProps, 'item'> & { item: ItemSummary }) {
@@ -877,14 +879,14 @@ function SelectedDetail({ item, ...props }: Omit<DetailProps, 'item'> & { item: 
   }, [props.client, item.id, retry]);
   if (detail) return <ItemDetail {...props} item={detail} />;
   return <div className="p-4">
-    <DetailBack onBack={props.onBack} />
+    <DetailBack onBack={props.onBack} label={props.backLabel} />
     {error ? <div role="alert" className="p-4 text-sm text-[var(--risk)]"><p>{error}</p>
       <button className="btn btn-quiet mt-3" onClick={() => setRetry((n) => n + 1)}>重试</button></div>
       : <p role="status" className="flex items-center gap-2 p-4 text-sm text-[var(--ink-secondary)]"><IconSpinner size={15} />正在载入…</p>}
   </div>;
 }
 
-function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, onBack, site, folders = [], onOpenFolder, onError }: DetailProps) {
+function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, onBack, backLabel, site, folders = [], onOpenFolder, onError }: DetailProps) {
   const summary = item.summary;
   const viewStore = useLocalStore(() => {
     const totp = (null) as { code: string; remaining: number; period: number } | null;
@@ -971,7 +973,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
   }
 
   return (
-    <article className="fade-in mx-auto w-full px-8 pb-12" style={{ maxWidth: 'calc(var(--detail-w) + 64px)' }}>
+    <article className="item-detail fade-in mx-auto w-full px-8 pb-12" style={{ maxWidth: 'calc(var(--detail-w) + 64px)' }}>
       {/* 头部跟着滚 —— 长条目滚到下面时，用户仍然看得到自己在看哪一条 */}
       <header className="sticky top-0 z-10 -mx-8 flex flex-wrap items-start gap-3.5 border-b border-[var(--border-subtle)] bg-[var(--surface-paper)] px-8 pb-4 pt-5">
         {/*
@@ -979,7 +981,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
           之前这里是按类型上色的旧写法，于是同一条记录在列表里显示站点图标、
           在详情栏里却是一把钥匙 —— 明明是同一条。
         */}
-        <DetailBack onBack={onBack} />
+        <DetailBack onBack={onBack} label={backLabel} />
         <span className="mt-0.5">
           <SummaryIcon item={summary} store={icons} size={36} />
         </span>
@@ -995,7 +997,7 @@ function ItemDetail({ client, item, icons, onEdit, onDelete, onToggleFavorite, o
           </p>
         </div>
 
-        <div className="flex shrink-0 items-center gap-1 pt-0.5">
+        <div className="item-detail-actions flex shrink-0 items-center gap-1 pt-0.5">
           <button disabled={organizing || resourcesBusy} onClick={onToggleFavorite} title={summary.favorite ? '取消收藏' : '加入收藏'}
             aria-label={summary.favorite ? '取消收藏' : '加入收藏'}
             className={`rounded-[var(--radius-sm)] p-1.5 transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] ${

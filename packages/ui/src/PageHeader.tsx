@@ -11,16 +11,17 @@ export function BackButton({ onBack, label, className = '', showLabel = false }:
 }
 
 /** Shared page/dialog header. Current crumb is text; ancestors are real actions. */
-export function PageHeader({ title, titleId, breadcrumbs, onBack, backLabel = '返回上一页', navigation = false, onClose, closeLabel, panel = false }: {
-  title: string; titleId?: string; breadcrumbs: readonly Breadcrumb[];
+export function PageHeader({ title, titleId, breadcrumbs, onBack, backLabel = '返回上一页', navigation = false, onClose, closeLabel, panel = false, headingLevel = 2 }: {
+  title: string; titleId?: string; headingLevel?: 1 | 2; breadcrumbs: readonly Breadcrumb[];
   onBack?: (() => void) | undefined; backLabel?: string; navigation?: boolean;
   onClose?: () => void; closeLabel?: string; panel?: boolean;
 }) {
   const generatedId = useId();
+  const Heading = headingLevel === 1 ? 'h1' : 'h2';
   return <header className={`${panel ? 'panel-head' : 'band'} page-header`} data-tauri-drag-region={panel ? undefined : 'deep'}>
     {navigation && <NavTrigger />}
     {onBack && <BackButton onBack={onBack} label={backLabel} />}
-    <h2 id={titleId ?? generatedId} className="sr-only">{title}</h2>
+    <Heading id={titleId ?? generatedId} className="sr-only">{title}</Heading>
     <nav aria-label={`${title}路径`} className="min-w-0 flex-1 text-sm">
       <ol className="flex min-w-0 items-center gap-1">
         {breadcrumbs.map((crumb, index) => <li key={`${index}:${crumb.label}`} className={`flex min-w-0 items-center gap-1 ${index === breadcrumbs.length - 1 ? 'flex-auto' : 'shrink'}`}>

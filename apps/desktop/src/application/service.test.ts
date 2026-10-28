@@ -1,7 +1,7 @@
 import type { CipherDto } from '@1warden/api';
 import { describe, expect, it, vi } from 'vitest';
 import { VaultClient, decryptCipher, emptyLogin, emptyIdentity, emptyBankAccount, emptyDriversLicense, emptyPassport,
-  buildProfileItem, buildPreferencesItem, parseProfileSettings, type VaultItem } from '@1warden/vault';
+  buildProfileItem, buildPreferencesItem, parseProfileSettings, hibpPrefix, type VaultItem } from '@1warden/vault';
 import { toBase64, fromBase64, concatBytes, deriveMasterKey, encryptBytes, encryptString, decryptString, makeUserKey, stretchMasterKey } from '@1warden/crypto';
 import { createVaultService, editableDraft, mergeEditableDraft } from './service';
 import { createProfileCache } from './profile-cache';
@@ -33,6 +33,26 @@ function restored(items = [record()], fetchImpl: typeof fetch = async () => { th
 }
 
 describe('application display boundary', () => {
+  it('returns the complete rescored display report after opt-in without secret material', async () => {
+    const items = Array.from({ length: 10 }, (_, index) => ({ ...record(), id: `fixture-${index}`,
+      login: { ...emptyLogin(), password: `Synthetic!qZ${index}#long-value` }, card: null, sshKey: null,
+    }));
+    const match = await hibpPrefix(items[0]!.login!.password!);
+    const request = vi.spyOn(globalThis, 'fetch').mockImplementation(async input =>
+      new Response(String(input).endsWith(match.prefix) ? `${match.suffix}:42` : '', { status: 200 }));
+    try {
+      const { service } = restored(items);
+      const local = await service.securityReport(1);
+      expect(local.score).toBe(100);
+      expect(request).not.toHaveBeenCalled();
+      const checked = await service.checkBreaches(1);
+      expect(checked).toMatchObject({ total: 10, score: 70, grade: 'fair', breached: [{ itemId: 'fixture-0', count: 42 }] });
+      expect(request).toHaveBeenCalledTimes(10);
+      for (const secret of ['Synthetic!', 'wrapped-item-key', 'hidden-field', 'historical-secret']) {
+        expect(JSON.stringify(checked)).not.toContain(secret);
+      }
+    } finally { request.mockRestore(); }
+  });
   it('binds a file import to the selected owner through its writes', async () => {
     const { client } = restored([]);
     let selection = 0;

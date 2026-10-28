@@ -19,6 +19,7 @@ describe('account presentation projection', () => {
     expect(apply).toHaveBeenLastCalledWith(legacy);
     receive({ ...unlocked, account: { ...account, email: 'b@example.com' } });
     expect(apply).toHaveBeenLastCalledWith(DEFAULT_PROFILE_PREFERENCES);
+    expect(apply.mock.lastCall?.[0]).toMatchObject({ mode: 'system', palette: 'clear-blue' });
     receive(unlocked); expect(apply).toHaveBeenLastCalledWith(legacy);
   });
   it('applies server preferences once, does not echo writes and ignores unrelated device updates', () => {

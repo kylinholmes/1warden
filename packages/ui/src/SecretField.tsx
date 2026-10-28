@@ -120,9 +120,10 @@ export function SecretField({
             type="button"
             onClick={() => { void toggle(); }}
             disabled={revealing}
-            aria-label={hidden ? '显示' : '隐藏'}
-            title={hidden ? '显示' : '隐藏'}
-            className="rounded-[var(--radius-sm)] p-1.5 text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)] disabled:opacity-50"
+            aria-label={`${hidden ? '显示' : '隐藏'}${label}`}
+            title={`${hidden ? '显示' : '隐藏'}${label}`}
+            aria-pressed={!hidden}
+            className="grid h-8 w-8 place-items-center rounded-[var(--radius-sm)] text-[var(--ink-tertiary)] transition-colors duration-[var(--dur-fast)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)] disabled:opacity-50"
           >
             <IconEye size={14} off={hidden} />
         </button>
@@ -143,7 +144,7 @@ export function Section({ title, children }: { title?: string; children: React.R
       {title && (
         <h3 className="mb-2 text-xs font-medium text-[var(--ink-tertiary)]">{title}</h3>
       )}
-      <div className="card px-4">{children}</div>
+      <div className="card detail-card px-4">{children}</div>
     </section>
   );
 }

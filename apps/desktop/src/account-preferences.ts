@@ -1,7 +1,7 @@
 import { DEFAULT_PROFILE_PREFERENCES, validatePreferences, type ProfilePreferences } from '@1warden/vault';
 import type { ApplicationSnapshot } from './application/types';
 import { getThemeMode, getThemePalette, getIconStyle, setThemeMode, setThemePalette, setIconStyle, subscribeTheme } from './theme';
-import { isPalette } from './theme-palettes';
+import { DEFAULT_PALETTE, isPalette } from './theme-palettes';
 import { getShowTypes, setShowTypes, subscribeShowTypes } from './prefs';
 
 export function localPreferences(): ProfilePreferences {
@@ -12,7 +12,7 @@ export function subscribePreferences(fn: () => void): () => void {
   const a = subscribeTheme(fn); const b = subscribeShowTypes(fn); return () => { a(); b(); };
 }
 export function applyPreferences(value: ProfilePreferences): void {
-  setThemeMode(value.mode); setThemePalette(isPalette(value.palette) ? value.palette : 'original'); setShowTypes(value.showTypes);
+  setThemeMode(value.mode); setThemePalette(isPalette(value.palette) ? value.palette : DEFAULT_PALETTE); setShowTypes(value.showTypes);
   setIconStyle(value.iconStyle ?? 'original');
 }
 

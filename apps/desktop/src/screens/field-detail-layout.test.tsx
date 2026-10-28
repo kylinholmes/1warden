@@ -113,9 +113,9 @@ describe('detail native/compound/custom shared label-value contract', () => {
       expect(host.querySelector('[data-field-layout="row"]')!.classList.contains('py-2')).toBe(true);
       expect(host.querySelector('[data-field-content]')!.classList.contains('gap-1')).toBe(true);
       expect(host.textContent).not.toContain('synthetic-secret'); expect(reveal).not.toHaveBeenCalled();
-      await act(() => host.querySelector<HTMLButtonElement>('[aria-label="显示"]')!.click());
+      await act(() => host.querySelector<HTMLButtonElement>('[aria-label="显示密码"]')!.click());
       expect(host.textContent).toContain('synthetic-secret'); expect(reveal).toHaveBeenCalledTimes(1);
-      await act(() => host.querySelector<HTMLButtonElement>('[aria-label="隐藏"]')!.click());
+      await act(() => host.querySelector<HTMLButtonElement>('[aria-label="隐藏密码"]')!.click());
       expect(host.textContent).not.toContain('synthetic-secret');
     } finally { await act(() => root.unmount()); host.remove(); }
   });

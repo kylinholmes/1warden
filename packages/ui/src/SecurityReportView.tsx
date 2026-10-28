@@ -82,12 +82,14 @@ export function SecurityReportView({
   report,
   nameOf,
   breach,
+  onOpenItem,
 }: {
   report: ReportBrief;
   /** 报告里只有 id —— 显示名由调用方查（桌面端查内存，弹窗查已加载的列表） */
   nameOf: (id: string) => string;
   /** 「已泄露的密码」的开关注入。桌面端本地查，扩展端走后台消息 */
   breach: { state: BreachState; onEnable: () => void };
+  onOpenItem?: (id: string) => void;
 }) {
   const checked = breach.state === 'on';
 
@@ -102,9 +104,9 @@ export function SecurityReportView({
      * 同一份标记，宽的时候留白大、窄的时候留白小。
      */
     <div className="@container flex min-h-0 flex-1 flex-col">
-      <div className="min-h-0 flex-1 overflow-y-auto px-4 py-5 @[640px]:px-8 @[640px]:py-7">
+      <div data-security-report-scroll className="min-h-0 flex-1 overflow-y-auto px-4 py-5 @[640px]:px-8 @[640px]:py-7">
         <div className="mx-auto w-full" style={{ maxWidth: 'var(--detail-w)' }}>
-          <ScoreCard score={report.score} grade={report.grade} report={report} />
+          <ScoreCard score={report.score} grade={report.grade} report={report} checked={checked} />
 
           {report.total === 0 ? (
             <p className="mt-8 text-center text-sm text-[var(--ink-tertiary)]">
@@ -122,23 +124,29 @@ export function SecurityReportView({
                 {!checked ? (
                   <div className="px-4 py-3.5">
                     <p className="text-xs leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
-                      把密码的 <strong className="font-medium text-[var(--ink-primary)]">SHA-1 哈希前 5 个字符</strong>发给
-                      Have I Been Pwned 查询，返回的候选在本地比对 ——
-                      离开设备的只有这 5 个字符。这是本应用
-                      <strong className="font-medium text-[var(--ink-primary)]">唯一</strong>会联系第三方的功能，默认关闭。
+                      联网查询已知泄露的密码，默认关闭。
                     </p>
+                    <details className="mt-2 text-xs leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
+                      <summary className="cursor-pointer text-[var(--ink-primary)]">查询如何保护密码</summary>
+                      <p className="mt-2">
+                        把密码的 <strong className="font-medium text-[var(--ink-primary)]">SHA-1 哈希前 5 个字符</strong>发给
+                        Have I Been Pwned 查询，返回的候选在本地比对 ——
+                        离开设备的只有这 5 个字符。这是本应用
+                        <strong className="font-medium text-[var(--ink-primary)]">唯一</strong>会联系第三方的功能，默认关闭。
+                      </p>
+                    </details>
                     <button
                       onClick={breach.onEnable}
                       disabled={breach.state === 'checking'}
                       className="btn btn-quiet mt-3 gap-1.5"
                     >
                       {breach.state === 'checking' && <IconSpinner size={13} />}
-                      {breach.state === 'checking' ? '查询中…' : '开启检查'}
+                      {breach.state === 'checking' ? '查询中…' : breach.state === 'failed' ? '重试检查' : '开启检查'}
                     </button>
                     {breach.state === 'failed' && (
                       <p className="mt-2.5 flex items-start gap-2 text-xs text-[var(--risk)]">
                         <IconAlert size={13} className="mt-0.5 shrink-0" />
-                        <span>查询失败 —— 可能是网络不通。其余检查不受影响。</span>
+                        <span role="alert">查询未完成 —— 可能是网络不通，请重试检查。其余检查不受影响。</span>
                       </p>
                     )}
                   </div>
@@ -150,6 +158,7 @@ export function SecurityReportView({
                       key={f.itemId}
                       label={nameOf(f.itemId)}
                       detail={`在泄露库里出现过 ${f.count.toLocaleString('zh-CN')} 次`}
+                      {...(onOpenItem ? { onOpen: () => onOpenItem(f.itemId) } : {})}
                     />
                   ))
                 )}
@@ -161,6 +170,7 @@ export function SecurityReportView({
                     key={f.itemId}
                     label={nameOf(f.itemId)}
                     detail={WEAK_REASON[f.reason] ?? f.reason}
+                    {...(onOpenItem ? { onOpen: () => onOpenItem(f.itemId) } : {})}
                   />
                 ))}
               </Finding>
@@ -171,11 +181,14 @@ export function SecurityReportView({
                 empty="没有重复使用的密码"
               >
                 {report.reused.map((g) => (
-                  <Row
-                    key={g.itemIds.join(',')}
-                    label={`${g.count} 条共用同一个密码`}
-                    detail={g.itemIds.map(nameOf).join('、')}
-                  />
+                  <details key={g.itemIds.join(',')} className="border-b border-[var(--border-subtle)] last:border-b-0">
+                    <summary className="cursor-pointer px-4 py-3 text-md hover:bg-[var(--surface-hover)]">
+                      {g.count} 条共用同一个密码
+                      <span className="mt-1 block break-words text-xs text-[var(--ink-tertiary)]">{g.itemIds.map(nameOf).join('、')}</span>
+                    </summary>
+                    {g.itemIds.map(id => <Row key={id} label={nameOf(id)} detail="重复使用的密码"
+                      {...(onOpenItem ? { onOpen: () => onOpenItem(id) } : {})} />)}
+                  </details>
                 ))}
               </Finding>
 
@@ -188,7 +201,8 @@ export function SecurityReportView({
                    * 说成「已经没了」的错话。名字是这里唯一需要跨过来的东西，
                    * 所以它跟着 brief 一起过来。
                    */
-                  <Row key={i.id} label={i.name} detail={i.uris.join('、')} />
+                  <Row key={i.id} label={i.name} detail={i.uris.join('、')}
+                    {...(onOpenItem ? { onOpen: () => onOpenItem(i.id) } : {})} />
                 ))}
               </Finding>
 
@@ -198,6 +212,7 @@ export function SecurityReportView({
                     key={f.itemId}
                     label={nameOf(f.itemId)}
                     detail={`有效期至 ${new Date(f.expiresAt).toLocaleDateString('zh-CN')}`}
+                    {...(onOpenItem ? { onOpen: () => onOpenItem(f.itemId) } : {})}
                   />
                 ))}
               </Finding>
@@ -224,10 +239,11 @@ export function SecurityReportView({
  * 光给一个 32 分，用户不知道下一步该干什么；把「5 条弱密码、2 组重复」
  * 摆在旁边，他就知道该去改哪一条了。
  */
-function ScoreCard({ score, grade, report }: {
+function ScoreCard({ score, grade, report, checked }: {
   score: number;
   grade: ScoreGrade;
   report: ReportBrief;
+  checked: boolean;
 }) {
   const color = grade === 'excellent' || grade === 'good' ? 'var(--safe)'
     : grade === 'fair' ? 'var(--caution)'
@@ -268,6 +284,7 @@ function ScoreCard({ score, grade, report }: {
           ? '没有发现明显的问题。'
           : <>发现 <span className="font-medium text-[var(--ink-primary)]">{issues.join(' · ')}</span>。</>}
       </p>
+      {!checked && <p className="mt-2 text-xs text-[var(--ink-tertiary)]">泄露查询尚未完成；当前评分仅反映已取得的检查结果。</p>}
     </section>
   );
 }
@@ -293,7 +310,7 @@ function Finding({ title, count, empty, children, tone, checked = true }: {
   return (
     <section className="card">
       <header className="flex items-center gap-3 border-b border-[var(--border-subtle)] px-4 py-3">
-        <h3 className="min-w-0 flex-1 truncate text-md font-medium">{title}</h3>
+        <h2 className="min-w-0 flex-1 truncate text-md font-medium">{title}</h2>
         {!checked ? (
           <span className="shrink-0 rounded-full bg-[var(--surface-hover)] px-2 py-0.5 text-2xs font-medium text-[var(--ink-tertiary)]">
             未检查
@@ -319,10 +336,12 @@ function Clean({ text }: { text: string }) {
   return <p className="px-4 py-3.5 text-xs text-[var(--ink-tertiary)]">{text}</p>;
 }
 
-function Row({ label, detail }: { label: string; detail: string }) {
+function Row({ label, detail, onOpen }: { label: string; detail: string; onOpen?: () => void }) {
   return (
     <div className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-[var(--border-subtle)] px-4 py-2.5 last:border-b-0">
-      <span className="min-w-0 flex-[1_1_14rem] break-words text-md">{label}</span>
+      {onOpen ? <button type="button" onClick={onOpen} aria-label={`查看「${label}」`}
+        className="min-h-11 min-w-0 flex-[1_1_14rem] break-words py-1 text-left text-md text-[var(--accent)] underline-offset-4 hover:underline">{label}</button>
+        : <span className="min-w-0 flex-[1_1_14rem] break-words text-md">{label}</span>}
       <span className="min-w-0 break-words text-xs text-[var(--ink-tertiary)]" title={detail}>
         {detail}
       </span>

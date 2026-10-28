@@ -58,7 +58,7 @@ async function start(kind: 'resource' | 'folder' | 'history') {
   else if (kind === 'history') {
     const toggle = host.querySelector<HTMLButtonElement>('[data-password-history] > button')!;
     if (toggle.getAttribute('aria-expanded') !== 'true') await act(() => toggle.click());
-    await act(() => host.querySelector<HTMLButtonElement>('[data-password-history] [aria-label="显示"]')!.click());
+    await act(() => host.querySelector<HTMLButtonElement>('[data-password-history] [aria-label="显示密码"]')!.click());
   }
   else {
     await click('更改');

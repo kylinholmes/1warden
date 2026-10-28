@@ -36,6 +36,8 @@ describe('inline field copying', () => {
     const description = field().getAttribute('aria-describedby');
     expect(description).not.toBeNull();
     expect(document.getElementById(description!)?.textContent).toContain('synthetic@example.invalid');
+    expect(document.getElementById(description!)?.textContent).toContain('30 秒自动清空剪贴板');
+    expect(field().hasAttribute('title')).toBe(false);
     expect(host.querySelector('[aria-label="复制"]')).toBeNull();
     expect(write).not.toHaveBeenCalled();
     await act(() => host.querySelector<HTMLElement>('[data-field-value]')!.click());
@@ -55,9 +57,11 @@ describe('inline field copying', () => {
     const reveal = vi.fn(async () => 'revealed-secret');
     await mount(<SecretField label="密码" value="********" masked revealValue={reveal} />);
     expect(field().querySelector('button')).toBeNull();
-    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="显示"]')!.click());
+    expect(host.querySelector('[aria-label="显示密码"]')?.getAttribute('aria-pressed')).toBe('false');
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="显示密码"]')!.click());
     expect(host.textContent).toContain('revealed-secret');
-    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="隐藏"]')!.click());
+    expect(host.querySelector('[aria-label="隐藏密码"]')?.getAttribute('aria-pressed')).toBe('true');
+    await act(() => host.querySelector<HTMLButtonElement>('[aria-label="隐藏密码"]')!.click());
     expect(host.textContent).not.toContain('revealed-secret'); expect(write).not.toHaveBeenCalled();
   });
   it('keeps the existing platform cleanup callback and runs it only after a successful write', async () => {
@@ -69,9 +73,11 @@ describe('inline field copying', () => {
     await act(() => field().click());
     expect(cleanup).not.toHaveBeenCalled(); expect(field().dataset.state).not.toBe('ok');
     expect(field().textContent).toContain('复制失败');
+    expect(field().title).toBe('复制失败，点击重试');
     await act(() => field().click());
     expect(cleanup).toHaveBeenCalledExactlyOnceWith('https://example.invalid');
     expect(field().textContent).not.toContain('复制失败'); expect(field().dataset.state).toBe('ok');
+    expect(field().hasAttribute('title')).toBe(false);
   });
   it('prevents duplicate pending reads and reports a failed read without writing placeholders', async () => {
     let reject!: (error: Error) => void;

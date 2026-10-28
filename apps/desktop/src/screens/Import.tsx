@@ -1,5 +1,5 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import type { ImportFormatId } from '@1warden/vault';
 import { ImportView, PageHeader, type ImportOutcome, type ImportPreview } from '@1warden/ui';
 import type { ApplicationClient, ImportFile } from '../application/types';
@@ -26,8 +26,8 @@ export function ImportScreen({ client, onImported, onBack, droppedFile, onDropCo
   function cleanupWorking(value: boolean) { setCleaning(value); onBusyChange?.(value || store.getState().busy); }
   useEffect(() => { if (droppedFile && !store.getState().busy && !store.getState().cleaning) { setTab('import'); setSource('file'); } }, [droppedFile]);
   useEffect(() => () => { onBusyChange?.(false); }, []);
-  return <div className="flex h-full flex-col">
-    <PageHeader navigation title="导入 / 导出" onBack={onBack} backLabel="返回保险库"
+  return <main aria-label="导入 / 导出" className="flex h-full flex-col">
+    <PageHeader headingLevel={1} navigation title="导入 / 导出" onBack={onBack} backLabel="返回保险库"
       breadcrumbs={[{ label: '保险库', ...(onBack ? { onSelect: onBack } : {}) }, { label: '导入 / 导出' }]} />
     <div className="min-h-0 flex-1 overflow-y-auto px-8 py-7">
       <div className="mx-auto w-full" style={{ maxWidth: 'var(--detail-w)' }}>
@@ -59,7 +59,7 @@ export function ImportScreen({ client, onImported, onBack, droppedFile, onDropCo
         </div>
       </div>
     </div>
-  </div>;
+  </main>;
 }
 
 function ImportPanel({ client, onImported, droppedFile, onDropConsumed, onBusyChange }: {
@@ -84,6 +84,8 @@ function ImportPanel({ client, onImported, droppedFile, onDropConsumed, onBusyCh
   const [encrypted, setEncrypted] = useStoreField(viewStore, 'encrypted');
   const [password, setPassword] = useStoreField(viewStore, 'password');
   const [skipExisting, setSkipExisting] = useStoreField(viewStore, 'skipExisting');
+  const passwordInput = useRef<HTMLInputElement>(null);
+  useEffect(() => { if (encrypted && !parsing && !error) passwordInput.current?.focus({ preventScroll: true }); }, [encrypted, parsing, error]);
   const request = useTransferLifetime(client);
   useEffect(() => {
     // StrictMode probes mounts with setup/cleanup/setup. Consume only a live mount.
@@ -177,8 +179,9 @@ function ImportPanel({ client, onImported, droppedFile, onDropConsumed, onBusyCh
     {parsing && <p role="status" className="mb-4 text-sm text-[var(--ink-secondary)]">正在读取文件…</p>}
     {encrypted && <form className="mb-5 space-y-3 rounded-[var(--radius-md)] bg-[var(--surface-well)] p-4"
       onSubmit={event => { event.preventDefault(); if (file && !parsing && password) void parse({ ...file, password }); }}>
+      <h2 className="text-md font-semibold">解密导入文件</h2>
       <p className="text-sm">{file?.name} 是加密的 JSON 文件，请输入导出时设置的密码。</p>
-      <label className="block text-sm">文件解密密码<input type="password" aria-label="文件解密密码" autoComplete="off"
+      <label className="block text-sm">文件解密密码<input ref={passwordInput} type="password" aria-label="文件解密密码" autoComplete="off"
         disabled={parsing} value={password} onChange={event => setPassword(event.target.value)} className="field secret mt-1.5" /></label>
       <button className="btn btn-primary" disabled={parsing || !password}>解密并预览</button>
     </form>}

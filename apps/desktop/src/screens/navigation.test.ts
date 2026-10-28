@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
+import { PageHeader } from '@1warden/ui';
 import { ImportScreen } from './Import';
 import { SecurityReportView } from './SecurityReport';
 import { EMPTY_SNAPSHOT, type ApplicationClient } from '../application/types';
@@ -23,4 +24,13 @@ describe('full-width vault screens', () => {
     expect(html).toContain('aria-label="导航"');
     expect(html).toContain('aria-label="返回保险库"');
   });
+});
+
+it('PageHeader leaves heading level with its destination or dialog caller and adds no landmark', () => {
+  const props = { title: 'Synthetic header', breadcrumbs: [{ label: 'Synthetic header' }] };
+  const dialog = renderToStaticMarkup(createElement(PageHeader, props));
+  const destination = renderToStaticMarkup(createElement(PageHeader, { ...props, headingLevel: 1 }));
+  expect(dialog).toContain('<h2'); expect(dialog).not.toContain('<h1');
+  expect(destination).toContain('<h1'); expect(destination).not.toContain('<h2');
+  expect(dialog).not.toContain('<main'); expect(destination).not.toContain('<main');
 });

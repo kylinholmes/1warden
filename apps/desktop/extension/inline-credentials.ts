@@ -26,6 +26,7 @@ const styles = `
   button{font:inherit;color:var(--accent);background:var(--tint);border:0;border-radius:7px;padding:9px 11px;cursor:pointer}
   button:focus-visible,input:focus-visible{outline:2px solid var(--accent);outline-offset:2px}button:disabled{opacity:.55;cursor:wait}.secondary{background:transparent;color:var(--muted)}
   .status:empty{display:none}.source{font-weight:600;color:var(--ink)}
+  .arrival{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap;border:0}
 `;
 
 interface Panel { host: HTMLDivElement; shadow: ShadowRoot; panel: HTMLDivElement }
@@ -209,6 +210,15 @@ export function installInlineCredentials(observer: CredentialObserver): InlineCr
     notice.host.style.setProperty('width', 'min(340px, calc(100vw - 32px))', 'important');
     const text = noticeText(item);
     paragraph(notice.panel, text.source, 'source'); paragraph(notice.panel, text.detail); paragraph(notice.panel, text.description);
+    const arrival = paragraph(notice.panel, '', 'arrival'); arrival.setAttribute('role', 'status');
+    arrival.setAttribute('aria-live', 'polite'); arrival.setAttribute('aria-atomic', 'true');
+    // Populate the already-mounted live region on the next task. Arrival must
+    // be announced without moving focus out of the website's form.
+    setTimeout(() => {
+      if (!disposed && notice === currentNotice && currentNotice.host.isConnected) {
+        arrival.textContent = `1Warden：${text.source}，${text.description}可${text.action}。`;
+      }
+    }, 0);
     const status = paragraph(notice.panel, '', 'status'); status.setAttribute('role', 'status');
     let busy = false;
     async function action(type: 'review' | 'snooze'): Promise<void> {

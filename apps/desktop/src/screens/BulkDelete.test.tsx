@@ -55,8 +55,9 @@ describe('bulk cleanup confirmation', () => {
     await act(async () => { button('确认永久删除').click(); button('确认永久删除').click(); });
     expect(f.commitBulkDelete).toHaveBeenCalledTimes(1); expect(onCompleted).toHaveBeenCalledTimes(1);
     expect(host.textContent).toContain('已永久删除 1 条'); expect(host.textContent).toContain('跳过 1 条');
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('Failed record');
-    expect(host.querySelector('[role="alert"]')?.textContent).toContain('重新同步核实');
+    expect(host.querySelector('[role="alert"]')?.textContent).toContain('有 1 条记录需要检查');
+    expect(host.querySelector('[role="alert"]')?.textContent).not.toContain('Failed record');
+    expect(host.textContent).toContain('Failed record：重新同步核实');
     expect(button('重新预览').disabled).toBe(false);
     expect([...host.querySelectorAll('button')].some(control => control.textContent === '确认永久删除')).toBe(false);
   });
@@ -75,8 +76,10 @@ describe('bulk cleanup confirmation', () => {
     const { onCompleted } = await mount(f.client); await act(async () => button('预览移到回收站').click());
     await act(() => button('确认移到回收站').click());
     await act(() => f.emit({ account: { ...account, email: 'another@example.invalid' } }));
+    const newSessionControl = document.createElement('button'); host.append(newSessionControl); newSessionControl.focus();
     await act(async () => pending.resolve({ completed: 3, skipped: 0, failed: [] }));
     expect(host.textContent).not.toContain('已移到回收站'); expect(onCompleted).not.toHaveBeenCalled();
+    expect(document.activeElement).toBe(newSessionControl);
   });
 
   it('disables confirmation for an empty preview and requires a new preview after a commit error', async () => {
@@ -90,4 +93,23 @@ describe('bulk cleanup confirmation', () => {
     expect([...host.querySelectorAll('button')].some(control => control.textContent === '确认移到回收站')).toBe(false);
     expect(button('重新预览').disabled).toBe(false);
   });
+});
+
+it('keeps focus through preview, cancel, partial completion and recoverable failures', async () => {
+  const f = fixture(); await mount(f.client);
+  await act(() => { button('预览移到回收站').focus(); button('预览移到回收站').click(); });
+  expect(document.activeElement?.textContent).toBe('将移到回收站 3 条个人记录。');
+  await act(() => button('取消').click());
+  expect(document.activeElement).toBe(button('预览移到回收站'));
+  f.previewBulkDelete.mockRejectedValueOnce(new Error('读取失败'));
+  await act(() => button('预览移到回收站').click());
+  expect(document.activeElement).toBe(button('重新预览'));
+  await act(() => button('重新预览').click());
+  f.commitBulkDelete.mockRejectedValueOnce(new Error('预览已过期'));
+  await act(() => button('确认移到回收站').click());
+  expect(document.activeElement).toBe(button('重新预览'));
+  f.commitBulkDelete.mockResolvedValueOnce({ completed: 2, skipped: 0, failed: [{ name: 'Synthetic', reason: '连接中断' }] });
+  await act(() => button('重新预览').click());
+  await act(() => button('确认移到回收站').click());
+  expect(document.activeElement?.textContent).toBe('清理部分完成');
 });

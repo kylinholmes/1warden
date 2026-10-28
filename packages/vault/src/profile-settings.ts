@@ -15,7 +15,7 @@ export interface ProfileDeviceInput {
 }
 export interface ProfileDevice extends ProfileDeviceInput { firstSeen: number; lastSeen: number }
 export interface ProfileSettings { preferences: ProfilePreferences | null; devices: ProfileDevice[] }
-export const DEFAULT_PROFILE_PREFERENCES: ProfilePreferences = { mode: 'system', palette: 'original', showTypes: true, iconStyle: 'original' };
+export const DEFAULT_PROFILE_PREFERENCES: ProfilePreferences = { mode: 'system', palette: 'clear-blue', showTypes: true, iconStyle: 'original' };
 export const MAX_PROFILE_DEVICES = 10;
 const object = (v: unknown): v is Record<string, unknown> => !!v && typeof v === 'object' && !Array.isArray(v);
 const fail = (): never => { throw new Error('同步设置或设备记录格式无效，请更新 1Warden 或检查个人资料记录'); };

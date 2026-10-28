@@ -18,6 +18,9 @@
 @layer components {
     .inline-copy { cursor: pointer; user-select: text; -webkit-user-select: text; }
     .inline-copy:hover { background: color-mix(in srgb, var(--surface-hover) 55%, transparent); }
+    /* A field has one interaction surface. Its copy and reveal controls stay
+       separate targets without painting a second rectangle over the row. */
+    [data-field-layout] > .inline-copy:hover { background: transparent; }
     .inline-copy-feedback { min-width: 4em; color: var(--ink-tertiary); }
     .inline-copy[data-state='ok'] .inline-copy-feedback { color: var(--accent); }
     .inline-copy[data-state='error'] .inline-copy-feedback { color: var(--risk); }
@@ -41,10 +44,20 @@
       [data-field-layout] > button[data-field-actions][data-state='ok'] {
         opacity: 1;
       }
-      [data-field-layout]:is(:hover, :focus-within) {
+    }
+    [data-field-layout]:has(> .inline-copy):focus-within {
+      background-color: color-mix(in srgb, var(--surface-hover) 55%, transparent);
+    }
+    .detail-card > [data-compound-field]:focus-within {
+      background-color: color-mix(in srgb, var(--surface-hover) 55%, transparent);
+    }
+    @media (hover: hover) and (pointer: fine) {
+      [data-field-layout]:has(> .inline-copy):hover,
+      .detail-card > [data-compound-field]:hover {
         background-color: color-mix(in srgb, var(--surface-hover) 55%, transparent);
       }
     }
+    .detail-card > [data-compound-field] [data-field-layout] { background: transparent; }
     @media (forced-colors: active) {
       [data-field-layout] > [data-field-actions] button,
       [data-field-layout] > button[data-field-actions] { opacity: 1; }
@@ -332,6 +345,46 @@
     /* 抽屉里的导航栏不受折叠态影响 —— 它只在滑出来时可见 */
     .nav-drawer-panel .vault-rail { height: 100%; }
 
+    /* 蓝色大肥鱼 keeps a black navigation zone in both modes. Scope the full
+       foreground/surface set here so drawers, inline fields and account menus
+       inherit it while the main content keeps its independent light/dark pair. */
+    :root[data-palette='whale'] .nav-drawer-panel {
+      color-scheme: dark;
+      --surface-canvas: #0c0d0f;
+      --surface-chrome: #0c0d0f;
+      --surface-content: #101216;
+      --surface-paper: #15181d;
+      --surface-card: #15181d;
+      --surface-well: #13161b;
+      --surface-overlay: #191d23;
+      --surface-glass: #0c0d0f;
+      --surface-hover: #222832;
+      --surface-selected: #153e6b;
+      --surface-brand: #153e6b;
+      --ink-primary: #f5f7fb;
+      --ink-secondary: #d4dae4;
+      --ink-tertiary: #b5bfcd;
+      --ink-inverse: #10243d;
+      --border-subtle: #274364;
+      --border-overlay: #4b6e9a;
+      --border-strong: #63758e;
+      --border-control: #8291a6;
+      --accent: #93bfff;
+      --accent-hover: #a8ccff;
+      --accent-tint: #153e6b;
+      --accent-ring: #93bfff;
+      --accent-ink: #10243d;
+      --violet: #93bfff;
+      --teal: #93bfff;
+      --rose: #93bfff;
+      --favorite: #93bfff;
+      --safe: #75e0ad;
+      --caution: #ffd17b;
+      --risk: #ff98aa;
+      background: var(--surface-canvas);
+      color: var(--ink-primary);
+    }
+
     /*
      * ── 宽屏时，抽屉变回**常驻侧栏** ──────────────────────────
      *
@@ -520,6 +573,35 @@
     overflow: hidden;
   }
 
+  /* Only the card's own field rows span its gutter. Notes, resource controls
+     and nested password-history rows keep their existing inset. Round the
+     painted rows themselves, so the card need not clip focus or popovers. */
+  .detail-card { --detail-gutter: calc(var(--spacing) * 4); overflow: visible; }
+  .detail-card > [data-field-layout],
+  .detail-card > [data-compound-field] {
+    margin-inline: calc(-1 * var(--detail-gutter));
+    padding-inline: var(--detail-gutter);
+  }
+  .detail-card > [data-field-layout]:first-child,
+  .detail-card > [data-compound-field]:first-child {
+    border-start-start-radius: calc(var(--radius-md) - 1px);
+    border-start-end-radius: calc(var(--radius-md) - 1px);
+  }
+  .detail-card > [data-field-layout]:last-child,
+  .detail-card > [data-compound-field]:last-child {
+    border-end-start-radius: calc(var(--radius-md) - 1px);
+    border-end-end-radius: calc(var(--radius-md) - 1px);
+  }
+  /* Keep the container's original content-width breakpoint budget. The grid
+     alone spans the gutters, so 320px does not gain cramped extra columns. */
+  .detail-card > [data-compound-field] > [data-compound-cells] {
+    margin-inline: calc(-1 * var(--detail-gutter));
+  }
+  .detail-card > [data-compound-field] > [data-compound-cells] > [data-field-layout='inline'] {
+    min-height: 60px;
+    padding: 8px var(--detail-gutter);
+  }
+
   /* 略深一层的卡片 —— 放在 paper 上时用它，才有「凹进去」的感觉 */
   .card-well {
     border-radius: var(--radius-md);
@@ -604,7 +686,7 @@
   .field {
     width: 100%;
     border-radius: var(--radius-sm);
-    border: 1px solid var(--border-strong);
+    border: 1px solid var(--border-control);
     background: var(--surface-paper);
     color: var(--ink-primary);
     padding: 8px 11px;
@@ -625,6 +707,9 @@
 
   .select-control { display: inline-flex; min-width: 0; align-items: center; gap: 12px; text-align: left; cursor: pointer; }
   .select-control:disabled { cursor: not-allowed; }
+  .select-control.vault-sort { width: auto; gap: 4px; padding: 4px 8px; border-color: transparent; background: transparent; font-size: var(--text-xs); }
+  .select-control.vault-sort:hover { background: var(--surface-hover); }
+  .select-control.vault-sort:focus { border-color: var(--accent); }
   .select-value { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .select-chevron { flex: none; color: var(--ink-tertiary); }
   .select-popup {
@@ -661,6 +746,19 @@
     transition: background-color var(--dur-fast) var(--ease-enter);
   }
   .field-bare::placeholder { color: var(--ink-tertiary); }
+}
+
+/* Keep this palette-specific title role above the shared tertiary text utility. */
+:root[data-palette='whale'] .vault-detail section > h3 { color: var(--accent); }
+
+/* Generator rows respond to their available content width in every shell. */
+.generator-body { container: generator / inline-size; }
+@container generator (width < 360px) {
+  .generator-row { flex-direction: column; align-items: stretch; gap: 8px; }
+  .generator-label { flex: none; }
+  .generator-control { min-width: 0; }
+  .generator-control > div { width: 100%; }
+  .generator-options { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
 }
 
 /* A segmented date has one shared frame, not an extra focus ring around each

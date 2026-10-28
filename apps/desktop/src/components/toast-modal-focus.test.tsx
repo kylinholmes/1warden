@@ -9,7 +9,7 @@ import { ToastProvider, useToast } from './Toast';
 let root: Root | undefined;
 afterEach(async () => {
   if (root) await act(() => root!.unmount());
-  root = undefined; document.body.replaceChildren(); vi.restoreAllMocks();
+  root = undefined; document.body.replaceChildren(); vi.restoreAllMocks(); vi.unstubAllGlobals();
 });
 function Notify() {
   const toast = useToast();
@@ -77,5 +77,14 @@ it('restores the notification trigger when no modal is open', async () => {
   await mount();
   const close = document.querySelector<HTMLButtonElement>('[aria-label="关闭通知"]')!;
   await act(() => { close.focus(); close.click(); });
+  expect(document.activeElement).toBe(document.getElementById('notify'));
+});
+it('removes a dismissed notification without animationend under reduced motion and restores focus', async () => {
+  vi.stubGlobal('matchMedia', () => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() }));
+  await mount();
+  const close = document.querySelector<HTMLButtonElement>('[aria-label="关闭通知"]')!;
+  await act(() => { close.focus(); close.click(); });
+  expect(close.isConnected).toBe(false);
+  expect(document.querySelector('.toast-out')).toBeNull();
   expect(document.activeElement).toBe(document.getElementById('notify'));
 });

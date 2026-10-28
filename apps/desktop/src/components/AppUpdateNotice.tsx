@@ -2,10 +2,12 @@ import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/r
 
 import type { AppUpdater } from '../updates/controller';
 import ManualUpdateAction from './ManualUpdateAction';
+import { safeRestart } from '../updates/safe-restart';
 
-/** A polite notification; it never takes focus, closes the app, or touches the vault. */
+/** Passive until an explicit restart request enters the shared safe-leave flow. */
 export default function AppUpdateNotice({ updater }: { updater: AppUpdater }) {
   const state = useStoreSnapshot(updater.subscribe, updater.getSnapshot, updater.getSnapshot);
+  const restart = useStoreSnapshot(safeRestart.subscribe, safeRestart.getSnapshot, safeRestart.getSnapshot);
   const viewStore = useLocalStore(() => {
     const dismissed: ReadonlySet<string> = new Set();
     return { dismissed };
@@ -17,7 +19,7 @@ export default function AppUpdateNotice({ updater }: { updater: AppUpdater }) {
   if (!['ready', 'available', 'error'].includes(state.phase) || !version || dismissed.has(noticeKey)) return null;
 
   return <aside data-app-update-notice aria-label="应用更新提示"
-    className="fixed right-4 bottom-[max(16px,env(safe-area-inset-bottom))] z-[80] max-h-[calc(100dvh-32px)] overflow-y-auto w-[min(360px,calc(100vw-32px))] rounded-[var(--radius-md)] border border-[var(--border-overlay)] bg-[var(--surface-overlay)] p-4 shadow-[var(--elev-pop)]">
+    className={`fixed right-4 bottom-[max(16px,env(safe-area-inset-bottom))] ${restart.busy ? 'z-[40]' : 'z-[80]'} max-h-[calc(100dvh-32px)] overflow-y-auto w-[min(360px,calc(100vw-32px))] rounded-[var(--radius-md)] border border-[var(--border-overlay)] bg-[var(--surface-overlay)] p-4 shadow-[var(--elev-pop)]`}>
     <div role="status" aria-live="polite" aria-atomic="true">
       <p className="text-md font-medium">{ready ? '新版本已准备好' : `发现新版本 ${version}，请更新`}</p>
       <p className="mt-1.5 text-sm leading-relaxed text-[var(--ink-secondary)]">{ready
@@ -25,10 +27,11 @@ export default function AppUpdateNotice({ updater }: { updater: AppUpdater }) {
         : state.manual ?? '自动更新未完成，可以重试或下载新版本手动更新。'}</p>
     </div>
     {state.error && <p role="alert" className="mt-2 text-sm text-[var(--risk)]">{state.error}</p>}
+    {restart.error && <p role="alert" className="mt-2 text-sm text-[var(--risk)]">{restart.error}</p>}
     <div className="mt-3 flex flex-wrap justify-end gap-2">
       <button type="button" className="btn btn-quiet" onClick={() => setDismissed((previous) => new Set([...previous, noticeKey]))}>稍后</button>
       {(!ready || state.error) && <ManualUpdateAction />}
-      {ready && <button type="button" className="btn btn-primary" onClick={() => { void updater.restart(); }}>{state.installOnRestart ? '安装并重启' : '重启更新'}</button>}
+      {ready && <button type="button" className="btn btn-primary" disabled={restart.busy} onClick={() => { void safeRestart.restart(updater); }}>{restart.busy ? '正在确认重启…' : state.installOnRestart ? '安装并重启' : '重启更新'}</button>}
       {state.phase === 'error' && <button type="button" className="btn btn-primary" onClick={() => { void updater.check(); }}>重试更新</button>}
     </div>
   </aside>;

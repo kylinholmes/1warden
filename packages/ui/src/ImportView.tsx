@@ -1,8 +1,37 @@
-import { useRef } from 'react';
+import { useEffect, useRef, type ReactNode } from 'react';
+import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { IMPORT_FORMATS, type ImportFormatId } from '@1warden/vault';
 import { IconAlert, IconCheck, IconImport } from './icons';
 import { TYPE_LABEL } from './destinations';
 import { Select } from './Select';
+
+function useStageHeading() {
+  const heading = useRef<HTMLHeadingElement>(null);
+  useEffect(() => { heading.current?.focus({ preventScroll: true }); }, []);
+  return heading;
+}
+
+/** Keep every reason available without building thousands of hidden DOM nodes. */
+function ExceptionList<T>({ items, render }: { items: T[]; render: (item: T, index: number) => ReactNode }) {
+  const store = useLocalStore(() => ({ expanded: false, visible: 58 }));
+  const [expanded, setExpanded] = useStoreField(store, 'expanded');
+  const [visible, setVisible] = useStoreField(store, 'visible');
+  const summary = useRef<HTMLElement>(null);
+  const focusSummary = useRef(false);
+  useEffect(() => {
+    if (focusSummary.current) { summary.current?.focus({ preventScroll: true }); focusSummary.current = false; }
+  }, [visible]);
+  return <>
+    <ul className="space-y-1">{items.slice(0, 8).map((item, index) => <li key={index} className="break-words text-xs">{render(item, index)}</li>)}</ul>
+    {items.length > 8 && <details className="mt-2 text-xs text-[var(--ink-secondary)]" onToggle={event => setExpanded(event.currentTarget.open)}>
+      <summary ref={summary} className="cursor-pointer text-[var(--accent)]">查看其余 {items.length - 8} 项详情</summary>
+      {expanded && <>
+        <ul className="mt-2 space-y-1">{items.slice(8, visible).map((item, index) => <li key={index + 8} className="break-words text-xs">{render(item, index + 8)}</li>)}</ul>
+        {visible < items.length && <button type="button" className="btn btn-quiet mt-3" onClick={() => { focusSummary.current = visible + 50 >= items.length; setVisible(count => count + 50); }}>再显示 {Math.min(50, items.length - visible)} 项（共 {items.length} 项）</button>}
+      </>}
+    </details>}
+  </>;
+}
 
 /**
  * 从别处导入 —— **两端共用这一份**。
@@ -90,21 +119,34 @@ export function ImportView({
   onRetry?: (() => void) | undefined;
 }) {
   const fileRef = useRef<HTMLInputElement>(null);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const errorRef = useRef<HTMLParagraphElement>(null);
   const busy = progress !== null || reading;
+  const stage = progress ? 'progress' : result ? 'result' : preview ? 'preview' : 'pick';
+  const previousStage = useRef(stage);
+  useEffect(() => {
+    if (error && !busy) errorRef.current?.focus({ preventScroll: true });
+    else if (stage === 'pick' && previousStage.current !== 'pick') rootRef.current?.querySelector<HTMLButtonElement>('[data-import-pick]')?.focus({ preventScroll: true });
+    previousStage.current = stage;
+  }, [stage, error, busy]);
 
   return (
-    <div>
+    <div ref={rootRef}>
       <p className="text-sm leading-[var(--lh-prose)] text-[var(--ink-secondary)]">
+        数据只在本地解析，<strong className="font-medium text-[var(--ink-primary)]">文件不会上传到任何地方</strong>。
+        导入会创建新记录，创建和更新时间由服务器重新生成。
+      </p>
+      <details className="mt-3 text-sm text-[var(--ink-secondary)]">
+        <summary className="cursor-pointer text-[var(--accent)]">支持的导入格式</summary>
+        <p className="mt-2 leading-[var(--lh-prose)]">
         支持 1Password（.1pux / .1pif / CSV）、Bitwarden（JSON / CSV）、
         KeePass 2（XML 导出），以及 Chrome、Edge、Firefox、Safari、
         LastPass、Dashlane 等常见导出与 Excel 存出来的 CSV。
-        数据只在本地解析，<strong className="font-medium text-[var(--ink-primary)]">
-        文件不会上传到任何地方</strong>。
-        导入会创建新记录，创建和更新时间由服务器重新生成。
-      </p>
+        </p>
+      </details>
 
       {error && (
-        <p role="alert" className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-sm text-[var(--risk)]">
+        <p ref={errorRef} tabIndex={-1} role="alert" className="mt-4 flex items-start gap-2 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-sm text-[var(--risk)]">
           <IconAlert size={15} className="mt-0.5 shrink-0" />
           <span className="min-w-0 flex-1">{error}</span>
         </p>
@@ -164,6 +206,7 @@ export function ImportView({
 function PickStep({ hasFile, disabled, onChoose }: { hasFile: boolean; disabled: boolean; onChoose: () => void }) {
   return (
     <button
+      data-import-pick=""
       type="button"
       onClick={onChoose}
       disabled={disabled}
@@ -181,10 +224,12 @@ function PickStep({ hasFile, disabled, onChoose }: { hasFile: boolean; disabled:
 }
 
 function Progress({ done, total }: { done: number | null; total: number }) {
+  const heading = useStageHeading();
   const pct = done === null ? 35 : total === 0 ? 0 : (done / total) * 100;
   return (
     <div className="card-well p-5">
-      <p className="text-sm">
+      <h2 ref={heading} tabIndex={-1} className="mb-3 text-md font-semibold">正在导入</h2>
+      <p role="status" aria-atomic="true" className="text-sm">
         正在导入{done === null ? ` ${total} 条记录…` : <><span className="font-medium tabular-nums"> {done}</span><span className="text-[var(--ink-tertiary)]"> / {total}</span></>}
       </p>
       <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--border-subtle)]"
@@ -201,8 +246,11 @@ export function ImportResult({ result: { created, failed, skippedExisting = 0 },
   onAgain: () => void;
   onRetry?: (() => void) | undefined;
 }) {
+  const heading = useStageHeading();
   return (
     <div className="card p-4 @[640px]:p-5">
+      <h2 ref={heading} tabIndex={-1} className="mb-3 text-md font-semibold">{failed.length ? '导入部分完成' : '导入完成'}</h2>
+      <p role="status" aria-atomic="true" className="sr-only">已导入 {created} 条；跳过已有 {skippedExisting} 条；{failed.length} 项未完成或未能确认。</p>
       <p className="flex items-center gap-2.5 text-md">
         <span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-[var(--safe)] text-[var(--surface-paper)]">
           <IconCheck size={14} />
@@ -222,14 +270,10 @@ export function ImportResult({ result: { created, failed, skippedExisting = 0 },
             <IconAlert size={14} className="shrink-0" />
             有 {failed.length} 项未完成或未能确认
           </p>
-          <ul className="space-y-1">
-            {failed.map((f, index) => (
-              <li key={index} className="text-xs">
+          <ExceptionList items={failed} render={f => <>
                 <span className="font-medium">{f.name}</span>
                 <span className="text-[var(--ink-tertiary)]"> —— {f.reason}</span>
-              </li>
-            ))}
-          </ul>
+              </>} />
         </div>
       )}
 
@@ -248,11 +292,14 @@ export function ImportPreviewCard({ preview, disabled, onRun, onCancel, cancelLa
   onCancel: () => void;
   cancelLabel?: string;
 }) {
+  const heading = useStageHeading();
   const breakdown = Object.entries(preview.byType).map(([t, n]) => `${TYPE_LABEL[t] ?? t} ${n}`);
 
   return (
     <div className="card">
       <div className="border-b border-[var(--border-subtle)] px-4 py-3.5">
+        <h2 ref={heading} tabIndex={-1} className="mb-3 text-md font-semibold">导入预览</h2>
+        <p role="status" aria-atomic="true" className="sr-only">可导入 {preview.total} 条记录、{preview.folders} 个文件夹；{preview.skipped.length} 行不会被导入。</p>
         <p className="truncate text-sm text-[var(--ink-tertiary)]" title={preview.fileName}>
           {preview.fileName}
         </p>
@@ -278,21 +325,9 @@ export function ImportPreviewCard({ preview, disabled, onRun, onCancel, cancelLa
             <IconAlert size={14} className="shrink-0" />
             有 {preview.skipped.length} 行不会被导入
           </p>
-          <ul className="space-y-1">
-            {preview.skipped.slice(0, 8).map((s) => (
-              <li key={s.rowNumber} className="text-xs text-[var(--ink-secondary)]">
+          <ExceptionList items={preview.skipped} render={s => <>
                 第 <span className="tabular-nums">{s.rowNumber}</span> 行 —— {s.reason}
-              </li>
-            ))}
-          </ul>
-          {preview.skipped.length > 8 && <details className="mt-2 text-xs text-[var(--ink-secondary)]">
-            <summary className="cursor-pointer text-[var(--accent)]">查看其余 {preview.skipped.length - 8} 行</summary>
-            <ul className="mt-2 max-h-64 space-y-1 overflow-y-auto">
-              {preview.skipped.slice(8).map(s => <li key={s.rowNumber}>
-                第 <span className="tabular-nums">{s.rowNumber}</span> 行 —— {s.reason}
-              </li>)}
-            </ul>
-          </details>}
+              </>} />
         </div>
       )}
 

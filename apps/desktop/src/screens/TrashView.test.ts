@@ -42,6 +42,18 @@ it('keeps a record visible when restoring fails', async () => {
   expect(host.querySelector('[role="alert"]')?.textContent).toBe('Restore rejected');
   expect(host.querySelectorAll('ul.card > li')).toHaveLength(1);
   expect(button('恢复').disabled).toBe(false);
+  expect(document.activeElement).toBe(button('恢复'));
+});
+
+it('focuses the next restorable row and then the title as records are restored', async () => {
+  const next = { ...item, id: 'next-fixture', name: 'Next synthetic item' };
+  const broken = { ...item, id: 'broken', restoreError: '需要检查' };
+  await mount({ listTrash: async () => [item, broken, next], restoreItem: async () => {} } as unknown as ApplicationClient);
+  await act(() => button('恢复').click());
+  expect(document.activeElement?.getAttribute('aria-label')).toBe('恢复「Next synthetic item」');
+  await act(() => (document.activeElement as HTMLButtonElement).click());
+  expect(document.activeElement).toBe(host.querySelector('h1'));
+  expect(host.querySelectorAll('ul.card > li')).toHaveLength(1);
 });
 
 it('explains unreadable records without blocking restoration of healthy records', async () => {

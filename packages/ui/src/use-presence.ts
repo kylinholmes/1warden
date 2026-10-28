@@ -12,9 +12,13 @@ export function useRetainedPresence<T>(value: T | null) {
   const leaving = value === null && retained !== null;
   useEffect(() => {
     if (!leaving) return;
+    const media = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : undefined;
+    const finishWithoutMotion = () => { if (media?.matches) setRetained(null); };
+    finishWithoutMotion();
+    media?.addEventListener('change', finishWithoutMotion);
     // animationend is primary; this also handles hidden elements and disabled animations.
-    const timer = setTimeout(() => setRetained(null), 400);
-    return () => clearTimeout(timer);
+    const timer = media?.matches ? undefined : setTimeout(() => setRetained(null), 400);
+    return () => { clearTimeout(timer); media?.removeEventListener('change', finishWithoutMotion); };
   }, [leaving]);
   const onExited = useCallback(() => {
     if (value === null) setRetained(null);

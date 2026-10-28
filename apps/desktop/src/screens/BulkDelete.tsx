@@ -15,6 +15,10 @@ export function BulkDeletePanel({ client, scope, onCompleted, onBusyChange, disa
   const owner = ownerOf(snapshot);
   const titleId = useId();
   const request = useRef(0);
+  const previewHeading = useRef<HTMLHeadingElement>(null);
+  const resultHeading = useRef<HTMLHeadingElement>(null);
+  const previewButton = useRef<HTMLButtonElement>(null);
+  const focusNext = useRef<'preview' | 'result' | 'retry' | null>(null);
   const busyCallback = useRef(onBusyChange); busyCallback.current = onBusyChange;
   const store = useLocalStore(() => ({ owner: '', preview: null as BulkDeletePreview | null, result: null as BulkDeleteResult | null,
     busy: null as 'preview' | 'commit' | null, acknowledged: false, error: null as string | null, attempted: false }));
@@ -36,6 +40,7 @@ export function BulkDeletePanel({ client, scope, onCompleted, onBusyChange, disa
     let expectedOwner = ownerOf(client.getSnapshot());
     function reset() {
       request.current++;
+      focusNext.current = null;
       store.setState({ owner: expectedOwner, preview: null, result: null, busy: null, acknowledged: false, error: null, attempted: false });
     }
     reset();
@@ -48,6 +53,12 @@ export function BulkDeletePanel({ client, scope, onCompleted, onBusyChange, disa
   }, [client, scope, store]);
 
   useEffect(() => { busyCallback.current?.(!!busy || !!preview); }, [busy, preview]);
+  useEffect(() => {
+    if (busy || !current || !focusNext.current) return;
+    const target = focusNext.current === 'preview' && preview ? previewHeading.current
+      : focusNext.current === 'result' && result ? resultHeading.current : previewButton.current;
+    if (target) { target.focus({ preventScroll: true }); focusNext.current = null; }
+  }, [busy, current, preview, result, error]);
 
   function stillCurrent(version: number, source: string) {
     return request.current === version && ownerOf(client.getSnapshot()) === source;
@@ -55,6 +66,7 @@ export function BulkDeletePanel({ client, scope, onCompleted, onBusyChange, disa
   async function loadPreview() {
     if (store.getState().busy || disabled || !unlocked) return;
     const version = ++request.current; const source = ownerOf(client.getSnapshot());
+    focusNext.current = 'preview';
     store.setState({ owner: source, busy: 'preview', preview: null, result: null, acknowledged: false, error: null, attempted: true });
     try {
       const next = await client.previewBulkDelete(scope);
@@ -68,6 +80,7 @@ export function BulkDeletePanel({ client, scope, onCompleted, onBusyChange, disa
   function cancel() {
     if (store.getState().busy) return;
     request.current++;
+    focusNext.current = 'retry';
     store.setState({ preview: null, acknowledged: false, error: null, attempted: false });
   }
   async function confirm() {
@@ -75,6 +88,7 @@ export function BulkDeletePanel({ client, scope, onCompleted, onBusyChange, disa
     if (state.busy || !plan || plan.scope !== scope || plan.count === 0 || !unlocked
       || state.owner !== ownerOf(client.getSnapshot()) || (permanent && !state.acknowledged)) return;
     const version = ++request.current; const source = state.owner;
+    focusNext.current = 'result';
     // Remove the token before awaiting: retries always start with a fresh preview.
     store.setState({ busy: 'commit', preview: null, error: null, acknowledged: false });
     try {
@@ -96,7 +110,7 @@ export function BulkDeletePanel({ client, scope, onCompleted, onBusyChange, disa
       : '将当前账户的全部个人记录（包括归档）移到回收站，之后可恢复。'}个人资料和组织记录会保留。</p>
     {preview && <div className="mt-4 space-y-3">
       <div className="break-words text-sm"><p className="font-medium">{preview.account.email}</p><p className="text-[var(--ink-secondary)]">{preview.account.serverUrl}</p></div>
-      <p className="text-sm font-medium">{permanent ? '将永久删除' : '将移到回收站'} {preview.count} 条个人记录。</p>
+      <h3 ref={previewHeading} tabIndex={-1} className="text-sm font-medium">{permanent ? '将永久删除' : '将移到回收站'} {preview.count} 条个人记录。</h3>
       <p className="text-sm text-[var(--ink-secondary)]">{permanent ? '此操作无法恢复，附件也会一并删除。' : '这些记录可在回收站中恢复；服务器的回收站保留策略仍然适用。'}</p>
       {permanent && <label className="flex items-start gap-2 text-sm">
         <input type="checkbox" checked={acknowledged} disabled={!!busy} className="mt-0.5" onChange={event => setAcknowledged(event.target.checked)} />
@@ -112,13 +126,14 @@ export function BulkDeletePanel({ client, scope, onCompleted, onBusyChange, disa
     {busy && <p role="status" className="mt-4 flex items-center gap-2 text-sm"><IconSpinner size={15} />{busy === 'preview' ? '正在读取清理范围…' : '正在处理已确认的记录…'}</p>}
     {error && <p role="alert" className="mt-4 break-words text-sm text-[var(--risk)]">{error}</p>}
     {result && <div className="mt-4 space-y-3">
+      <h3 ref={resultHeading} tabIndex={-1} className="text-sm font-medium">{result.failed.length ? '清理部分完成' : '清理完成'}</h3>
       <p role="status" className="text-sm">{permanent ? '已永久删除' : '已移到回收站'} {result.completed} 条；跳过 {result.skipped} 条已变化或不再符合范围的记录。</p>
-      {result.failed.length > 0 && <div role="alert" className="text-sm text-[var(--risk)]">
-        <p>有 {result.failed.length} 条记录需要检查。请先同步核实，再重新预览。</p>
+      {result.failed.length > 0 && <div className="text-sm text-[var(--risk)]">
+        <p role="alert">有 {result.failed.length} 条记录需要检查。请先同步核实，再重新预览。</p>
         <ul className="mt-2 space-y-2">{result.failed.map((failed, index) => <li key={index} className="break-words">{failed.name}：{failed.reason}</li>)}</ul>
       </div>}
     </div>}
-    {!preview && !busy && <button type="button" className="btn btn-quiet mt-4" disabled={disabled || !unlocked} onClick={() => { void loadPreview(); }}>
+    {!preview && !busy && <button ref={previewButton} type="button" className="btn btn-quiet mt-4" disabled={disabled || !unlocked} onClick={() => { void loadPreview(); }}>
       {attempted ? '重新预览' : permanent ? '预览清空回收站' : '预览移到回收站'}
     </button>}
   </section>;

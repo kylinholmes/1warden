@@ -250,6 +250,8 @@ export async function hibpPrefix(password: string): Promise<{ prefix: string; su
 export interface BreachOptions {
   fetchImpl?: typeof fetch;
   signal?: AbortSignal;
+  /** UI reports must not label a partial or failed query as a completed check. */
+  failOnError?: boolean;
 }
 
 /** HIBP 的 k-匿名查询端点 */
@@ -284,7 +286,10 @@ export async function checkBreaches(
         // 让服务端用固定长度的假条目填充响应，避免从响应大小推断出前缀命中数
         headers: { 'Add-Padding': 'true' },
       });
-      if (!res.ok) continue;
+      if (!res.ok) {
+        if (opts.failOnError) throw new Error('泄露查询未完成，请重试');
+        continue;
+      }
 
       const text = await res.text();
       for (const line of text.split('\n')) {
@@ -294,7 +299,8 @@ export async function checkBreaches(
           break;
         }
       }
-    } catch {
+    } catch (cause) {
+      if (opts.failOnError) throw new Error('泄露查询未完成，请重试', { cause });
       // 网络失败、被用户中断 —— 跳过这一条，其余照常检查
       continue;
     }

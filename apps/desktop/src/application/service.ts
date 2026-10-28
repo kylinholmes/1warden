@@ -312,7 +312,13 @@ export function createVaultService(client: VaultClient, profileCache?: ProfileCa
     async previewMerge(request) { activeItems(); return guarded(() => client.previewMerge(request)); },
     async revealMergeValue(request) { activeItems(); return guarded(() => client.revealMergeValue(request)); },
     async mergeItems(request) { activeItems(); return guarded(() => client.mergeItems(request)); },
-    async checkBreaches() { return guarded(() => checkBreaches(activeItems())); },
+    async checkBreaches(now) {
+      return guarded(async () => {
+        const items = activeItems();
+        const breached = await checkBreaches(items, { failOnError: true });
+        return reportBrief(buildReport(items, now, breached), (i) => i.nameFailed ? '无法解密' : i.name);
+      });
+    },
     async exportVault(request) {
       return guarded(async () => {
         const session = client.getSession();

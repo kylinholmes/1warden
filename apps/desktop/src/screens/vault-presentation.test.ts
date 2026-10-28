@@ -105,7 +105,7 @@ describe('shared vault presentation', () => {
     expect(html).toContain('reader');
     expect(html).toContain('aria-label="返回列表"');
     // Password history is collapsed by default and has no mounted secret fields.
-    expect(html.match(/aria-label="显示"/g)).toHaveLength(1);
+    expect(html.match(/aria-label="显示[^">]+"/g)).toHaveLength(1);
     expect(html).toContain('历史密码');
     expect(html).not.toContain('清空历史密码');
     expect(html).not.toContain('输入到其他应用');
@@ -285,7 +285,7 @@ describe('shared compound-field presentation in record details', () => {
   ] as const)('keeps %s secret-only sections masked with the same explicit reveal controls', (type, rawType, fields, count) => {
     const reveal = vi.fn(async () => 'revealed-only-after-action');
     const html = renderNativeDetail({ type, rawType, ...fields }, { ...client, reveal });
-    expect(html.match(/aria-label="显示"/g)).toHaveLength(count);
+    expect(html.match(/aria-label="显示[^">]+"/g)).toHaveLength(count);
     expect(html).not.toContain('private-marker');
     expect(html).not.toContain('revealed-only-after-action');
     expect(html).not.toContain('data-compound-field=');

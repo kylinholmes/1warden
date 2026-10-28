@@ -3,7 +3,7 @@ import { act, createElement, type ComponentProps } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ItemEditor } from '../../../../packages/ui/src/ItemEditor';
-import { blankCard, blankEditorItem, nativeEditorFields, nativeFieldValue } from '../../../../packages/ui/src/item-editor-fields';
+import { blankCard, blankEditorItem, nativeEditorFields, nativeFieldValue, updateNativeField } from '../../../../packages/ui/src/item-editor-fields';
 import { TYPE_LABEL, TYPE_ORDER } from '../../../../packages/ui/src/destinations';
 import type { VaultItem } from '@1warden/vault';
 import { emptyPassport } from '@1warden/vault';
@@ -11,7 +11,7 @@ import { emptyPassport } from '@1warden/vault';
 let root: Root;
 let host: HTMLDivElement;
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
-afterEach(async () => { if (root) await act(() => root.unmount()); host?.remove(); });
+afterEach(async () => { if (root) await act(() => root.unmount()); host?.remove(); vi.unstubAllGlobals(); });
 function button(label: string): HTMLButtonElement {
   const result = [...host.querySelectorAll<HTMLButtonElement>('button')].find(node => node.textContent?.trim() === label);
   if (!result) throw new Error(`Missing button: ${label}`);
@@ -30,6 +30,128 @@ async function mount(item: VaultItem | null, onSave = async (draft: VaultItem) =
 }
 
 describe('complete native editor and custom-field interactions', () => {
+  it.each(['login', 'card', 'identity', 'sshKey', 'bankAccount', 'driversLicense', 'passport'] as const)(
+    'masks every native %s secret and keeps editable values across reveal/hide and save', async type => {
+      const fields = nativeEditorFields(type).filter(field => field.kind === 'secret');
+      const item = fields.reduce<VaultItem>((draft, field) => updateNativeField(draft, field.id, `synthetic-${field.id}`),
+        { ...blankEditorItem(), type, name: 'Secret editing' });
+      let saved: VaultItem | undefined;
+      await mount(item, async draft => { saved = draft; return { id: 'saved', name: draft.name }; });
+      for (const field of fields) {
+        const control = host.querySelector<HTMLInputElement>(`input[aria-label="${field.label}"]`)!;
+        expect(control.type).toBe('password');
+        expect(control.value).toBe(`synthetic-${field.id}`);
+        const show = host.querySelector<HTMLButtonElement>(`[aria-label="显示${field.label}"]`)!;
+        expect(show.getAttribute('aria-pressed')).toBe('false');
+        await click(show);
+        expect(control.type).toBe('text');
+        await input(control, `edited-${field.id}`);
+        const hide = host.querySelector<HTMLButtonElement>(`[aria-label="隐藏${field.label}"]`)!;
+        expect(hide.getAttribute('aria-pressed')).toBe('true');
+        await click(hide);
+        expect(control.type).toBe('password');
+        expect(control.value).toBe(`edited-${field.id}`);
+      }
+      await click(button('保存'));
+      for (const field of fields) expect(nativeFieldValue(saved!, field.id)).toBe(`edited-${field.id}`);
+      expect(saved?.name).toBe('Secret editing');
+      expect(JSON.stringify(saved)).not.toMatch(/revealed|nameInvalid/);
+    });
+  it('requires an explicit private-key reveal and preserves multiline edits while public keys stay readable', async () => {
+    const privateKey = '-----BEGIN OPENSSH PRIVATE KEY-----\nsynthetic-line-one\nsynthetic-line-two\n-----END OPENSSH PRIVATE KEY-----';
+    let saved: VaultItem | undefined;
+    await mount({ ...blankEditorItem(), type: 'sshKey', name: 'SSH',
+      sshKey: { privateKey, publicKey: 'ssh-ed25519 synthetic-public', fingerprint: null } },
+      async draft => { saved = draft; return { id: 'saved', name: draft.name }; });
+    const key = host.querySelector<HTMLTextAreaElement>('textarea[aria-label="私钥"]')!;
+    expect(key.readOnly).toBe(true); expect(key.value).not.toContain('synthetic');
+    expect(host.querySelector<HTMLTextAreaElement>('[aria-label="公钥"]')?.value).toBe('ssh-ed25519 synthetic-public');
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="显示私钥"]')!);
+    expect(key.readOnly).toBe(false); expect(key.value).toBe(privateKey);
+    const edited = `${privateKey}\n`;
+    await act(() => {
+      Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, 'value')!.set!.call(key, edited);
+      key.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="隐藏私钥"]')!);
+    expect(key.value).not.toContain('synthetic');
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="显示私钥"]')!);
+    expect(key.value).toBe(edited);
+    await click(button('保存')); expect(saved?.sshKey?.privateKey).toBe(edited);
+  });
+  it('masks new, regenerated and newly added custom secrets', async () => {
+    await mount(null);
+    const password = host.querySelector<HTMLInputElement>('[aria-label="密码"]')!;
+    expect(password.type).toBe('password');
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="显示密码"]')!);
+    await click(host.querySelector<HTMLButtonElement>('[title="生成随机密码"]')!);
+    expect(password.value).toHaveLength(20); expect(password.type).toBe('password');
+    await click(button('添加自定义字段'));
+    await click(host.querySelector<HTMLButtonElement>('[data-add-custom="1"]')!);
+    const custom = host.querySelector<HTMLInputElement>('[aria-label="字段 1 值"]')!;
+    expect(custom.type).toBe('password');
+    await input(custom, 'custom-secret');
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="显示字段 1 值"]')!);
+    expect(custom.type).toBe('text'); expect(custom.value).toBe('custom-secret');
+  });
+  it('associates the required name error with its input and focuses it without calling save', async () => {
+    const onSave = vi.fn(); await mount(null, onSave);
+    const name = host.querySelector<HTMLInputElement>('[aria-label="名称"]')!;
+    const scroll = vi.fn(); name.scrollIntoView = scroll;
+    button('保存').focus(); await click(button('保存'));
+    expect(onSave).not.toHaveBeenCalled(); expect(document.activeElement).toBe(name);
+    expect(scroll).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(name.getAttribute('aria-required')).toBe('true');
+    expect(name.getAttribute('aria-invalid')).toBe('true');
+    expect(document.getElementById(name.getAttribute('aria-describedby')!)?.textContent).toBe('名称不能为空');
+    await input(name, 'Named'); expect(name.hasAttribute('aria-invalid')).toBe(false);
+    expect(host.querySelector('[role="alert"]')).toBeNull();
+  });
+  it('remasks custom secrets when removal or undo reuses a row position', async () => {
+    await mount({ ...blankEditorItem(), name: 'Custom secrets', customFields: [
+      { name: 'First', value: 'first-secret', type: 1, linkedId: null },
+      { name: 'Second', value: 'second-secret', type: 1, linkedId: null },
+    ] });
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="显示字段 1 值"]')!);
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="删除字段 1"]')!);
+    const second = host.querySelector<HTMLInputElement>('[aria-label="字段 1 值"]')!;
+    expect(second.type).toBe('password'); expect(second.value).toBe('second-secret');
+    await click(button('撤销移除'));
+    expect(host.querySelector<HTMLInputElement>('[aria-label="字段 1 值"]')?.type).toBe('password');
+    expect(host.querySelector<HTMLInputElement>('[aria-label="字段 1 值"]')?.value).toBe('first-secret');
+    expect(host.querySelector<HTMLInputElement>('[aria-label="字段 2 值"]')?.value).toBe('second-secret');
+  });
+  it('remasks the editor on reopen without keeping reveal state in the saved record', async () => {
+    const item = { ...blankEditorItem(), name: 'Reopen', login: { ...blankEditorItem().login!, password: 'synthetic-secret' } };
+    const props = { folders: [], item, onSave: async (draft: VaultItem) => ({ id: 'saved', name: draft.name }), onDone: () => {}, onCancel: () => {} };
+    await mount(item, props.onSave, props);
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="显示密码"]')!);
+    expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')?.type).toBe('text');
+    await act(() => root.render(createElement(ItemEditor, { ...props, open: false })));
+    await act(() => root.render(createElement(ItemEditor, { ...props, open: true })));
+    expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')?.type).toBe('password');
+    expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')?.value).toBe('synthetic-secret');
+  });
+  it('offers all compact type choices on demand via keyboard and retains per-type drafts', async () => {
+    vi.stubGlobal('matchMedia', vi.fn(() => ({ matches: true, addEventListener: vi.fn(), removeEventListener: vi.fn() })));
+    await mount(null);
+    const select = host.querySelector<HTMLButtonElement>('[aria-label="条目类型"]')!;
+    expect(select.getAttribute('role')).toBe('combobox');
+    expect(host.querySelector('[role="listbox"]')).toBeNull();
+    expect([...host.querySelectorAll('button')].some(node => node.textContent === TYPE_LABEL.card)).toBe(false);
+    await input(host.querySelector<HTMLInputElement>('[aria-label="密码"]')!, 'login-draft');
+    const key = async (key: string) => { await act(() => select.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true }))); };
+    select.focus(); await key('Enter');
+    expect(host.querySelectorAll('[role="option"]')).toHaveLength(TYPE_ORDER.length);
+    await key('End'); await key('Enter');
+    expect(select.value).toBe(TYPE_ORDER.at(-1)); expect(document.activeElement).toBe(select);
+    const fingerprint = host.querySelector<HTMLInputElement>('[aria-label="指纹"]')!;
+    await input(fingerprint, 'ssh-draft');
+    await key('Enter'); await key('Home'); await key('Enter');
+    expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')?.value).toBe('login-draft');
+    await key('Enter'); await key('End'); await key('Enter');
+    expect(host.querySelector<HTMLInputElement>('[aria-label="指纹"]')?.value).toBe('ssh-draft');
+  });
   it('retains drafts when changing a new item type and only saves the selected fields', async () => {
     let saved: VaultItem | undefined;
     await mount(null, async draft => { saved = draft; return { id: 'saved', name: draft.name }; });
@@ -152,7 +274,6 @@ describe('complete native editor and custom-field interactions', () => {
     for (const control of controls) {
       expect(control.closest('label')?.classList.contains('flex')).toBe(true);
       expect(control.closest('label')?.classList.contains('flex-col')).toBe(true);
-      expect(control.closest('label')?.querySelector('[data-field-label]')?.className).toContain('text-[var(--violet)]');
     }
     for (let index = 0; index < controls.length; index++) await input(controls[index]!, `Name ${index}`);
     await click(button('保存'));
@@ -209,7 +330,7 @@ describe('complete native editor and custom-field interactions', () => {
   it('lets password strength feedback wrap below a narrow credential without losing the generate action', async () => {
     await mount({ ...blankEditorItem(), name: 'Login', login: { ...blankEditorItem().login!, password: 'Synthetic password' } });
     const password = host.querySelector<HTMLElement>('[data-editor-field="login.password"]')!;
-    const meter = password.querySelector<HTMLElement>('[aria-hidden]')!.parentElement!;
+    const meter = password.querySelector<HTMLElement>('span[aria-hidden]')!.parentElement!;
     expect(meter.classList.contains('flex-wrap')).toBe(true);
     const generate = password.querySelector<HTMLButtonElement>('[title="生成随机密码"]')!;
     await click(generate);

@@ -3,6 +3,7 @@ import { IconTrash } from './icons';
 import { changeCustomFieldType, linkedFieldTargets } from './item-editor-fields';
 import { FIELD_LABEL_CLASS, FIELD_ROW_CLASS } from './CompoundFieldRow';
 import { Select } from './Select';
+import { EditorSecretField } from './EditorSecretField';
 
 export function EditorCustomFields({ fields, itemType, onChange, onRemove }: {
   fields: CustomField[];
@@ -64,12 +65,15 @@ export function EditorCustomFields({ fields, itemType, onChange, onRemove }: {
                   </label>
                   {!linkedSupported && <p className="mt-1 text-xs text-[var(--ink-tertiary)]">此关联目标暂不支持，未改动时会保留。</p>}
                 </>
+              ) : field.type === 1 ? (
+                <EditorSecretField label={`字段 ${index + 1} 值`} value={field.value}
+                  onChange={value => update(index, { value })} />
               ) : (
                 <label className={FIELD_ROW_CLASS}>
                   <span className="sr-only">字段 {index + 1} 值</span>
                   <input value={field.value} placeholder="值" aria-label={`字段 ${index + 1} 值`}
-                    type={field.type === 1 ? 'password' : 'text'} autoComplete="off" spellCheck={false}
-                    onChange={event => update(index, { value: event.target.value })} className={`field min-w-0${field.type === 1 ? ' secret' : ''}`} />
+                    type="text" autoComplete="off" spellCheck={false}
+                    onChange={event => update(index, { value: event.target.value })} className="field min-w-0" />
                 </label>
               )}
             </div>

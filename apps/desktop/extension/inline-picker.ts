@@ -229,6 +229,9 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
 
   async function choose(itemId: string): Promise<void> {
     const version = ++request;
+    // Chromium and Firefox may drop shadow focus when its button is disabled.
+    const focused = buttons.find(button => button.matches(':focus'));
+    const previous = focused ?? (document.activeElement === anchor ? anchor : null);
     busy = true;
     buttons.forEach((button) => { button.disabled = true; });
     message('正在填充…');
@@ -243,6 +246,7 @@ export function installInlinePicker(readFields: () => InlineField[], credentials
       busy = false;
       buttons.forEach((button) => { button.disabled = false; });
       message(errorText(error, '未能填充，请重试'));
+      if (previous?.isConnected) previous.focus({ preventScroll: true });
     }
   }
 

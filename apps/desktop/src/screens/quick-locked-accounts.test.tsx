@@ -71,3 +71,13 @@ it('shows account loading instead of claiming there are no remembered accounts w
   expect(node.textContent).toContain('正在读取账户…');
   expect(node.textContent).not.toContain('还没有记住的账户');
 });
+
+it('shows distinct visible server host and path for accounts sharing an email, preserving card navigation', async () => {
+  const sameEmail = accounts.map((account, index) => ({ ...account, email: 'same@example.test',
+    serverUrl: `https://shared.example/team-${index}/` }));
+  const props = await mount({ accounts: sameEmail });
+  expect(cards().map(card => card.querySelector('[data-quick-account-server]')?.textContent)).toEqual(['shared.example/team-0', 'shared.example/team-1']);
+  await act(() => cards()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })));
+  expect(document.activeElement).toBe(cards()[1]);
+  await act(() => cards()[1]!.click()); expect(props.onOpenAccount).toHaveBeenCalledExactlyOnceWith('two');
+});

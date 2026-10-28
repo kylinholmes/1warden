@@ -5,6 +5,18 @@ export const PALETTES = [
   { id: 'original', name: '1Warden',
     light: ['#edf2fb', '#ecf2ff', '#f7f9fd', '#ffffff', '#202b3c', '#0667e8', '#ffffff'],
     dark: ['#101722', '#162234', '#1b2738', '#213045', '#f1f6ff', '#8ac0ff', '#112947'] },
+  { id: 'jade', name: '青绿暖白',
+    light: ['#dcece4', '#e7f2e9', '#f5f8ee', '#fffdf5', '#173e32', '#08755c', '#ffffff'],
+    dark: ['#071e18', '#0d2c23', '#143a2e', '#1d493a', '#f1f8e9', '#77dfb2', '#103b2b'] },
+  { id: 'clear-blue', name: '清透蓝白',
+    light: ['#dceaff', '#e7f1ff', '#f5f9ff', '#ffffff', '#152f59', '#095bd9', '#ffffff'],
+    dark: ['#101113', '#17191c', '#1d1f23', '#25282d', '#f2f3f5', '#8dcaff', '#122235'] },
+  { id: 'whale', name: '蓝色大肥鱼',
+    light: ['#d5e0ef', '#dfe8f4', '#e4ecf7', '#eaf0f8', '#17191d', '#174fc4', '#ffffff'],
+    dark: ['#101113', '#17191c', '#1d1f23', '#25282d', '#f3f4f6', '#91bdff', '#13243e'] },
+  { id: 'brass', name: '墨色黄铜',
+    light: ['#e9dfc6', '#f2e9d4', '#faf5e6', '#fffbee', '#302a1e', '#80600e', '#ffffff'],
+    dark: ['#17160f', '#252319', '#302d20', '#3d3828', '#faf1d7', '#e4bf65', '#30240d'] },
   { id: 'graphite', name: '石墨',
     light: ['#eeeeee', '#f4f4f4', '#fafafa', '#ffffff', '#202020', '#343434', '#ffffff'],
     dark: ['#121212', '#181818', '#1e1e1e', '#242424', '#ededed', '#ededed', '#202020'] },
@@ -32,8 +44,9 @@ export const PALETTES = [
 ] as const satisfies readonly Palette[];
 
 export type ThemePalette = typeof PALETTES[number]['id'];
+export const DEFAULT_PALETTE: ThemePalette = 'clear-blue';
 export const isPalette = (value: unknown): value is ThemePalette => PALETTES.some(p => p.id === value);
-export function getPalette(id: ThemePalette) { return PALETTES.find(p => p.id === id)!; }
+export function getPalette(id: ThemePalette): Palette { return PALETTES.find(p => p.id === id)!; }
 
 /** Hex mixing keeps previews, WebViews and contrast tests on the same exact colors. */
 function mix(a: string, b: string, amount: number): string {
@@ -53,8 +66,13 @@ export function paletteTokens(id: ThemePalette, mode: 'light' | 'dark'): Record<
     '--surface-brand': mix(accent, paper, .08), '--surface-card': paper,
     '--ink-primary': ink, '--ink-secondary': mix(ink, paper, .86), '--ink-tertiary': mix(ink, paper, .78),
     '--ink-inverse': accentInk, '--border-subtle': subtle, '--border-overlay': mix(ink, paper, .24),
-    '--border-strong': mix(ink, paper, .4), '--accent': accent,
+    '--border-strong': mix(ink, paper, .4), '--border-control': mix(ink, paper, mode === 'dark' ? .55 : .62), '--accent': accent,
     '--accent-hover': mix(accent, mode === 'dark' ? '#ffffff' : '#000000', .88),
     '--accent-tint': mix(accent, paper, .1), '--accent-ring': accent, '--accent-ink': accentInk,
+    ...(id === 'whale' ? {
+      '--surface-selected': mode === 'light' ? '#c5d9f7' : '#1c3d66',
+      '--border-subtle': mode === 'light' ? '#b0c6e6' : '#344f72',
+      '--border-control': mode === 'light' ? '#4d719c' : '#7e9fc9',
+    } : {}),
   };
 }

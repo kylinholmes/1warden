@@ -302,9 +302,14 @@ try {
 
   await page.emulateMediaFeatures([{ name: 'prefers-reduced-motion', value: 'reduce' }]);
   await visit('generator');
-  check('reduced motion uses negligible duration', await page.$eval('.panel', (element: HTMLElement) => parseFloat(getComputedStyle(element).animationDuration) < 0.001));
-  await page.keyboard.press('Escape');
-  await page.waitForSelector('[role="dialog"]', { hidden: true });
+  check('reduced motion removes panel movement', await page.$eval('.panel', (element: HTMLElement) => getComputedStyle(element).animationName === 'none'));
+  const reducedCloseMs = await page.evaluate(async () => {
+    const start = performance.now();
+    document.activeElement?.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    while (document.querySelector('.floating-layer') && performance.now() - start < 1000) await new Promise(requestAnimationFrame);
+    return performance.now() - start;
+  });
+  check('reduced motion releases the overlay promptly', reducedCloseMs < 150, reducedCloseMs);
   check('no browser runtime errors', errors.length === 0, errors);
   console.log(JSON.stringify({ checks, screenshots: output }, null, 2));
 } catch (error) {

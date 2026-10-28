@@ -1,5 +1,5 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useId, useRef } from 'react';
 import { generatePassword, passwordStrength } from '@1warden/crypto';
 import type { VaultItem, VaultFolder, ItemType } from '@1warden/vault';
 import { emptyBankAccount, emptyDriversLicense, emptyPassport } from '@1warden/vault';
@@ -8,8 +8,10 @@ import { EditorUrls } from './EditorUrls';
 import { EditorCardExpiry, EditorDateField } from './EditorDateFields';
 import { CompoundFieldRow, FIELD_LABEL_CLASS, FIELD_ROW_CLASS } from './CompoundFieldRow';
 import { EditorCustomFields } from './EditorCustomFields';
+import { EditorSecretField } from './EditorSecretField';
 import { EditorAddMore } from './EditorAddMore';
 import { Select } from './Select';
+import { useCompactLayout } from './layout';
 import {
   blankEditorItem, blankLogin, blankCard, blankIdentity, blankSshKey,
   createCustomField, customFieldsForItemType,
@@ -28,12 +30,15 @@ interface Props {
   folders: readonly VaultFolder[];
   /** 保存。桌面端直接调 client，扩展端发消息给后台 —— 加密在他们那边 */
   onSave: (draft: VaultItem) => Promise<Pick<VaultItem, 'id' | 'name'>>;
+  /** Applied only when a new editor opens; later navigation never resets a draft. */
+  newItemDefaults?: Partial<Pick<VaultItem, 'folderId' | 'favorite' | 'type'>>;
   item: VaultItem | null;      // null = 新建
   /** 浮层的开合。**组件本身一直挂着** —— 见下面「退场」那一段 */
   open: boolean;
   onDone: (saved: Pick<VaultItem, 'id' | 'name'> | null) => void;
   onCancel: () => void;
   onCreateFolder?: (name: string) => Promise<{ id: string; name: string }>;
+  registerRestartCheck?: (prepare: (signal: AbortSignal) => Promise<boolean>, finish: () => void) => () => void;
 }
 
 const CARD_BRANDS = [
@@ -74,16 +79,18 @@ const EDITOR_ROW_CLASS = `${FIELD_ROW_CLASS} border-b border-[var(--border-subtl
  * 第三次确认：**没有任何键盘路径能丢掉改动**。Esc 第一次是「你要关吗」，
  * 第二次是把这一问撤掉、回到编辑。要丢只能点「放弃改动」。
  */
-export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCreateFolder }: Props) {
+export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCreateFolder, registerRestartCheck, newItemDefaults }: Props) {
+  const compact = useCompactLayout();
+  const nameErrorId = useId();
   const viewStore = useLocalStore(() => {
-    const draft = item ?? newEditorItem();
+    const draft = item ?? newEditorItem(newItemDefaults);
     const initial = draft;
     const busy = false;
     const error = (null) as string | null;
     const confirming = false;
     const isNew = item === null;
     return {
-      draft, initial, busy, error, confirming, isNew,
+      draft, initial, busy, error, confirming, restartConfirm: false, isNew, nameInvalid: false,
       pendingFocus: null as string | null,
       undoRemoval: null as { label: string; run: () => void } | null,
       createdFolders: [] as { id: string; name: string }[],
@@ -100,7 +107,47 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
   const [initial, setInitial] = useStoreField(viewStore, 'initial');
   const [busy, setBusy] = useStoreField(viewStore, 'busy');
   const [error, setError] = useStoreField(viewStore, 'error');
+  const [nameInvalid, setNameInvalid] = useStoreField(viewStore, 'nameInvalid');
   const [confirming, setConfirming] = useStoreField(viewStore, 'confirming');
+  const [restartConfirm, setRestartConfirm] = useStoreField(viewStore, 'restartConfirm');
+  const restartDecision = useRef<((allowed: boolean) => void) | null>(null);
+  const restartOwned = useRef(false);
+  const restartRegistration = useRef(0);
+  const savingRestart = useRef<number | null>(null);
+  const restartCancel = useRef<HTMLButtonElement>(null);
+  function cancelRestart() {
+    restartDecision.current?.(false);
+    restartDecision.current = null;
+    setRestartConfirm(false); setConfirming(false);
+  }
+  useEffect(() => {
+    if (!open || !registerRestartCheck) return;
+    const registration = ++restartRegistration.current;
+    const unregister = registerRestartCheck(async signal => {
+      const current = viewStore.getState();
+      if (current.busy || current.creatingFolder) throw new Error('正在保存条目或文件夹，请完成后再重启更新。');
+      restartOwned.current = true;
+      if (JSON.stringify(current.draft) === JSON.stringify(current.initial)) { setBusy(true); return true; }
+      setRestartConfirm(true); setConfirming(true);
+      return new Promise<boolean>(resolve => {
+        const decide = (allowed: boolean) => {
+          signal.removeEventListener('abort', abort);
+          restartDecision.current = null;
+          resolve(allowed);
+        };
+        const abort = () => decide(false);
+        restartDecision.current = decide;
+        signal.addEventListener('abort', abort, { once: true });
+        if (signal.aborted) abort();
+      });
+    }, () => {
+      if (registration !== restartRegistration.current || !restartOwned.current) return;
+      restartOwned.current = false; cancelRestart();
+      if (savingRestart.current !== registration) setBusy(false);
+    });
+    return () => { restartRegistration.current++; restartOwned.current = false; cancelRestart(); unregister(); };
+  }, [open, registerRestartCheck, viewStore]);
+  useEffect(() => { if (restartConfirm) restartCancel.current?.focus(); }, [restartConfirm]);
   /**
    * 「这是在新建吗」也在打开时定下来，不跟着 prop 走。
    *
@@ -113,6 +160,8 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
   const [undoRemoval, setUndoRemoval] = useStoreField(viewStore, 'undoRemoval');
   const editorBody = useRef<HTMLDivElement>(null);
   const restoreAfterSave = useRef<HTMLElement | null>(null);
+  const saveButton = useRef<HTMLButtonElement>(null);
+  const retrySaveFocus = useRef(false);
   const typeDrafts = useRef(new Map<ItemType, VaultItem>());
   const [createdFolders, setCreatedFolders] = useStoreField(viewStore, 'createdFolders');
   const [folderName, setFolderName] = useStoreField(viewStore, 'folderName');
@@ -129,16 +178,19 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
    */
   const itemRef = useRef(item);
   itemRef.current = item;
+  const defaultsRef = useRef(newItemDefaults);
+  defaultsRef.current = newItemDefaults;
 
   useEffect(() => {
     typeDrafts.current.clear();
     if (!open) return;
-    const start = itemRef.current ?? newEditorItem();
+    const start = itemRef.current ?? newEditorItem(defaultsRef.current);
     setBusy(false);
     setIsNew(itemRef.current === null);
     setInitial(start);
     setDraft(start);
     setError(null);
+    setNameInvalid(false);
     setConfirming(false);
     setPendingFocus(null);
     setUndoRemoval(null);
@@ -148,11 +200,12 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
   }, [open]);
 
   useEffect(() => {
-    if (busy || !error) return;
-    const target = restoreAfterSave.current;
+    if (!open || busy || !error) return;
+    const target = retrySaveFocus.current ? saveButton.current : restoreAfterSave.current;
+    retrySaveFocus.current = false;
     restoreAfterSave.current = null;
     if (target?.isConnected) target.focus({ preventScroll: true });
-  }, [busy, error]);
+  }, [open, busy, error]);
 
   useEffect(() => {
     if (!pendingFocus) return;
@@ -253,48 +306,78 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
         options={[{ value: '', label: '选择卡片品牌' },
           ...(value && !CARD_BRANDS.some(([brand]) => brand === value) ? [{ value, label: `已保存：${value}` }] : []),
           ...CARD_BRANDS.map(([value, label]) => ({ value, label }))]} />
-      : field.kind === 'multiline' ? <textarea value={value} rows={field.id === 'sshKey.publicKey' ? 2 : 4}
-        aria-label={field.label} autoComplete="off" spellCheck={false}
-        placeholder={field.id === 'sshKey.privateKey' ? '-----BEGIN OPENSSH PRIVATE KEY-----' : field.id === 'sshKey.publicKey' ? 'ssh-ed25519 AAAA…' : '需要记下来的其他事情'}
-        className={`field resize-y leading-[var(--lh-prose)] ${field.id.startsWith('sshKey.') ? 'secret' : ''}`}
-        onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))} />
-      : <>
-        <div className="relative min-w-0">
-          <input value={value} aria-label={field.label} autoComplete="off" spellCheck={false}
-            {...(field.id === 'login.totp' ? { placeholder: 'otpauth://totp/…' } : {})}
-            className={`field ${field.kind === 'secret' ? 'secret' : ''} ${field.id === 'login.password' ? 'pr-[76px]' : ''}`}
-            onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))} />
-          {field.id === 'login.password' && <button type="button" title="生成随机密码"
-            onClick={() => setDraft(current => updateNativeField(current, field.id, generatePassword({ length: 20 })))}
-            className="absolute right-1 top-1/2 -translate-y-1/2 rounded-[var(--radius-sm)] px-2 py-1 text-xs text-[var(--accent)] hover:bg-[var(--accent-tint)]">生成</button>}
-        </div>
+      : field.kind === 'secret' || field.id === 'sshKey.privateKey' ? <>
+        <EditorSecretField key={`${open}-${field.id}`} label={field.label} value={value}
+          multiline={field.id === 'sshKey.privateKey'}
+          placeholder={field.id === 'sshKey.privateKey' ? '-----BEGIN OPENSSH PRIVATE KEY-----' : undefined}
+          onChange={value => setDraft(current => updateNativeField(current, field.id, value))}
+          onGenerate={field.id === 'login.password' ? () => setDraft(current => updateNativeField(current, field.id, generatePassword({ length: 20 }))) : undefined} />
         {field.id === 'login.password' && <StrengthMeter value={value} />}
         {field.id === 'login.totp' && <p className="mt-1 text-xs text-[var(--ink-tertiary)]">otpauth:// 链接，或直接填 base32 密钥</p>}
-      </>}
+      </>
+      : field.kind === 'multiline' ? <textarea value={value} rows={field.id === 'sshKey.publicKey' ? 2 : 4}
+        aria-label={field.label} autoComplete="off" spellCheck={false}
+        placeholder={field.id === 'sshKey.publicKey' ? 'ssh-ed25519 AAAA…' : '需要记下来的其他事情'}
+        className={`field resize-y leading-[var(--lh-prose)] ${field.id.startsWith('sshKey.') ? 'secret' : ''}`}
+        onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))} />
+      : <input value={value} aria-label={field.label} autoComplete="off" spellCheck={false} className="field"
+        onChange={event => setDraft(current => updateNativeField(current, field.id, event.target.value))} />}
     </Row>;
   }
   const shownFields = nativeEditorFields(draft.type);
   const nativeGroups = [...new Set(shownFields.map(field => field.group))];
   const allFolders = [...folders, ...createdFolders.filter(folder => !folders.some(existing => existing.id === folder.id))];
 
+  function changeType(type: ItemType) {
+    if (viewStore.getState().busy || type === draft.type) return;
+    typeDrafts.current.set(draft.type, draft);
+    setDraft(itemWithType(draft, type, typeDrafts.current.get(type)));
+    setUndoRemoval(null);
+  }
 
-  async function save() {
+
+  async function save(forRestart = false) {
     if (viewStore.getState().busy || viewStore.getState().creatingFolder) return;
     const draft = viewStore.getState().draft;
+    if (draft.name.trim().length === 0) {
+      restoreAfterSave.current = null;
+      setError(null);
+      setNameInvalid(true);
+      setPendingFocus('[data-editor-name]');
+      if (forRestart) cancelRestart();
+      return;
+    }
     restoreAfterSave.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     setBusy(true);
     setError(null);
+    const registration = restartRegistration.current;
+    if (forRestart) savingRestart.current = registration;
     try {
-      // 名是必填的 —— 一条没有名字的记录在列表里是一片空白，用户找不回来
-      if (draft.name.trim().length === 0) throw new Error('名称不能为空');
       // An unused newly added URL row is a UI placeholder, never a saved URL.
       const savedDraft = draft.login ? {
         ...draft, login: { ...draft.login, uris: savedLoginUris(draft.login.uris, isNew ? [] : initial.login?.uris ?? []) },
       } : draft;
-      onDone(await onSave(savedDraft));
+      const saved = await onSave(savedDraft);
+      if (forRestart) {
+        if (!restartOwned.current || registration !== restartRegistration.current) return;
+        // Preserve a successful save if installation fails. No secret leaves this component.
+        const committed = { ...savedDraft, id: saved.id, name: saved.name };
+        setInitial(committed); writeDraft(committed); setIsNew(false);
+        setConfirming(false); setRestartConfirm(false); restartDecision.current?.(true);
+      } else onDone(saved);
     } catch (e) {
+      if (forRestart && (!restartOwned.current || registration !== restartRegistration.current)) return;
+      // The confirmation action disappears on failure; retry at the surviving
+      // Save button after React has mounted and re-enabled it.
+      if (forRestart) retrySaveFocus.current = true;
       setError(messageOf(e));
       setBusy(false);
+      if (forRestart) cancelRestart();
+    } finally {
+      if (forRestart) {
+        if (savingRestart.current === registration) savingRestart.current = null;
+        if (!restartOwned.current && registration === restartRegistration.current) setBusy(false);
+      }
     }
   }
 
@@ -310,9 +393,10 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
    * 正在问「要放弃吗」的时候，再按 Esc 是**把这一问撤掉**，不是丢掉改动。
    */
   const handleClose = useCallback(() => {
+    if (restartConfirm) { if (!viewStore.getState().busy) cancelRestart(); return; }
     if (confirming) { setConfirming(false); return; }
     requestClose();
-  }, [confirming, requestClose]);
+  }, [confirming, requestClose, restartConfirm]);
 
   return (
     <FloatingPanel
@@ -324,10 +408,20 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
         <div className="flex min-w-0 flex-col gap-2 @[420px]:flex-row @[420px]:items-center @[420px]:justify-between">
         {confirming ? (
         <>
-          <span className="min-w-0 break-words text-[var(--ink-secondary)]">有未保存的改动，关掉就没了</span>
-          <span className="flex shrink-0 items-center gap-2 self-end @[420px]:self-auto">
-            <button onClick={() => setConfirming(false)} className="btn btn-quiet">继续编辑</button>
-            <button onClick={onCancel} className="btn btn-danger">放弃改动</button>
+          <span className="min-w-0 break-words text-[var(--ink-secondary)]">{restartConfirm ? '有未保存的改动，请选择保存或放弃后重启' : '有未保存的改动，关掉就没了'}</span>
+          <span className="flex shrink-0 flex-wrap justify-end items-center gap-2 self-end @[420px]:self-auto">
+            <button ref={restartCancel} disabled={busy} onClick={() => restartConfirm ? cancelRestart() : setConfirming(false)} className="btn btn-quiet">继续编辑</button>
+            <button disabled={busy || (restartConfirm && creatingFolder)} onClick={() => {
+              if (restartConfirm) {
+                // A folder write can begin after the question opens. Read the
+                // synchronous snapshot as queued clicks can precede rendering.
+                const current = viewStore.getState();
+                if (current.busy || current.creatingFolder) return;
+                setBusy(true); setConfirming(false); setRestartConfirm(false); restartDecision.current?.(true);
+              }
+              else onCancel();
+            }} className="btn btn-danger">{restartConfirm ? '放弃改动并重启' : '放弃改动'}</button>
+            {restartConfirm && <button disabled={busy || creatingFolder} onClick={() => { void save(true); }} className="btn btn-primary">{busy ? '保存中…' : '保存并重启'}</button>}
           </span>
         </>
       ) : (
@@ -339,9 +433,9 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
             : <span className="min-w-0 break-words">{isNew ? '新条目会加密后存到服务器' : '改动会加密后存到服务器'}</span>}
           <span className="flex shrink-0 items-center gap-2 self-end @[420px]:self-auto">
             <button onClick={requestClose} disabled={busy || creatingFolder} className="btn btn-quiet">取消</button>
-            <button onClick={save} disabled={busy || creatingFolder} className="btn btn-primary">
+            <button ref={saveButton} onClick={() => { void save(); }} disabled={busy || creatingFolder} className="btn btn-primary">
               {busy && <IconSpinner size={14} />}
-              {busy ? '保存中…' : '保存'}
+              {busy ? restartOwned.current ? '正在确认重启…' : '保存中…' : '保存'}
             </button>
           </span>
         </>
@@ -373,32 +467,35 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
       <div ref={editorBody} inert={busy} aria-busy={busy}
         className={`min-h-0 min-w-0 flex-1 overflow-x-hidden overflow-y-auto px-5 py-5${busy ? ' opacity-70' : ''}`}>
         {isNew && <Group title="类型">
-          <div className="grid grid-cols-2 gap-2 py-3 @[400px]:grid-cols-4">
+          {compact ? <div className="py-2"><Select value={draft.type} aria-label="条目类型" disabled={busy}
+            options={TYPE_ORDER.map(type => ({ value: type, label: TYPE_LABEL[type]! }))}
+            onChange={value => changeType(value as ItemType)} /></div>
+          : <div className="grid grid-cols-2 gap-2 py-3 @[400px]:grid-cols-4">
             {TYPE_ORDER.map(type => <button key={type} type="button" aria-pressed={draft.type === type}
-              onClick={() => {
-                if (type === draft.type) return;
-                typeDrafts.current.set(draft.type, draft);
-                const next = itemWithType(draft, type, typeDrafts.current.get(type));
-                setDraft(next); setUndoRemoval(null);
-              }}
+              onClick={() => changeType(type)}
               className={`flex min-w-0 flex-col items-center gap-1.5 rounded-[var(--radius-md)] border px-1 py-3 text-xs ${
                 draft.type === type ? 'border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--ink-primary)]'
                   : 'border-[var(--border-subtle)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]'}`}>
               <span className={draft.type === type ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}><TypeIcon type={type} size={17} /></span>{TYPE_LABEL[type]}
             </button>)}
-          </div>
+          </div>}
         </Group>}
         <Group>
           <Row label="名称">
-            <input value={draft.name} aria-label="名称" onChange={event => patch({ name: event.target.value })}
+            <input value={draft.name} aria-label="名称" data-editor-name aria-required="true"
+              aria-invalid={nameInvalid || undefined} aria-describedby={nameInvalid ? nameErrorId : undefined}
+              onChange={event => { patch({ name: event.target.value }); if (event.target.value.trim()) setNameInvalid(false); }}
               className="field" placeholder="例如 GitHub" />
+            {nameInvalid && <p id={nameErrorId} role="alert" className="mt-1 text-xs text-[var(--risk)]">名称不能为空</p>}
           </Row>
         </Group>
         {nativeGroups.map(group => <Group key={group} title={group}>
           {shownFields.filter(field => field.group === group).map(renderNative)}
         </Group>)}
         {draft.customFields.length > 0 && <Group title="自定义字段">
-          <div className="py-3"><EditorCustomFields fields={draft.customFields} itemType={draft.type}
+          {/* New custom rows have no sourceId. Remask on collection changes so
+              an index reused after removal cannot inherit another row's reveal. */}
+          <div className="py-3"><EditorCustomFields key={`${open}-${draft.type}-${draft.customFields.length}`} fields={draft.customFields} itemType={draft.type}
             onChange={customFields => patch({ customFields })} onRemove={removeCustom} /></div>
         </Group>}
         {undoRemoval && <div className="mb-3 flex min-w-0 flex-wrap items-center gap-2 text-xs text-[var(--ink-tertiary)]" role="status">
@@ -506,8 +603,9 @@ function StrengthMeter({ value }: { value: string }) {
   );
 }
 
-function newEditorItem(): VaultItem {
-  return blankEditorItem();
+function newEditorItem(defaults?: Props['newItemDefaults']): VaultItem {
+  const blank = blankEditorItem();
+  return { ...(defaults?.type ? itemWithType(blank, defaults.type) : blank), ...defaults };
 }
 
 function itemWithType(draft: VaultItem, type: ItemType, previous?: VaultItem): VaultItem {

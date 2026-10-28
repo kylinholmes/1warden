@@ -273,12 +273,12 @@ describe('application dispatcher', () => {
     const started = new Promise<void>((resolve) => { markStarted = resolve; });
     let status = 'unlocked';
     const service = {
-      checkBreaches: async () => { await new Promise<void>((resolve) => { finishRead = resolve; markStarted(); }); return [{ itemId: 'secret', count: 1 }]; },
+      checkBreaches: async () => { await new Promise<void>((resolve) => { finishRead = resolve; markStarted(); }); return { total: 10, score: 70, grade: 'fair', breached: [{ itemId: 'secret', count: 1 }], weak: [], reused: [], unsecured: [], expiring: [] }; },
       logout: async () => { status = 'loggedOut'; },
       snapshot: async () => ({ status }),
     } as unknown as ApplicationService;
     const dispatch = createApplicationDispatcher(service);
-    const reading = dispatch({ method: 'checkBreaches', args: [] });
+    const reading = dispatch({ method: 'checkBreaches', args: [1] });
     const cancelled = expect(reading).rejects.toThrow();
     await started;
     const loggingOut = dispatch({ method: 'logout', args: [] });

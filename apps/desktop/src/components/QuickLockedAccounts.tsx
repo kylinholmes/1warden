@@ -49,11 +49,14 @@ export function QuickLockedAccounts({ accounts, busy, onOpenAccount }: {
         disabled={busy || !onOpenAccount} onClick={() => onOpenAccount?.(account.id)}
         title={`${account.displayName || account.email}\n${account.email}\n${account.serverUrl}`}
         aria-label={`选择账户 ${account.displayName || account.email} · ${account.email} · ${account.serverUrl}`}
-        className="group flex h-40 w-44 shrink-0 flex-col items-center justify-center gap-3 rounded-[var(--radius-lg)] px-2 py-2 text-center first:ml-auto last:mr-auto hover:bg-[var(--surface-hover)] focus-visible:outline-none disabled:opacity-60">
+        className="group flex h-40 w-44 shrink-0 flex-col items-center justify-center gap-2 rounded-[var(--radius-lg)] px-2 py-2 text-center first:ml-auto last:mr-auto hover:bg-[var(--surface-hover)] focus-visible:outline-none disabled:opacity-60">
         <span className="shrink-0 rounded-full transition-transform duration-150 group-hover:scale-110 group-focus-visible:scale-110 group-focus-visible:ring-2 group-focus-visible:ring-[var(--accent)] group-focus-visible:ring-offset-4 group-focus-visible:ring-offset-[var(--surface-overlay)] motion-reduce:transition-none">
           <ProfileAvatar profile={{ displayName: account.displayName, avatarDataUrl: account.avatarDataUrl }} fallback={account.email} className="h-[88px] w-[88px] text-3xl" />
         </span>
-        <span data-quick-account-label className="block w-full shrink-0 truncate text-sm leading-6 font-medium">{account.email || account.displayName}</span>
+        <span className="block w-full min-w-0 shrink-0">
+          <span data-quick-account-label className="block truncate text-sm leading-6 font-medium">{account.email || account.displayName}</span>
+          <span data-quick-account-server className="block truncate text-xs leading-5 text-[var(--ink-secondary)]" title={account.serverUrl}>{serverLabel(account.serverUrl)}</span>
+        </span>
       </button>)}
       {accounts.length === 0 && <div className="flex w-full flex-col items-center gap-4 py-5">
         <p role="status" className="text-sm text-[var(--ink-secondary)]">{busy ? '正在读取账户…' : '还没有记住的账户'}</p>
@@ -61,4 +64,8 @@ export function QuickLockedAccounts({ accounts, busy, onOpenAccount }: {
       </div>}
     </div>
   </section>;
+}
+
+function serverLabel(value: string) {
+  try { const url = new URL(value); return `${url.host}${url.pathname.replace(/\/$/, '')}`; } catch { return value; }
 }

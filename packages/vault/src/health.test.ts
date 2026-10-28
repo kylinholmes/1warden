@@ -210,6 +210,22 @@ describe('HIBP k-匿名', () => {
     await expect(checkBreaches([login('a', 'password')], { fetchImpl })).resolves.toEqual([]);
   });
 
+  it('rejects incomplete UI checks for offline, HTTP, and partial failures', async () => {
+    await expect(checkBreaches([login('a', 'password')], {
+      failOnError: true, fetchImpl: async () => { throw new TypeError('Synthetic offline'); },
+    })).rejects.toThrow('泄露查询未完成');
+    await expect(checkBreaches([login('a', 'password')], {
+      failOnError: true, fetchImpl: async () => new Response('', { status: 503 }),
+    })).rejects.toThrow('泄露查询未完成');
+    const fetchImpl = vi.fn<typeof fetch>()
+      .mockResolvedValueOnce(new Response('1E4C9B93F3F0682250B6CF8331B7EE68FD8:5', { status: 200 }))
+      .mockRejectedValueOnce(new TypeError('Synthetic partial failure'));
+    await expect(checkBreaches([login('a', 'password'), login('b', 'different')], {
+      failOnError: true, fetchImpl,
+    })).rejects.toThrow('泄露查询未完成');
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+  });
+
   it('skips items without a password', async () => {
     const fetchImpl = vi.fn(async () => new Response('', { status: 200 }));
     await checkBreaches([login('a', null)], { fetchImpl });

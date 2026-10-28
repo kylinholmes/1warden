@@ -2,15 +2,31 @@ import { useStoreSnapshot } from '@1warden/state/react';
 import { createContext, useContext, useEffect, useMemo, type ReactNode } from 'react';
 import type { ApplicationClient } from '../application/types';
 import { createProfileAutosave, type ProfileAutosave, type SaveField } from '../profile-autosave';
+import { safeRestart } from '../updates/safe-restart';
+import { accountKey } from '../application/account-target';
 
 const Context = createContext<ProfileAutosave | null>(null);
 export function ProfileAutosaveProvider({ client, children }: { client: ApplicationClient; children: ReactNode }) {
   const store = useMemo(() => createProfileAutosave(client), [client]);
   useEffect(() => {
     store.start();
+    const sessionKey = () => {
+      const session = client.getSnapshot();
+      return `${session.status}:${session.account ? accountKey(session.account) : ''}`;
+    };
+    let previous = sessionKey();
+    const unsubscribe = client.subscribe(() => {
+      const next = sessionKey();
+      if (next !== previous) { previous = next; safeRestart.invalidate(); }
+    });
+    const unregister = safeRestart.register({ priority: 20, prepare: async () => {
+      const result = await store.flush();
+      if (!result.saved) throw new Error('个人资料或外观偏好尚未保存，暂未重启。请回到用户详情或设置中的外观页面重试保存，或明确放弃修改后再试。');
+      return true;
+    } });
     const flush = () => { void store.flush(); };
     window.addEventListener('pagehide', flush);
-    return () => { window.removeEventListener('pagehide', flush); store.stop(); };
+    return () => { unregister(); unsubscribe(); window.removeEventListener('pagehide', flush); store.stop(); };
   }, [store]);
   return <Context.Provider value={store}>{children}</Context.Provider>;
 }

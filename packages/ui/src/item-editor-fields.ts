@@ -128,7 +128,8 @@ export function nativeEditorFields(type: ItemType): NativeEditorField[] {
       if (key === 'middleName' || key === 'lastName' || key === 'state') return [];
       if (key === 'city') return [compound('identity.region', '地区', group,
         [['identity.state', '省 / 州'], ['identity.city', '城市']])];
-      return [field(`identity.${key}`, label, group)];
+      return [field(`identity.${key}`, label, group,
+        ['ssn', 'passportNumber', 'licenseNumber'].includes(key) ? 'secret' : undefined)];
     }))
   : type === 'sshKey' ? [
     field('sshKey.privateKey', '私钥', 'SSH 密钥', 'multiline'),

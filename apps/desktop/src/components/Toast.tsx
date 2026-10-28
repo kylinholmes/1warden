@@ -300,6 +300,15 @@ function ToastItem({ rec, onDismiss, onExited }: {
     return () => clearTimeout(t);
   }, [rec.status, rec.nonce, rec.id, paused, duration, onDismiss]);
 
+  useEffect(() => {
+    if (rec.status !== 'leaving') return;
+    const media = typeof matchMedia === 'function' ? matchMedia('(prefers-reduced-motion: reduce)') : undefined;
+    const finishWithoutMotion = () => { if (media?.matches) onExited(rec.id); };
+    finishWithoutMotion();
+    media?.addEventListener('change', finishWithoutMotion);
+    return () => media?.removeEventListener('change', finishWithoutMotion);
+  }, [rec.status, rec.id, onExited]);
+
   const assertive = rec.tone === 'danger' || rec.tone === 'warning';
 
   return (
