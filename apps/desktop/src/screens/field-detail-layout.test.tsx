@@ -81,6 +81,8 @@ describe('detail native/compound/custom shared label-value contract', () => {
     const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
     const detail = itemDetail({ ...blankEditorItem(), login: { ...emptyLogin(), username: 'Synthetic user',
       password: 'Synthetic password', totp: 'Synthetic seed', uris: [{ uri: 'https://example.invalid', match: null }] } });
+    detail.login!.passkeys = [{ credentialId: 'synthetic-passkey', rpId: 'example.invalid', rpName: 'Synthetic website',
+      userName: 'synthetic-user', userDisplayName: null, creationDate: '2026-01-01' }];
     const loginClient = { ...client, totp: vi.fn(async () => ({ code: '123456', remaining: 20, period: 30 })) };
     try {
       await act(async () => root.render(<ItemDetail client={loginClient as unknown as ApplicationClient} item={detail} icons={null}
@@ -94,7 +96,7 @@ describe('detail native/compound/custom shared label-value contract', () => {
           || label.nextElementSibling!.querySelector('[data-field-value]') !== null).toBe(true);
       }
       expect(host.querySelector('[data-field-layout="totp"] .secret')?.textContent).toBe('123 456');
-      expect(host.querySelector('[data-login-passkeys] [data-field-value]')?.textContent).toBe('未保存');
+      expect(host.querySelector('[data-login-passkeys] [data-field-value]')?.textContent).toBe('已保存 1 个');
       expect(host.textContent).not.toContain('Synthetic password');
     } finally { await act(() => root.unmount()); host.remove(); }
   });

@@ -247,19 +247,20 @@ export function ItemPasskeys({ controls }: { controls: ResourceControls }) {
   const { resources, controlsDisabled, editable, busy, setPending, confirmation, website, addPasskey } = controls;
   if (!resources.login) return null;
   const passkeys = resources.login.passkeys ?? [];
+  if (passkeys.length === 0) return null;
   return <fieldset data-login-passkeys disabled={controlsDisabled} aria-busy={busy} aria-label="通行密钥"
     className="m-0 min-w-0 border-0 px-0 py-2">
     <div data-field-layout="passkeys" className="flex min-w-0 items-center gap-3">
       <div data-field-content className={`${FIELD_ROW_CLASS} flex-1`}>
         <span data-field-label className={FIELD_LABEL_CLASS}>通行密钥</span>
-        <span data-field-value className="min-w-0 flex-1 text-sm text-[var(--ink-secondary)]">{passkeys.length > 0 ? `已保存 ${passkeys.length} 个` : '未保存'}</span>
+        <span data-field-value className="min-w-0 flex-1 text-sm text-[var(--ink-secondary)]">已保存 {passkeys.length} 个</span>
       </div>
         {editable && <button data-field-actions data-field-persistent type="button" disabled={controlsDisabled || website === null}
           className="btn btn-ghost shrink-0 gap-1 text-xs" aria-label="前往网站添加通行密钥"
           title={website ? '前往支持通行密钥的网站，在安全设置中创建并通过 1Warden 扩展保存' : '请先为登录条目添加网站地址'}
           onClick={addPasskey}><IconPlus size={13} />添加</button>}
     </div>
-    {passkeys.length > 0 && <div className="mt-2 divide-y divide-[var(--border-subtle)]">
+    <div className="mt-2 divide-y divide-[var(--border-subtle)]">
       {passkeys.map(passkey => <div key={passkey.credentialId}>
         <div className="flex flex-wrap items-center gap-2 py-2">
           <div className="min-w-0 flex-1 basis-36">
@@ -277,7 +278,7 @@ export function ItemPasskeys({ controls }: { controls: ResourceControls }) {
         </div>
         {confirmation('passkey', passkey.credentialId)}
       </div>)}
-    </div>}
+    </div>
   </fieldset>;
 }
 

@@ -109,7 +109,7 @@ describe('shared vault presentation', () => {
     expect(html).toContain('历史密码');
     expect(html).not.toContain('清空历史密码');
     expect(html).not.toContain('输入到其他应用');
-    expect(html.indexOf('data-login-passkeys')).toBeLessThan(html.indexOf('data-item-resources'));
+    expect(html).not.toContain('data-login-passkeys');
     expect(html.slice(html.indexOf('data-resource-actions'))).not.toContain('添加通行密钥');
   });
 

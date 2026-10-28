@@ -80,7 +80,7 @@ const MESSY: VaultItem[] = [
     id: '7', name: '信用卡', type: 'card', rawType: 3, login: null,
     card: { cardholderName: 'ME', brand: 'Visa', number: '4111', expMonth: '7', expYear: '2026', code: null },
   }),
-  // 没有网址、名字也不是域名的笔记 —— 走「着色的类型图标」那一层
+  // 笔记用标题缩写与小型笔记标识，不从正文或标题推断网站。
   item({ id: '8', name: '家里 Wi-Fi 密码', type: 'secureNote', rawType: 2, login: null }),
 ];
 
@@ -146,6 +146,23 @@ const params = new URLSearchParams(location.search);
 const which = params.get('screen') ?? params.get('state') ?? (IS_EXTENSION ? 'vault' : 'messy');
 if (which === 'clean') previewVault.getSession().replaceData(CLEAN, FOLDERS);
 if (which === 'detail') previewVault.getSession().replaceData([DETAIL], FOLDERS);
+if (which === 'vault' && params.get('fixture') === 'note-icons') {
+  previewVault.getSession().replaceData(['Atlas Notes', '旅行资料', 'Read later', '家庭网络', 'Studio Research', '项目备忘', 'A', '—',
+    '一条名称很长的安全笔记用来检查列表截断与图标占位'].map((name, index) => item({
+    id: `synthetic-note-${index}`, name, type: 'secureNote', rawType: 2, login: null,
+  })), FOLDERS);
+}
+if (which === 'vault' && params.get('fixture') === 'passkey-visibility') {
+  previewVault.getSession().replaceData([
+    item({ id: 'without-passkeys', name: '未保存通行密钥的登录', login: { ...emptyLogin(), username: 'fixture@example.invalid', password: 'Synthetic password' } }),
+    item({ id: 'with-passkeys', name: '已保存通行密钥的登录', login: { ...emptyLogin(), username: 'fixture@example.invalid', password: 'Synthetic password',
+      // Rendering fixture only: no usable private key or external authentication.
+      fido2Credentials: [{ credentialId: 'synthetic-passkey', rpId: 'example.invalid', rpName: 'Synthetic website',
+        keyType: 'public-key', keyAlgorithm: 'ECDSA', keyCurve: 'P-256', keyValue: 'synthetic-not-a-real-key',
+        userName: 'fixture@example.invalid', userDisplayName: 'Synthetic person', counter: '0', discoverable: 'true', creationDate: '2026-01-01' }],
+    } }),
+  ], FOLDERS);
+}
 // Built-preview regression fixtures: exercise the real list → detail → editor
 // path with partial/compound values, without a live vault or source interception.
 if (which === 'vault' && ['identity-partial', 'identity-complete', 'identity-short', 'identity-partial-two'].includes(params.get('fixture') ?? '')) {
@@ -509,7 +526,7 @@ void fakeClient.initialize().then(() => createRoot(document.getElementById('root
             { id: '4', name: '云服务商', username: null, hasPassword: true, hasTotp: false,
               type: 'login', summary: 'cloud.digitalocean.com', iconDomain: 'cloud.digitalocean.com',
               avatarText: '云服', avatarHue: 269 },
-            // 没有网址的笔记 —— 走「着色的类型图标」那一层
+            // 笔记沿用标题缩写与小型笔记标识。
             { id: '5', name: '家里 Wi-Fi 密码', username: null, hasPassword: false, hasTotp: false,
               type: 'secureNote', summary: null, iconDomain: null, avatarText: '家里', avatarHue: 178 },
           ]}

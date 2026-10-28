@@ -127,6 +127,7 @@
     .tile-avatar,
     .tile-card-brand,
     .tile-service-brand,
+    .tile-note,
     .tile-glyph {
       display: grid;
       place-items: center;
@@ -197,6 +198,29 @@
       font-weight: 600;
       letter-spacing: -0.01em;
       line-height: 1;
+    }
+
+    .tile-note {
+      --note-tint: oklch(0.60 0.10 var(--h, 250));
+      position: relative;
+      border-radius: calc(var(--tile-size, 34px) * 0.265);
+      background: color-mix(in srgb, var(--note-tint) 16%, var(--surface-paper));
+      color: color-mix(in srgb, var(--note-tint) 22%, var(--ink-primary));
+      font-size: calc(var(--tile-size, 34px) * 0.35);
+      font-weight: 600;
+      line-height: 1;
+    }
+    .tile-note-text { transform: translate(-1px, -3px); }
+    .tile-note-mark {
+      position: absolute;
+      right: 2px;
+      bottom: 2px;
+      display: grid;
+      place-items: center;
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+      background: var(--surface-paper);
     }
 
     /* ── 三栏 → 折叠 → 竖向 ──────────────────────────────────────

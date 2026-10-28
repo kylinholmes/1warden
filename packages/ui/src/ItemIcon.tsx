@@ -18,8 +18,8 @@ import { useLocalStore, useStoreField } from '@1warden/state/react';
  * 2. 其他站点图标 —— 从服务端取，真实、可辨认
  * 3. 彩色字母徽标 —— 取不到站点图标时，由**条目名**算出来，颜色由域名算，
  *    同一站点的多条登录颜色一致
- * 4. 类型图标（着色）—— 卡片、笔记、身份这些**没有站点**的条目，
- *    光看字母认不出它是张卡；保留类型形状、用条目自己的色相着色
+ * 4. 笔记用标题缩写与小笔记标识；其他没有站点的条目保留着色类型形状，
+ *    避免卡片、身份等只看字母时无法区分类型
  *
  * ⚠️ 字母兜底不是「降级」那种将就。出网受限时 favicon 可能抓不到，
  * 所以字母徽标也必须好看。
@@ -33,7 +33,7 @@ import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { useEffect } from 'react';
 import { avatarOf, displayDomainOf, iconDomainOf, type VaultItem } from '@1warden/vault';
 import type { IconStore } from '@1warden/vault';
-import { TypeIcon } from './icons';
+import { IconNote, TypeIcon } from './icons';
 import { cardBrandLogo } from './card-brand';
 import { serviceBrandLogo } from './service-brand';
 
@@ -109,7 +109,7 @@ export function IconGlyph({ domain, text, hue, type, cardBrand, store, size }: {
   store: IconStore | null;
   size?: number;
 }) {
-  const brand = type !== 'card' ? serviceBrandLogo(domain) : null;
+  const brand = type !== 'card' && type !== 'secureNote' ? serviceBrandLogo(domain) : null;
   const viewStore = useLocalStore(() => {
     const image = null as { domain: string; owner: IconStore; url: string } | null;
     return { image };
@@ -121,7 +121,7 @@ export function IconGlyph({ domain, text, hue, type, cardBrand, store, size }: {
     // 换了条目就把上一个的图标清掉，否则会先显示上一条的图标再换 ——
     // 列表滚动时那一下闪烁很明显
     setImage(null);
-    if (brand !== null || type === 'card' || domain === null || store === null) return;
+    if (brand !== null || type === 'card' || type === 'secureNote' || domain === null || store === null) return;
 
     let alive = true;
     // 内建图标用完整主机名；未收录站点保留原来的基础域名缓存与请求路径。
@@ -146,6 +146,13 @@ export function IconGlyph({ domain, text, hue, type, cardBrand, store, size }: {
     ...(size === undefined ? {} : { '--tile-size': `${size}px` }),
   } as React.CSSProperties;
 
+  // Notes are recognized by their title, with a small type marker. Their
+  // presentation never interprets a title/domain as a brand or requests icons.
+  if (type === 'secureNote') return <span className="tile-note" style={style} aria-hidden="true">
+    <span className="tile-note-text">{text}</span>
+    <span className="tile-note-mark"><IconNote size={9} /></span>
+  </span>;
+
   const network = type === 'card' ? cardBrandLogo(cardBrand) : null;
   if (network) return <span className="tile-card-brand" style={style} title={network.name} data-card-brand={network.id}>
     <img src={network.src} alt={network.name} draggable={false} />
@@ -164,7 +171,7 @@ export function IconGlyph({ domain, text, hue, type, cardBrand, store, size }: {
     return <img src={url} alt="" className="tile-img" style={style} draggable={false} />;
   }
 
-  // 没有站点的条目（卡片、笔记、身份、SSH 密钥）保留类型形状 ——
+  // 没有站点的条目（卡片、身份、SSH 密钥）保留类型形状 ——
   // 「ZA 信用卡」和「我的邮箱」都变成两个汉字的话，就看不出哪个是卡了
   if (domain === null) {
     return (
