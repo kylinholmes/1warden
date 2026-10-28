@@ -6,14 +6,15 @@ import type { ApplicationClient, ApplicationSnapshot } from './application/types
 export type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 export interface SaveField<T> { value: T; status: SaveStatus; error: string | null }
 interface Draft<T> extends SaveField<T> { base: T | null; dirty: boolean }
-interface Entry { profile: Draft<UserProfile>; preferences: Draft<ProfilePreferences> }
+interface Entry { profile: Draft<UserProfile>; preferences: Draft<ProfilePreferences>; dueAt: number }
 export interface AutosaveSnapshot { profile: SaveField<UserProfile>; preferences: SaveField<ProfilePreferences> }
-export interface FlushResult { saved: boolean; pending: (keyof Entry)[] }
+type SaveKind = keyof AutosaveSnapshot;
+export interface FlushResult { saved: boolean; pending: SaveKind[] }
 export const UNSAVED_PROFILE_MESSAGE = '个人资料或外观偏好尚未保存，暂未退出或切换账户。请回到用户详情或设置中的外观页面重试保存，或明确放弃修改后再试。';
 const emptyProfile = (): UserProfile => ({ displayName: '', avatarDataUrl: null });
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const identity = (s: ApplicationSnapshot) => s.account ? accountKey(s.account) : null;
-const ready = (s: ApplicationSnapshot) => s.status === 'unlocked' && s.profileReady && !s.profileError && !s.profileSettingsError;
+const ready = (s: ApplicationSnapshot) => s.status === 'unlocked' && s.profileReady && !s.syncing && !s.profileError && !s.profileSettingsError;
 const draft = <T>(value: T, base: T | null = value): Draft<T> => ({ value, base, dirty: false, status: 'idle', error: null });
 
 /** App-owned, memory-only drafts survive page navigation, but never cross account identities.
@@ -26,14 +27,15 @@ export function createProfileAutosave(client: ApplicationClient) {
   let unsubscribe: (() => void) | undefined;
   let running: Promise<void> | null = null;
   let started = false;
-  const blank: Entry = { profile: draft(emptyProfile()), preferences: draft({ ...DEFAULT_PROFILE_PREFERENCES }, null) };
+  let verifiedIdentity: string | null = null;
+  const blank: Entry = { profile: draft(emptyProfile()), preferences: draft({ ...DEFAULT_PROFILE_PREFERENCES }, null), dueAt: 0 };
   const state = createStore<AutosaveSnapshot>(() => blank);
   function entry(): Entry {
     const s = client.getSnapshot(); const key = identity(s);
     if (!key) return blank;
     let value = entries.get(key);
     if (!value) {
-      value = { profile: draft(s.profile ?? emptyProfile()), preferences: draft(s.profileSettings?.preferences ?? { ...DEFAULT_PROFILE_PREFERENCES }, s.profileSettings?.preferences ?? null) };
+      value = { profile: draft(s.profile ?? emptyProfile()), preferences: draft(s.profileSettings?.preferences ?? { ...DEFAULT_PROFILE_PREFERENCES }, s.profileSettings?.preferences ?? null), dueAt: 0 };
       entries.set(key, value);
     }
     return value;
@@ -45,12 +47,22 @@ export function createProfileAutosave(client: ApplicationClient) {
   function cancelTimer() { clearTimeout(timer); timer = undefined; }
   function schedule() {
     cancelTimer();
-    if (started && ready(client.getSnapshot()) && [entry().profile, entry().preferences].some(f => f.dirty && !f.error)) {
-      timer = setTimeout(() => { void flush(); }, 650);
+    const value = entry();
+    if (started && !running && ready(client.getSnapshot()) && [value.profile, value.preferences].some(f => f.dirty && !f.error)) {
+      // Only an edit moves the deadline. Sync notifications must not keep
+      // postponing a save beyond every brief window of verified readiness.
+      timer = setTimeout(() => { void flush(); }, Math.max(0, value.dueAt - Date.now()));
     }
+  }
+  function canEditPreferences() {
+    const s = client.getSnapshot();
+    if (s.status !== 'unlocked' || s.syncError || s.profileError || s.profileSettingsError) return false;
+    return ready(s) || (s.syncing && verifiedIdentity !== null && identity(s) === verifiedIdentity);
   }
   function observe() {
     const s = client.getSnapshot(); const value = entry();
+    if (s.status !== 'unlocked' || identity(s) !== verifiedIdentity || s.syncError || s.profileError || s.profileSettingsError) verifiedIdentity = null;
+    if (ready(s) && !s.syncError) verifiedIdentity = identity(s);
     if (ready(s)) {
       if (!value.profile.dirty) value.profile = { ...value.profile, base: s.profile ?? emptyProfile(), value: s.profile ?? emptyProfile() };
       if (!value.preferences.dirty) value.preferences = { ...value.preferences, base: s.profileSettings?.preferences ?? null, value: s.profileSettings?.preferences ?? { ...DEFAULT_PROFILE_PREFERENCES } };
@@ -59,6 +71,7 @@ export function createProfileAutosave(client: ApplicationClient) {
   }
   function edit<T>(field: Draft<T>, value: T) {
     field.value = value; field.dirty = true; field.status = 'pending'; field.error = null;
+    entry().dueAt = Date.now() + 650;
     emit(); schedule();
   }
   async function drain() {
@@ -110,11 +123,14 @@ export function createProfileAutosave(client: ApplicationClient) {
     start: () => { started = true; unsubscribe?.(); unsubscribe = client.subscribe(observe); observe(); },
     stop: () => { started = false; unsubscribe?.(); unsubscribe = undefined; cancelTimer(); },
     editProfile: (patch: Partial<UserProfile>) => { if (ready(client.getSnapshot())) edit(entry().profile, { ...entry().profile.value, ...patch }); },
-    editPreferences: (value: ProfilePreferences) => { if (ready(client.getSnapshot())) edit(entry().preferences, value); },
+    // A previously verified account can preview/queue appearance while a new
+    // background sync is running. drain() still requires completed verification.
+    canEditPreferences,
+    editPreferences: (value: ProfilePreferences) => { if (canEditPreferences()) edit(entry().preferences, value); },
     pendingPreferences: () => entry().preferences.dirty ? entry().preferences.value : null,
     flush,
-    retry: (kind: keyof Entry) => { const field = entry()[kind]; field.error = null; field.status = 'pending'; emit(); return flush(); },
-    discard: (kind: keyof Entry) => { const field = entry()[kind]; if (field.status === 'saving') return; field.dirty = false; field.error = null; field.status = 'idle'; observe(); },
+    retry: (kind: SaveKind) => { const field = entry()[kind]; field.error = null; field.status = 'pending'; emit(); return flush(); },
+    discard: (kind: SaveKind) => { const field = entry()[kind]; if (field.status === 'saving') return; field.dirty = false; field.error = null; field.status = 'idle'; observe(); },
     forget: (key = identity(client.getSnapshot())) => {
       const value = key ? entries.get(key) : undefined;
       if (value && (value.profile.dirty || value.preferences.dirty)) throw new Error(UNSAVED_PROFILE_MESSAGE);

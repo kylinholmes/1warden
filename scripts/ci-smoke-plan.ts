@@ -37,6 +37,7 @@ export function smokePlan(suite: SmokeSuite): SmokeStep[] {
     build('build-native-companion-extension', ['run', 'build:extension']),
     smoke('native-quick', 'windows-quick-smoke.mjs', [], 'node'),
     smoke('native-account-details', 'account-details-smoke.ts', ['--native']),
+    smoke('native-appearance-sync', 'appearance-sync-smoke.ts'),
   ];
 }
 

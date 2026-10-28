@@ -2,10 +2,10 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createProfileAutosave } from './profile-autosave';
 import { EMPTY_SNAPSHOT, type ApplicationClient, type ApplicationSnapshot } from './application/types';
 
-function setup() {
+function setup(initial: Partial<ApplicationSnapshot> = {}) {
   let snapshot: ApplicationSnapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked', profileReady: true,
     account: { serverUrl: 'https://a.test', email: 'a@test.com', userId: '', kdf: { kdf: 0, iterations: 1 } },
-    profile: { displayName: 'Before', avatarDataUrl: null }, profileVersion: '1' };
+    profile: { displayName: 'Before', avatarDataUrl: null }, profileVersion: '1', ...initial };
   const listeners = new Set<() => void>();
   const update = (patch: Partial<ApplicationSnapshot>) => { snapshot = { ...snapshot, ...patch }; listeners.forEach(fn => fn()); };
   const saveProfile = vi.fn(async (profile) => { update({ profile, profileVersion: String(Number(snapshot.profileVersion) + 1) }); });
@@ -17,6 +17,42 @@ function setup() {
 }
 afterEach(() => vi.useRealTimers());
 describe('profile autosave', () => {
+  it('keeps appearance edits during verified background sync and saves only after sync finishes', async () => {
+    const { store, update, savePreferences } = setup();
+    const preferences = { mode: 'light' as const, palette: 'whale', showTypes: true };
+    update({ syncing: true, profileReady: false });
+    store.editPreferences(preferences);
+    expect(store.getSnapshot().preferences.value).toEqual(preferences);
+    expect(await store.flush()).toEqual({ saved: false, pending: ['preferences'] });
+    expect(savePreferences).not.toHaveBeenCalled();
+    update({ syncing: false, profileReady: true });
+    expect(await store.flush()).toEqual({ saved: true, pending: [] });
+    expect(savePreferences).toHaveBeenCalledExactlyOnceWith(preferences, null); store.stop();
+  });
+  it.each(['initial', 'locked', 'account', 'syncError', 'profileError', 'profileSettingsError'] as const)('does not accept appearance edits during %s unverified sync', reason => {
+    const { store, update, client, savePreferences } = setup(reason === 'initial' ? { profileReady: false, syncing: true } : {});
+    if (reason === 'locked') { update({ status: 'locked', profileReady: false }); update({ status: 'unlocked', syncing: true }); }
+    if (reason === 'account') update({ account: { ...client.getSnapshot().account!, email: 'b@test.com' }, syncing: true, profileReady: false });
+    if (reason.endsWith('Error')) update({ [reason]: 'unverified', syncing: true, profileReady: false });
+    const before = store.getSnapshot().preferences.value;
+    store.editPreferences({ mode: 'light', palette: 'whale', showTypes: false });
+    expect(store.getSnapshot().preferences.value).toEqual(before);
+    expect(savePreferences).not.toHaveBeenCalled(); store.stop();
+  });
+  it('does not postpone a pending save when unrelated ready snapshots arrive', async () => {
+    vi.useFakeTimers(); const { store, update, savePreferences } = setup();
+    store.editPreferences({ mode: 'dark', palette: 'whale', showTypes: true });
+    for (let i = 0; i < 7; i++) { await vi.advanceTimersByTimeAsync(100); update({ revision: i + 1 }); }
+    expect(savePreferences).toHaveBeenCalledTimes(1); store.stop();
+  });
+  it('retains the edit deadline through repeated background sync instead of starving autosave', async () => {
+    vi.useFakeTimers(); const { store, update, savePreferences } = setup();
+    store.editPreferences({ mode: 'dark', palette: 'whale', showTypes: true });
+    await vi.advanceTimersByTimeAsync(100); update({ syncing: true, profileReady: false });
+    await vi.advanceTimersByTimeAsync(800); expect(savePreferences).not.toHaveBeenCalled();
+    update({ syncing: false, profileReady: true }); await vi.advanceTimersByTimeAsync(1);
+    expect(savePreferences).toHaveBeenCalledTimes(1); store.stop();
+  });
   it('reports pending failed edits on every flush until retry saves them', async () => {
     const { store, saveProfile } = setup();
     saveProfile.mockRejectedValueOnce(new Error('offline'));

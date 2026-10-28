@@ -11,7 +11,7 @@ export function SyncedPreferences({ client, children }: { client?: ApplicationCl
 function ConnectedPreferences({ client, children }: { client: ApplicationClient; children: (onChange: () => void) => ReactNode }) {
   const snapshot = useStoreSnapshot(client.subscribe, client.getSnapshot);
   const { store, preferences } = useProfileDraft(client);
-  const ready = snapshot.status === 'unlocked' && snapshot.profileReady && !snapshot.profileError && !snapshot.profileSettingsError;
+  const ready = store.canEditPreferences();
   // Only actual user edits enqueue a write; receiving a projection never does.
   const edited = () => store.editPreferences(localPreferences());
   return <div className="space-y-4">

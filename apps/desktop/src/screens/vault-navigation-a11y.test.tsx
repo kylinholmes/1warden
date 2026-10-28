@@ -3,7 +3,7 @@ import { act, createElement } from 'react';
 import { createRoot } from 'react-dom/client';
 import { afterEach, expect, it, vi } from 'vitest';
 import { makeUserKey } from '@1warden/crypto';
-import { SORT_BY, SORT_LABEL, emptyCard, VaultClient, type VaultItem } from '@1warden/vault';
+import { SORT_BY, SORT_LABEL, emptyCard, emptyLogin, VaultClient, type VaultItem } from '@1warden/vault';
 import { blankEditorItem } from '../../../../packages/ui/src/item-editor-fields';
 import { createVaultService } from '../application/service';
 import { createApplicationClient } from '../application/client';
@@ -54,6 +54,41 @@ it('uses the shared sorting keyboard contract and exposes persisted current choi
   expect(document.activeElement).toBe(sort); await key(sort, 'ArrowUp'); await key(sort, 'Home'); await key(sort, 'Escape');
   expect(sort.getAttribute('aria-expanded')).toBe('false'); expect(document.activeElement).toBe(sort);
   expect(sort.textContent).toBe(SORT_LABEL[SORT_BY.name]);
+});
+it.each(['', 'Synthetic'])('retains selected detail during sync with query "%s" and refreshes a changed record', async query => {
+  const original = fixture({ login: { ...emptyLogin(), password: 'Synthetic detail secret' } });
+  const { host, vault, client } = await mount([original]);
+  const input = host.querySelector<HTMLInputElement>('input[aria-label="搜索条目"]')!;
+  if (query) { await value(input, query); await act(async () => { await new Promise(resolve => setTimeout(resolve, 150)); }); }
+  const getItem = vi.spyOn(client, 'getItem');
+  await act(() => host.querySelector<HTMLButtonElement>('.vault-list ul > li > button')!.click());
+  const article = host.querySelector('.item-detail'); expect(article).not.toBeNull();
+  await act(() => host.querySelector<HTMLButtonElement>('[aria-label="显示密码"]')!.click());
+  const hide = host.querySelector<HTMLButtonElement>('[aria-label="隐藏密码"]')!; hide.focus();
+  if (query) vi.spyOn(client, 'search').mockImplementation(() => new Promise(() => {}));
+  getItem.mockClear();
+  await act(async () => { vault.getSession().setSyncing(true); await client.refresh(); });
+  expect(host.querySelector('.item-detail')).toBe(article);
+  await act(async () => { vault.getSession().setSyncing(false); await client.refresh(); });
+  expect(host.querySelector('.item-detail')).toBe(article);
+  expect(getItem).not.toHaveBeenCalled();
+  expect(document.activeElement).toBe(hide);
+  expect(article!.textContent).toContain('Synthetic detail secret');
+  await act(async () => {
+    vault.getSession().replaceData([{ ...original, name: 'Updated record', updatedAt: '2026-02-01' }], folders);
+    await client.refresh();
+  });
+  expect(host.querySelector('.item-detail')).not.toBe(article);
+  expect(host.querySelector('.item-detail')?.textContent).toContain('Updated record');
+  expect(host.querySelector('.item-detail')?.textContent).not.toContain('Synthetic detail secret');
+  expect(getItem).toHaveBeenCalledTimes(1);
+  if (query) {
+    await act(async () => { vault.getSession().replaceData([], folders); await client.refresh(); });
+    expect(host.querySelector('.item-detail')).toBeNull();
+    expect(host.querySelector('.vault-list ul > li > button')).toBeNull();
+    await value(input, 'Different query');
+    expect(host.querySelector('.vault-list')?.textContent).not.toContain('Updated record');
+  }
 });
 it.each([false, true])('exposes current item and favorite within ordinary list/button navigation (compact=%s)', async compact => {
   const { host } = await mount([fixture({ favorite: true }), fixture({ id: 'other', name: 'Other login' })], compact);

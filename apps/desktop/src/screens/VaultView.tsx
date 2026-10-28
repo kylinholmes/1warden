@@ -210,7 +210,14 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
   }, [client, normalizedQuery, session.revision, searchAttempt]);
   const searchReady = search?.query === normalizedQuery && search.revision === session.revision;
   const searching = Boolean(normalizedQuery) && !searchReady && !searchError;
-  const searchItems = normalizedQuery ? searchReady ? search.items : [] : items;
+  const searchItems = useMemo(() => {
+    if (!normalizedQuery) return items;
+    if (search?.query !== normalizedQuery) return [];
+    // Keep this query's results visible during background refresh, but resolve
+    // them against the current vault so deleted/stale records never survive.
+    const current = new Map(items.map(item => [item.id, item]));
+    return search.items.flatMap(result => { const item = current.get(result.id); return item ? [item] : []; });
+  }, [normalizedQuery, search, items]);
 
   function closeEditor(): void { editRequest.current++; setMode({ kind: 'browse' }); }
   async function edit(id: string): Promise<void> {
@@ -397,7 +404,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
                 const item = session.items.find(item => item.id === id);
                 if (!item) return <div className="p-4"><BackButton onBack={onBack} label="返回安全报告" />
                   <p role="status" className="p-4 text-sm text-[var(--ink-secondary)]">这条记录已不存在，请返回安全报告。</p></div>;
-                return <SelectedDetail key={`${id}:${session.revision}`} client={client} item={item} icons={icons}
+                return <SelectedDetail key={`${id}:${item.updatedAt}`} client={client} item={item} icons={icons}
                   folders={folders} onError={message => toast.show({ tone: 'danger', message })}
                   onEdit={() => { void edit(id); }} onBack={onBack} backLabel="返回安全报告" site={site}
                   onDelete={() => setConfirmDelete(item)}
@@ -561,7 +568,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
             <div className="vault-detail-scroll">
               {shownSelected ? (
                 <SelectedDetail
-                  key={`${shownSelected.id}:${session.revision}`}
+                  key={`${shownSelected.id}:${shownSelected.updatedAt}`}
                   client={client}
                   item={shownSelected}
                   folders={session.folders}
