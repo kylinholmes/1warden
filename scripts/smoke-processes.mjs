@@ -59,7 +59,15 @@ export async function removeSmokeProfile(directory) {
   if (dirname(actual) !== realpathSync(tmpdir()) || !basename(actual).startsWith('onewarden-smoke-')) {
     throw Error('Refusing to remove a directory outside the disposable smoke profile boundary');
   }
-  await rm(actual, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
+  // Bun does not consistently honor Node's rm maxRetries option. Keep the
+  // bounded retry here so both runtimes wait for the same Windows file release.
+  for (let attempt = 0; ; attempt++) {
+    try { await rm(actual, { recursive: true, force: true }); return; }
+    catch (error) {
+      if (attempt >= 10 || !['EBUSY', 'ENOTEMPTY', 'EPERM', 'EMFILE', 'ENFILE'].includes(error.code)) throw error;
+      await new Promise(resolve => setTimeout(resolve, 100 * (attempt + 1)));
+    }
+  }
 }
 
 export async function closeSmokeBrowser(browser, timeoutMs = 5000) {
