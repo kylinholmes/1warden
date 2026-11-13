@@ -1,11 +1,29 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { afterEach, expect, it } from 'vitest';
-import { closeSmokeBrowser, ownSmokeProcess, stopSmokeProcess } from './smoke-processes.mjs';
+import { closeSmokeBrowser, launchSmokeBrowser, ownSmokeProcess, stopSmokeProcess } from './smoke-processes.mjs';
 
 const children: ChildProcess[] = [];
 const descendants: number[] = [];
 const live = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+it('opts explicitly requested Firefox automation into system access without changing the runner environment', async () => {
+  const before = process.env.MOZ_REMOTE_ALLOW_SYSTEM_ACCESS;
+  let launched: any;
+  await launchSmokeBrowser({ launch: async (options: any) => { launched = options; return { process: () => null }; } },
+    { browser: 'firefox', args: ['--remote-allow-system-access'], env: { SMOKE_FIXTURE: 'isolated' } });
+  expect(launched.env.MOZ_REMOTE_ALLOW_SYSTEM_ACCESS).toBe('1');
+  expect(launched.env.SMOKE_FIXTURE).toBe('isolated');
+  expect(process.env.MOZ_REMOTE_ALLOW_SYSTEM_ACCESS).toBe(before);
+});
+
+it.each([{ browser: 'chrome', args: ['--remote-allow-system-access'] }, { browser: 'firefox', args: [] }])(
+  'does not add system access to browsers without an explicit Firefox opt-in: %j', async options => {
+    let launched: any;
+    await launchSmokeBrowser({ launch: async (value: any) => { launched = value; return { process: () => null }; } }, options);
+    expect(launched).toBe(options);
+    expect(launched.env).toBeUndefined();
+  });
+
 async function tree() {
   const child = spawn(process.execPath, ['-e', `
     const {spawn}=require('node:child_process');

@@ -62,12 +62,18 @@ async function closeSettings(page: any) {
   await page.waitForSelector('[aria-labelledby="settings-title"]', { hidden: true });
 }
 async function login(page: any) {
-  await page.waitForSelector('[data-add-server]');
-  check('fresh installation offers login', await page.$eval('h1', (node: Element) => node.textContent === '登录你的保险库')
-    && await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录'));
+  const directEntry = page.url() === 'http://tauri.localhost/';
+  if (directEntry) {
+    await page.waitForSelector('input[type="email"]', { visible: true });
+    check('fresh native installation opens login directly', !(await page.$('[data-add-server]')));
+  } else {
+    await page.waitForSelector('[data-add-server]');
+    check('fresh extension installation offers login', await page.$eval('h1', (node: Element) => node.textContent === '登录你的保险库')
+      && await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录'));
+    await button(page, '登录');
+  }
   await page.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('[data-brand-mark]')].some(img => img.complete && img.naturalWidth > 0));
-  check('home production logo decodes under the real platform CSP', true);
-  await button(page, '登录');
+  check('entry production logo decodes under the real platform CSP', true);
   await page.waitForSelector('input[type="email"]');
   await selectCustomServer(page);
   await text(page, 'input[type="url"]', serverUrl); await text(page, 'input[type="email"]', email);
@@ -108,16 +114,40 @@ async function home(page: any) {
   await page.click('[aria-label="账户菜单"]');
   check('account menu has no redundant account-home action', await page.$eval('#profile-account-menu', (node: Element) => !node.textContent?.includes('返回账户首页')));
   await button(page, '添加账户');
-  await page.waitForSelector('input[type="email"]'); await page.click('[aria-label="返回上一级"]');
+  await page.waitForSelector('input[type="email"]');
+  if (page.url() === 'http://tauri.localhost/') {
+    await page.click('[aria-label="返回账户"]');
+    await page.waitForSelector('[aria-label="账户菜单"]');
+    check('native Add Account cancellation returns directly to the unlocked account', !(await page.$('#unlock-password')));
+    return;
+  }
+  await page.click('[aria-label="返回上一级"]');
   await page.waitForFunction(() => document.body.textContent?.includes('登录你的保险库'));
   check('saved-account home offers another-account login', await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录其他账户'));
 }
 async function pickAccount(page: any) {
+  if (page.url() === 'http://tauri.localhost/') {
+    await page.waitForSelector('[aria-label="搜索条目"]');
+    return;
+  }
   await page.waitForFunction((email: string) => [...document.querySelectorAll<HTMLButtonElement>('main button')].some(b => b.textContent?.includes(email) && !b.disabled), {}, email);
   const handle = await page.evaluateHandle((email: string) => [...document.querySelectorAll('main button')].find(b => b.textContent?.includes(email)), email);
   await handle.asElement().click(); await handle.dispose();
 }
 async function homeProfile(page: any, profile: { displayName: string | null; avatarDataUrl: string | null }, stage: string) {
+  if (page.url() === 'http://tauri.localhost/') {
+    await page.click('[aria-label="账户菜单"]');
+    await page.waitForFunction((expected: { email: string; serverUrl: string; displayName: string; avatarDataUrl: string }) => {
+      const current = document.querySelector('.account-menu-current');
+      const image = document.querySelector<HTMLImageElement>('[aria-label="账户菜单"] img');
+      return current?.textContent?.includes(expected.email) && current.textContent.includes(expected.serverUrl)
+        && current.textContent.includes(expected.displayName) && image?.complete && image.naturalWidth > 0 && image.src === expected.avatarDataUrl;
+    }, {}, { email, serverUrl, displayName: profile.displayName, avatarDataUrl: profile.avatarDataUrl });
+    check(`${stage}: native account menu retains the decoded avatar, name, email and server`, true);
+    await page.keyboard.press('Escape');
+    await page.waitForSelector('#profile-account-menu', { hidden: true });
+    return;
+  }
   await page.waitForSelector('main li button');
   await page.waitForFunction((expected: { email: string; host: string; displayName: string; avatarDataUrl: string }) => {
     const row = [...document.querySelectorAll<HTMLButtonElement>('main li button')]
@@ -156,7 +186,7 @@ try {
   check('vault sidebar has no duplicated home or profile destinations', await page.$$eval('[data-key]', (items: Element[]) =>
     items.every(item => !['home', 'profile'].includes(item.getAttribute('data-key') ?? ''))));
   await home(page); await pickAccount(page); await page.waitForSelector('[aria-label="搜索条目"]');
-  check('account picker is home and returning preserves the unlocked session', !(await page.$('#unlock-password')));
+  check('returning to the saved account preserves the unlocked session', !(await page.$('#unlock-password')));
   await openDetails(page);
   check('user details directory contains only profile and devices, not appearance', await page.$$eval('[id^="profile-link-"]', (items: Element[]) =>
     items.map(item => item.id).join(',') === 'profile-link-edit,profile-link-devices'));

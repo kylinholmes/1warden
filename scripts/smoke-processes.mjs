@@ -39,7 +39,12 @@ export function stopSmokeProcess(child) {
 }
 
 export async function launchSmokeBrowser(puppeteer, options) {
-  const browser = await puppeteer.launch(options);
+  // New Firefox releases use an environment opt-in instead of the old flag.
+  // Apply it only to disposable smoke browsers that explicitly request access.
+  const systemAccess = options.browser === 'firefox' && options.args?.includes('--remote-allow-system-access');
+  const browser = await puppeteer.launch(systemAccess
+    ? { ...options, env: { ...process.env, ...options.env, MOZ_REMOTE_ALLOW_SYSTEM_ACCESS: '1' } }
+    : options);
   ownSmokeProcess(browser.process());
   return browser;
 }

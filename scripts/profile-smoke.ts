@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
-import { selectCustomServer } from './entry-smoke-helpers';
+import { openServerOptions, selectCustomServer } from './entry-smoke-helpers';
 /** Synthetic local server + disposable, headless Edge/Zen; never reads personal vaults. */
 import { cpSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -347,13 +347,14 @@ try {
     }, text);
     const selectedStatus = (text: string) => page.waitForFunction((text: string) =>
       document.querySelector('[role="combobox"][aria-label="服务器"]')?.textContent?.includes(text), { timeout: 10000 }, text);
-    await clickText('登录其他账户'); await selectedStatus('未连通');
+    await clickText('登录其他账户'); await openServerOptions(page); await selectedStatus('未连通');
     let releaseProbe!: () => void;
     probeGate = new Promise(resolve => { releaseProbe = resolve; }); rejectProbe = false;
     await clickText('测速'); await selectedStatus('测量中');
     check(true, 'manual retry immediately replaces failed welcome status in the selector');
     probeGate = null; releaseProbe(); await selectedStatus(' ms');
     await page.click('[role="combobox"][aria-label="服务器"]');
+    await page.waitForSelector('[role="option"][aria-selected="true"]', { visible: true });
     check(await page.evaluate(() => [...document.querySelectorAll('[role="option"]')]
       .some(option => option.getAttribute('aria-selected') === 'true' && option.textContent?.includes(' ms'))), 'open dropdown receives the manual latency result');
     await page.click('[role="combobox"][aria-label="服务器"]');
@@ -361,7 +362,7 @@ try {
     check(true, 'registration reuses manual latency without the failed welcome cache');
     rejectProbe = true; await clickText('测速'); await selectedStatus('未连通');
     rejectProbe = false; await clickText('测速'); await selectedStatus(' ms');
-    await clickText('已有账户？登录'); await selectedStatus(' ms');
+    await clickText('已有账户？登录'); await openServerOptions(page); await selectedStatus(' ms');
     check(true, 'another failure and recovery replace shared latency across registration and login');
     await back(); await homeProfile('更新后的用户', saved.profile.avatarDataUrl, 'after entry retries');
     if (!firefox) await page.screenshot({ path: join(output, 'home-avatar-after-logout-and-retries.png') });
