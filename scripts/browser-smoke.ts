@@ -1,11 +1,11 @@
 #!/usr/bin/env bun
-import { launchSmokeBrowser, closeSmokeBrowser } from './smoke-processes.mjs';
+import { launchSmokeBrowser, closeSmokeBrowser, removeSmokeProfile } from './smoke-processes.mjs';
 /**
  * Built-extension smoke in real Chrome/Firefox, with disposable profiles and an
  * in-memory synthetic vault. No development server/account or personal profile.
  * See apps/desktop/extension/README.md for browser/tool setup.
  */
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -1033,7 +1033,7 @@ try {
 } finally {
   await closeSmokeBrowser(browser);
   site.stop(true);
-  rmSync(profile, { recursive: true, force: true });
+  await removeSmokeProfile(profile);
   writeFileSync(join(artifacts, `${product}-report.json`), JSON.stringify({
     browser: product, engine, version, userAgent, executable, extension: dist, buildHashes, viewport: [440, 600], checks, errors,
     passed: !failure, failure, synthetic: true, timestamp: new Date().toISOString(),

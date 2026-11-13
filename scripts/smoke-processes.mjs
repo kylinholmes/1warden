@@ -1,4 +1,8 @@
 import { spawnSync } from 'node:child_process';
+import { realpathSync } from 'node:fs';
+import { rm } from 'node:fs/promises';
+import { basename, dirname } from 'node:path';
+import { tmpdir } from 'node:os';
 
 // Track handles returned by our own spawn/launch calls, never image names or user PIDs.
 const owned = new Set();
@@ -47,6 +51,15 @@ export async function launchSmokeBrowser(puppeteer, options) {
     : options);
   ownSmokeProcess(browser.process());
   return browser;
+}
+
+/** Windows may keep profile files locked briefly after the owned browser exits. */
+export async function removeSmokeProfile(directory) {
+  const actual = realpathSync(directory);
+  if (dirname(actual) !== realpathSync(tmpdir()) || !basename(actual).startsWith('onewarden-smoke-')) {
+    throw Error('Refusing to remove a directory outside the disposable smoke profile boundary');
+  }
+  await rm(actual, { recursive: true, force: true, maxRetries: 10, retryDelay: 100 });
 }
 
 export async function closeSmokeBrowser(browser, timeoutMs = 5000) {

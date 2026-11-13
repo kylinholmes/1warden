@@ -18,3 +18,9 @@
 - 证据保存在 `artifacts/ci-fix-native/`、`artifacts/ci-fix-profile-after/` 和 `artifacts/ci-fix-firefox/`。均使用合成账户，未读取系统剪贴板。
 
 此次只修改测试路径及测试浏览器配置，不修改应用界面，也未跳过失败用例。
+
+## 后续：Windows 清理文件锁
+
+运行 [43387860072](https://github.com/kylinholmes/1warden/actions/runs/43387860072) 中，Firefox 的 109 项交互断言全部通过，退出后的同步目录删除却因 `EBUSY` 失败。清理现在先验证目标是临时目录直属、具有测试专用前缀的目录，再异步删除；文件锁等可重试错误最多重试 10 次，间隔逐次增加 100ms，最终错误仍使测试失败。
+
+新增真实 Windows 独占文件锁测试和删除路径边界测试；启动/清理与浏览器接线共 16 项通过，Firefox 159 的 109 项检查再次通过。

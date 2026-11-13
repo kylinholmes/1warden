@@ -1,11 +1,42 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { afterEach, expect, it } from 'vitest';
-import { closeSmokeBrowser, launchSmokeBrowser, ownSmokeProcess, stopSmokeProcess } from './smoke-processes.mjs';
+import { closeSmokeBrowser, launchSmokeBrowser, ownSmokeProcess, removeSmokeProfile, stopSmokeProcess } from './smoke-processes.mjs';
 
 const children: ChildProcess[] = [];
 const descendants: number[] = [];
 const live = (pid: number) => { try { process.kill(pid, 0); return true; } catch { return false; } };
+it('only removes a generated smoke profile inside the temporary directory', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'onewarden-smoke-cleanup-'));
+  writeFileSync(join(profile, 'fixture.txt'), 'synthetic');
+  await removeSmokeProfile(profile);
+  expect(existsSync(profile)).toBe(false);
+  await expect(removeSmokeProfile(tmpdir())).rejects.toThrow('disposable smoke profile boundary');
+});
+
+it.skipIf(process.platform !== 'win32')('waits for a transient Windows profile file lock to release', async () => {
+  const profile = mkdtempSync(join(tmpdir(), 'onewarden-smoke-locked-'));
+  const file = join(profile, 'fixture.txt'); writeFileSync(file, 'synthetic');
+  const escaped = file.replaceAll("'", "''");
+  const locker = spawn('powershell.exe', ['-NoProfile', '-NonInteractive', '-Command',
+    `$file=[IO.File]::Open('${escaped}',[IO.FileMode]::Open,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None); Write-Output 'locked'; Start-Sleep -Milliseconds 500; $file.Dispose()`],
+    { windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
+  children.push(locker);
+  try {
+    const [ready] = await once(locker.stdout!, 'data');
+    expect(ready.toString().trim()).toBe('locked');
+    expect(() => rmSync(file)).toThrow();
+    await removeSmokeProfile(profile);
+    expect(existsSync(profile)).toBe(false);
+  } finally {
+    stopSmokeProcess(locker);
+    if (existsSync(profile)) await removeSmokeProfile(profile);
+  }
+});
+
 it('opts explicitly requested Firefox automation into system access without changing the runner environment', async () => {
   const before = process.env.MOZ_REMOTE_ALLOW_SYSTEM_ACCESS;
   let launched: any;
