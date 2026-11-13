@@ -100,7 +100,7 @@ function SidebarContent(props: SidebarProps) {
         onLogout={props.onLogout} onSwitch={props.onSwitchAccount} />}
       current={currentKey} onSelect={onNavSelect}
       footer={<div className="space-y-1">
-        <button type="button" className="btn btn-quiet w-full justify-center" disabled={props.syncing}
+        <button type="button" className="btn btn-ghost w-full justify-center border border-[var(--border-subtle)] bg-[var(--surface-hover)]/45 hover:bg-[var(--surface-hover)]" disabled={props.syncing}
           onClick={() => { void props.onSync().catch(() => {}); }}>
           {props.syncing && <IconSpinner size={14} />}{props.syncing ? '同步中…' : '立即同步'}
         </button>

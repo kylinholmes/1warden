@@ -2,7 +2,7 @@ import { Children, type ReactNode } from 'react';
 
 /** Labels above content, shared by independent editor and detail fields. */
 export const FIELD_ROW_CLASS = 'flex flex-col min-w-0 gap-1';
-export const FIELD_LABEL_CLASS = 'break-words [overflow-wrap:anywhere] text-xs text-[var(--ink-secondary)]';
+export const FIELD_LABEL_CLASS = 'break-words [overflow-wrap:anywhere] text-xs text-[var(--ink-tertiary)]';
 
 /** Related native fields share one divider and use equal columns when the whole
  * group fits. Only surviving children count: an omitted detail field must not

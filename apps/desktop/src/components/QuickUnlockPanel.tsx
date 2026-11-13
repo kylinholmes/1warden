@@ -115,10 +115,10 @@ export function QuickUnlockPanel({ accounts, loading, autoSelect = true, initial
           {stage === 'twoFactor' && <button type="button" className="btn btn-ghost quick-unlock-back" onClick={back}
             aria-label="返回密码解锁"><IconArrowLeft size={17} /></button>}
         </div>
-        {!multiple && <div className="quick-unlock-identity">
+        <div className="quick-unlock-identity">
           <p title={account.email}>{account.email || account.displayName}</p>
           <p title={account.serverUrl}>{serverLabel(account.serverUrl)}</p>
-        </div>}
+        </div>
         {stage === 'twoFactor' ? <div className="quick-unlock-two-factor"><TwoFactorForm providers={providers} busy={busy}
           onSubmit={fields => { void authenticate(account, { action: 'twoFactor', ...fields }); }} /></div>
           : <form className="quick-unlock-password" onSubmit={event => {

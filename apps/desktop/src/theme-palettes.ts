@@ -9,8 +9,8 @@ export const PALETTES = [
     light: ['#dcece4', '#e7f2e9', '#f5f8ee', '#fffdf5', '#173e32', '#08755c', '#ffffff'],
     dark: ['#071e18', '#0d2c23', '#143a2e', '#1d493a', '#f1f8e9', '#77dfb2', '#103b2b'] },
   { id: 'clear-blue', name: '清透蓝白',
-    light: ['#dceaff', '#e7f1ff', '#f5f9ff', '#ffffff', '#152f59', '#095bd9', '#ffffff'],
-    dark: ['#101113', '#17191c', '#1d1f23', '#25282d', '#f2f3f5', '#8dcaff', '#122235'] },
+    light: ['#e8effa', '#eef4fc', '#f7faff', '#ffffff', '#152f59', '#095bd9', '#ffffff'],
+    dark: ['#10151e', '#161d28', '#1c2533', '#232e3f', '#f2f5fa', '#8dcaff', '#112236'] },
   { id: 'whale', name: '蓝色大肥鱼',
     light: ['#e7edf5', '#eff3f8', '#f7f9fc', '#ffffff', '#223247', '#245ba8', '#ffffff'],
     dark: ['#111820', '#18212c', '#202b38', '#283544', '#e9f0f8', '#a1c7ff', '#13243e'] },
@@ -58,16 +58,22 @@ export function paletteTokens(id: ThemePalette, mode: 'light' | 'dark'): Record<
   // Keep the existing CSS as the original theme's source of truth (and no-JS fallback).
   if (id === 'original') return {};
   const [canvas, chrome, content, paper, ink, accent, accentInk] = getPalette(id)[mode];
-  const subtle = mix(ink, paper, .16);
+  const isDark = mode === 'dark';
+  const subtle = mix(ink, paper, isDark ? .14 : .10);
   return {
     '--surface-canvas': canvas, '--surface-chrome': chrome, '--surface-content': content,
     '--surface-paper': paper, '--surface-well': chrome, '--surface-overlay': paper,
     '--surface-hover': mix(ink, paper, .06), '--surface-selected': mix(accent, paper, .12),
     '--surface-brand': mix(accent, paper, .08), '--surface-card': paper,
-    '--ink-primary': ink, '--ink-secondary': mix(ink, paper, .86), '--ink-tertiary': mix(ink, paper, .78),
-    '--ink-inverse': accentInk, '--border-subtle': subtle, '--border-overlay': mix(ink, paper, .24),
-    '--border-strong': mix(ink, paper, .4), '--border-control': mix(ink, paper, mode === 'dark' ? .55 : .62), '--accent': accent,
-    '--accent-hover': mix(accent, mode === 'dark' ? '#ffffff' : '#000000', .88),
+    '--ink-primary': ink,
+    '--ink-secondary': mix(ink, paper, isDark ? .76 : .75),
+    '--ink-tertiary': mix(ink, paper, isDark ? .58 : .56),
+    '--ink-inverse': accentInk, '--border-subtle': subtle,
+    '--border-overlay': mix(ink, paper, isDark ? .22 : .16),
+    '--border-strong': mix(ink, paper, isDark ? .32 : .26),
+    '--border-control': mix(ink, paper, isDark ? .30 : .22),
+    '--accent': accent,
+    '--accent-hover': mix(accent, isDark ? '#ffffff' : '#000000', .88),
     '--accent-tint': mix(accent, paper, .1), '--accent-ring': accent, '--accent-ink': accentInk,
   };
 }

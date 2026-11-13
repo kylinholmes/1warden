@@ -100,7 +100,14 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
       // A mode change may already be persisting its draft. Clear after that
       // write settles so an abandoned registration cannot resurrect its route.
       await entryWrites.current.catch(() => {});
-      await client.connectionDraft?.clear();
+      const previous = nextRoute === 'work' ? await client.connectionDraft?.load().catch(() => null) : null;
+      if (previous?.returnAccount) {
+        const preserved: ConnectionDraft = { serverUrl: previous.serverUrl, email: previous.email, error: null, returnAccount: previous.returnAccount };
+        await client.connectionDraft?.save(preserved);
+        setEntryDraft(preserved);
+      } else {
+        await client.connectionDraft?.clear();
+      }
       void autosave?.flush();
     } catch (e) { setError(e instanceof Error ? e.message : '返回首页失败'); }
     finally { navigation.current = false; setNavigating(false); }

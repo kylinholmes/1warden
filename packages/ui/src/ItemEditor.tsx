@@ -554,7 +554,7 @@ function Group({ title, children }: { title?: string; children: React.ReactNode 
   return (
     <section className="mb-6 last:mb-0">
       {title && (
-        <h3 className="mb-2 text-xs font-medium text-[var(--ink-tertiary)]">{title}</h3>
+        <h3 className="mb-2 text-xs font-semibold tracking-[0.02em] text-[var(--ink-secondary)]">{title}</h3>
       )}
       <div className="@container card px-4">{children}</div>
     </section>

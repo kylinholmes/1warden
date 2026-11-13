@@ -136,9 +136,9 @@ const DETAIL: VaultItem = item({
 function DetailPane({ children }: { children: React.ReactNode }) {
   return (
     <div className="flex h-full">
-      <div className="w-[var(--rail-w)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-glass)]" />
-      <div className="w-[var(--list-w)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-content)]" />
-      <div className="min-w-0 flex-1 overflow-y-auto bg-[var(--surface-paper)]">{children}</div>
+      <div className="hidden w-[var(--rail-w)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-glass)] min-[900px]:block" />
+      <div className="hidden w-[min(var(--list-w),42%)] shrink-0 border-r border-[var(--border-subtle)] bg-[var(--surface-content)] min-[900px]:block" />
+      <div className="vault-detail min-w-0 flex-1 overflow-y-auto bg-[var(--surface-paper)]">{children}</div>
     </div>
   );
 }

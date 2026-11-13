@@ -71,9 +71,9 @@
    * 都是各自平台上为该语言做过优化的字体，比塞一个 Inter 进去更贴合系统，
    * 也少几 MB 资产。CJK 不能直接用 Inter，字形会不匹配。
    */
-  --font-ui: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI',
-    'PingFang SC', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei',
-    Inter, sans-serif;
+  --font-ui: Inter, -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'Segoe UI Variable Text', 'Segoe UI',
+    'PingFang SC', 'HarmonyOS Sans SC', 'MiSans', 'Hiragino Sans GB', 'Noto Sans SC', 'Microsoft YaHei UI', 'Microsoft YaHei',
+    sans-serif;
   --font-secret: ui-monospace, SFMono-Regular, 'SF Mono', 'JetBrains Mono',
     Menlo, Consolas, monospace;
 }
@@ -94,13 +94,13 @@
   --surface-selected: #dbeaff;
   --surface-glass: rgb(236 243 255 / 0.84);
   --ink-primary: #202b3c;
-  --ink-secondary: #43556e;
-  --ink-tertiary: #57697f;
+  --ink-secondary: #4a5b73;
+  --ink-tertiary: #6e8098;
   --ink-inverse: #f7faff;
-  --border-subtle: #d7e0ee;
-  --border-overlay: #bbcee8;
-  --border-strong: #94abc9;
-  --border-control: #7086a3;
+  --border-subtle: #e2e8f2;
+  --border-overlay: #cfd9e8;
+  --border-strong: #b4c3d8;
+  --border-control: #c2cfe0;
   --accent: #055fda;
   --accent-hover: #0055c8;
   --accent-tint: #ecf3ff;
@@ -137,13 +137,13 @@
     --surface-selected: #244c7a;
     --surface-glass: rgb(22 34 52 / 0.84);
     --ink-primary: #f1f6ff;
-    --ink-secondary: #c5d2e4;
-    --ink-tertiary: #adbed3;
+    --ink-secondary: #b8c7dc;
+    --ink-tertiary: #8ea2bd;
     --ink-inverse: #142339;
-    --border-subtle: #374b65;
-    --border-overlay: #4b6382;
-    --border-strong: #607b9d;
-    --border-control: #819bbd;
+    --border-subtle: #2e4057;
+    --border-overlay: #3d526e;
+    --border-strong: #516a8a;
+    --border-control: #4a6282;
     --accent: #8ac0ff;
     --accent-hover: #acd1ff;
     --accent-tint: #243f62;
@@ -180,13 +180,13 @@
   --surface-selected: #244c7a;
   --surface-glass: rgb(22 34 52 / 0.84);
   --ink-primary: #f1f6ff;
-  --ink-secondary: #c5d2e4;
-  --ink-tertiary: #adbed3;
+  --ink-secondary: #b8c7dc;
+  --ink-tertiary: #8ea2bd;
   --ink-inverse: #142339;
-  --border-subtle: #374b65;
-  --border-overlay: #4b6382;
-  --border-strong: #607b9d;
-  --border-control: #819bbd;
+  --border-subtle: #2e4057;
+  --border-overlay: #3d526e;
+  --border-strong: #516a8a;
+  --border-control: #4a6282;
   --accent: #8ac0ff;
   --accent-hover: #acd1ff;
   --accent-tint: #243f62;

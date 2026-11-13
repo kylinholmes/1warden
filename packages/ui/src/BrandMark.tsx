@@ -6,5 +6,5 @@ export function BrandMark({ size = 40, className = '' }: { size?: number; classN
   return <img data-brand-mark={size <= 32 ? 'compact' : 'app'}
     src={size <= 32 ? compact : app} alt="" aria-hidden="true" draggable={false}
     width={size} height={size} className={`shrink-0 select-none ${className}`}
-    style={{ width: size, height: size, objectFit: 'contain' }} />;
+    style={{ width: size, height: size, objectFit: 'contain', imageRendering: 'crisp-edges' }} />;
 }

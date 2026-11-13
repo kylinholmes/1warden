@@ -39,23 +39,23 @@
       color: var(--ink-secondary);
       font-size: 12px;
       line-height: 20px;
-      transition: background-color var(--dur-fast), color var(--dur-fast);
+      transition: background-color var(--dur-fast), color var(--dur-fast), box-shadow var(--dur-fast);
     }
     .segmented-option:hover { background: var(--surface-hover); color: var(--ink-primary); }
-    .segmented-option[aria-checked='true'] { background: var(--accent-tint); color: var(--accent); font-weight: 500; }
-    .auth-title { font-size: 28px; line-height: 1.35; font-weight: 600; letter-spacing: -0.025em; }
-    .auth-back { min-height: 36px; margin: 0 0 16px -8px; }
-    .auth-connect-content { margin-top: 26px; }
-    .auth-connect-form { display: grid; gap: 20px; }
-    .auth-login-credentials { display: grid; gap: 20px; min-width: 0; }
-    .auth-connect .field { min-height: 50px; font-size: 16px; border-radius: 8px; }
-    .auth-login-credentials > label > span:first-child { font-size: 13px; margin-bottom: 8px; }
-    .auth-field-label { display: block; margin-bottom: 8px; font-size: 13px; line-height: 1.55; font-weight: 500; color: var(--ink-secondary); }
+    .segmented-option[aria-checked='true'] { background: var(--surface-paper); color: var(--ink-primary); font-weight: 500; box-shadow: 0 1px 2px rgb(15 23 42 / 0.08), 0 0 0 0.5px var(--border-subtle); }
+    .auth-title { font-size: 24px; line-height: 1.35; font-weight: 600; letter-spacing: -0.025em; }
+    .auth-back { min-height: 36px; margin: 0 0 14px -8px; }
+    .auth-connect-content { margin-top: 22px; }
+    .auth-connect-form { display: grid; gap: 16px; }
+    .auth-login-credentials { display: grid; gap: 16px; min-width: 0; }
+    .auth-connect .field { min-height: 42px; font-size: 14px; border-radius: 8px; }
+    .auth-login-credentials > label > span:first-child { font-size: 13px; margin-bottom: 6px; }
+    .auth-field-label { display: block; margin-bottom: 6px; font-size: 13px; line-height: 1.55; font-weight: 500; color: var(--ink-secondary); }
     .auth-password { position: relative; width: 100%; }
-    .auth-password > input { padding-right: 48px; }
+    .auth-password > input { padding-right: 44px; }
     .auth-password > input::placeholder { font-family: var(--font-ui); font-size: 14px; letter-spacing: normal; }
-    .auth-password-toggle { position: absolute; inset: 3px 3px 3px auto; width: 42px; min-height: 38px; padding: 0; }
-    .auth-submit { min-height: 48px; border-radius: 8px; margin-top: 4px; font-weight: 600; }
+    .auth-password-toggle { position: absolute; inset: 3px 3px 3px auto; width: 38px; min-height: 34px; padding: 0; }
+    .auth-submit { min-height: 42px; border-radius: 8px; margin-top: 4px; font-weight: 600; }
     .auth-register { display: flex; align-items: center; justify-content: center; margin-top: 12px; font-size: 13px; color: var(--ink-secondary); }
     .auth-register > button { min-height: 44px; }
     .auth-security { display: flex; gap: 9px; margin-top: 32px; font-size: 12px; line-height: 1.7; color: var(--ink-tertiary); }
@@ -81,7 +81,7 @@
     .auth-connection-body { display: grid; gap: 8px; margin-top: 6px; padding: 10px 12px; border-radius: 6px; background: var(--surface-well); }
     .auth-connection-address { display: flex; align-items: center; gap: 10px; }
     .auth-connection-address > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
-    .inline-copy { cursor: pointer; user-select: text; -webkit-user-select: text; }
+    .inline-copy { position: relative; cursor: pointer; user-select: text; -webkit-user-select: text; }
     .inline-copy:hover { background: color-mix(in srgb, var(--surface-hover) 55%, transparent); }
     /* A field has one interaction surface. Its copy and reveal controls stay
        separate targets without painting a second rectangle over the row. */
@@ -90,6 +90,17 @@
     .inline-copy[data-state='ok'] .inline-copy-feedback { color: var(--accent); }
     .inline-copy[data-state='error'] .inline-copy-feedback { color: var(--risk); }
     @media (hover: hover) and (pointer: fine) {
+      .inline-copy-feedback {
+        position: absolute;
+        right: 4px;
+        top: 50%;
+        transform: translateY(-50%);
+        min-width: 0;
+        padding: 2px 6px;
+        border-radius: var(--radius-sm);
+        background: color-mix(in srgb, var(--surface-paper) 92%, transparent);
+        pointer-events: none;
+      }
       .inline-copy[data-state='idle']:not(:hover):not(:focus-visible) .inline-copy-feedback { opacity: 0; }
     }
     @media (forced-colors: active) {
@@ -485,7 +496,7 @@
     }
 
     @media (width >= 900px) {
-      .detail-back { display: none; }
+      .btn.detail-back { display: none; }
       .vault-list {
         flex: none;
         width: min(var(--list-w), 42%);
@@ -616,12 +627,24 @@
     padding-inline: 12px;
   }
 
-  /* 分组卡片：填充 + 描边，**不投影** */
+  /* 分组卡片：微顶边高光 + 极轻环境阴影 */
   .card {
     border-radius: var(--radius-md);
     background: var(--surface-paper);
     border: 1px solid var(--border-subtle);
+    box-shadow: 0 1px 2px rgb(15 23 42 / 0.03), var(--edge-top);
     overflow: hidden;
+  }
+  .card .field {
+    background: color-mix(in srgb, var(--surface-well) 55%, var(--surface-paper));
+    border-color: color-mix(in srgb, var(--border-control) 55%, var(--border-subtle));
+  }
+  .card .field:hover:not(:disabled):not(:focus) {
+    border-color: var(--border-control);
+  }
+  .card .field:focus {
+    background: var(--surface-paper);
+    border-color: var(--accent);
   }
 
   /* Only the card's own field rows span its gutter. Notes, resource controls

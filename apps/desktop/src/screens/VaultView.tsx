@@ -397,7 +397,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
       </div>}
 
       {fullWidth ? (
-        <div className="below-titlebar flex min-w-0 flex-1 flex-col bg-[var(--surface-paper)]">
+        <div className="below-titlebar flex min-w-0 flex-1 flex-col bg-[var(--surface-content)]">
           <SyncNotice session={session} client={client} />
           {category.kind === 'trash' ? <TrashView client={client} onBack={() => setCategory({ kind: 'all' })}
             onBusyChange={busy => { transferBusy.current = busy; }} />
@@ -463,7 +463,7 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
               <Select aria-label="排序方式" title="排序方式" value={sortBy}
                 options={([SORT_BY.updated, SORT_BY.created, SORT_BY.name] as const).map(value => ({ value, label: SORT_LABEL[value] }))}
                 onChange={value => changeSort(value as SortBy)} className="vault-sort shrink-0" />
-              <button onClick={() => setMode({ kind: 'new' })} aria-label="新建条目" title={`新建条目  ${primaryShortcut('N')}`} className="btn btn-primary">
+              <button onClick={() => setMode({ kind: 'new' })} aria-label="新建条目" title={`新建条目  ${primaryShortcut('N')}`} className="btn btn-primary !h-9 !w-9 shrink-0 !p-0">
 <IconPlus size={15} />
 </button>
             </div>

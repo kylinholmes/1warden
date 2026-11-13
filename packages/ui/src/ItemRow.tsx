@@ -67,7 +67,7 @@ export function ItemRow({
     >
       {icon}
       <span className="min-w-0 flex-1 py-0.5">
-        <span className={`block truncate text-md leading-snug ${
+        <span className={`block truncate text-md font-medium leading-snug ${
           nameFailed ? 'italic text-[var(--ink-tertiary)]' : ''
         }`}>
           {nameFailed ? '无法解密' : name}

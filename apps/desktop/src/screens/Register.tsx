@@ -1,8 +1,9 @@
 import { useEffect, useRef, type FormEvent } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { beginRegistration, finishRegistration, HttpClient, registrationServerUrl, serverEnvironment, type RegistrationStep } from '@1warden/api';
-import { apiMessageOf, BackButton, BrandMark, Field, host, IconSpinner, initialServerUrl, ServerSelector, useAccounts, type SavedAccount } from '@1warden/ui';
+import { apiMessageOf, BackButton, Field, host, IconSpinner, initialServerUrl, ServerSelector, useAccounts, type SavedAccount } from '@1warden/ui';
 import type { ApplicationClient, ConnectionDraft } from '../application/types';
+import { AuthPage } from '../components/AuthPage';
 import { openWebsite } from '../open-website';
 import type { CertInfo } from '../trust';
 import { CertificatePrompt } from './Connect';
@@ -21,7 +22,7 @@ interface RegisterProps {
 
 export function Register(props: RegisterProps) {
   const accounts = useAccounts();
-  if (accounts === null) return <main className="below-titlebar flex h-full items-center justify-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在读取服务器…</main>;
+  if (accounts === null) return <AuthPage label="注册账户"><p className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在读取服务器…</p></AuthPage>;
   return <RegistrationForm {...props} accounts={accounts} />;
 }
 
@@ -128,11 +129,10 @@ function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts, bac
     finally { if (mounted.current && !leaving.current && version === operation.current) setBusy(false); }
   }
 
-  return <main aria-label="注册账户" className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
-    <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
-      <div className="mb-7 flex items-center gap-2.5"><BrandMark /><span className="text-xl font-semibold">1Warden</span></div>
-      <BackButton label={backLabel} showLabel className="mb-4" onBack={() => { void leave('home'); }} />
-      <h1 className="text-xl font-semibold">{step.kind === 'complete' ? '账户已创建' : step.kind === 'verifyEmail' ? '检查你的邮箱' : step.kind === 'setPassword' ? '设置主密码' : '创建账户'}</h1>
+  return <AuthPage label="注册账户">
+    <section className="auth-connect screen-in">
+      <BackButton label={backLabel} showLabel className="auth-back" onBack={() => { void leave('home'); }} />
+      <h1 className="auth-title">{step.kind === 'complete' ? '账户已创建' : step.kind === 'verifyEmail' ? '检查你的邮箱' : step.kind === 'setPassword' ? '设置主密码' : '创建账户'}</h1>
       {cert ? <div className="mt-5"><CertificatePrompt cert={cert} host={new URL(serverUrl).host} busy={busy}
         onCancel={() => setCert(null)} onTrust={() => { void trustAndRetry(); }} /></div> : <>
         {step.kind === 'identity' && <>
@@ -175,6 +175,6 @@ function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts, bac
       {error && <p role="alert" className="mt-4 rounded-[var(--radius-sm)] bg-[var(--surface-well)] px-3 py-2.5 text-sm text-[var(--risk)]">{error}</p>}
       {!cloudRegion && (step.kind === 'identity' || error) && <button type="button" disabled={busy || !serverUrl.trim()} className="btn btn-ghost mt-3 w-full py-2 text-xs" onClick={() => { void openWebVault(); }}>在服务器网页中注册</button>}
       <p className="mt-7 text-xs leading-relaxed text-[var(--ink-tertiary)]">主密码只在本地用于派生密钥，永不发送到服务器。{!cloudRegion && '是否开放注册、是否需要邮箱验证，由服务器管理员决定。'}</p>
-    </div>
-  </main>;
+    </section>
+  </AuthPage>;
 }

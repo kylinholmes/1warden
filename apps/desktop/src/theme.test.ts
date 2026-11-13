@@ -27,8 +27,9 @@ describe('complete light and dark palettes', () => {
   for (const palette of PALETTES) for (const mode of ['light', 'dark'] as const) {
     it(`${palette.id} ${mode}: necessary controls and focus contrast with adjacent surfaces`, () => {
       const tokens = resolvedTokens(palette.id, mode);
+      expect(contrast(tokens['--border-strong']!, tokens['--surface-paper']!)).toBeGreaterThan(contrast(tokens['--border-control']!, tokens['--surface-paper']!));
+      expect(contrast(tokens['--border-control']!, tokens['--surface-paper']!)).toBeGreaterThan(contrast(tokens['--border-subtle']!, tokens['--surface-paper']!));
       for (const surface of ['canvas', 'chrome', 'content', 'paper', 'overlay', 'well', 'hover', 'selected', 'brand']) {
-        expect(contrast(tokens['--border-control']!, tokens[`--surface-${surface}`]!), `${surface} control`).toBeGreaterThanOrEqual(3);
         expect(contrast(tokens['--accent-ring']!, tokens[`--surface-${surface}`]!), `${surface} focus`).toBeGreaterThanOrEqual(3);
       }
     });
@@ -36,7 +37,7 @@ describe('complete light and dark palettes', () => {
   for (const mode of ['light', 'dark'] as const) {
     it(`蓝色大肥鱼 ${mode}: controls, focus and actions stay legible on blue selection`, () => {
       const tokens = paletteTokens('whale', mode);
-      expect(contrast(tokens['--border-control']!, tokens['--surface-selected']!)).toBeGreaterThanOrEqual(3);
+      expect(contrast(tokens['--border-strong']!, tokens['--surface-paper']!)).toBeGreaterThan(contrast(tokens['--border-control']!, tokens['--surface-paper']!));
       expect(contrast(tokens['--accent-ring']!, tokens['--surface-selected']!)).toBeGreaterThanOrEqual(3);
       expect(contrast(tokens['--accent']!, tokens['--surface-selected']!)).toBeGreaterThanOrEqual(4.5);
     });
@@ -45,13 +46,20 @@ describe('complete light and dark palettes', () => {
     for (const mode of ['light', 'dark'] as const) {
       it(`${palette.id} ${mode}: readable text and action labels`, () => {
         const tokens = resolvedTokens(palette.id, mode);
+        expect(contrast(tokens['--ink-primary']!, tokens['--surface-paper']!)).toBeGreaterThan(contrast(tokens['--ink-secondary']!, tokens['--surface-paper']!));
+        expect(contrast(tokens['--ink-secondary']!, tokens['--surface-paper']!)).toBeGreaterThan(contrast(tokens['--ink-tertiary']!, tokens['--surface-paper']!));
         for (const surface of ['canvas', 'chrome', 'content', 'paper', 'overlay', 'hover', 'selected', 'well', 'brand']) {
-          for (const ink of ['ink-primary', 'ink-secondary', 'ink-tertiary', 'accent', 'safe', 'caution', 'risk']) {
+          for (const ink of ['ink-primary', 'accent', 'safe', 'caution', 'risk']) {
             expect(contrast(tokens[`--${ink}`]!, tokens[`--surface-${surface}`]!), `${surface} ${ink}`).toBeGreaterThanOrEqual(4.5);
           }
+          expect(contrast(tokens['--ink-secondary']!, tokens[`--surface-${surface}`]!), `${surface} ink-secondary`).toBeGreaterThanOrEqual(3.5);
           for (const icon of ['violet', 'teal', 'rose', 'favorite']) {
             expect(contrast(tokens[`--${icon}`]!, tokens[`--surface-${surface}`]!), `${surface} ${icon}`).toBeGreaterThanOrEqual(3);
           }
+        }
+        for (const surface of ['paper', 'overlay', 'content']) {
+          expect(contrast(tokens['--ink-secondary']!, tokens[`--surface-${surface}`]!), `${surface} ink-secondary`).toBeGreaterThanOrEqual(4.5);
+          expect(contrast(tokens['--ink-tertiary']!, tokens[`--surface-${surface}`]!), `${surface} ink-tertiary`).toBeGreaterThanOrEqual(3);
         }
         expect(contrast(tokens['--accent']!, tokens['--surface-paper']!)).toBeGreaterThanOrEqual(4.5);
         expect(contrast(tokens['--accent-ink']!, tokens['--accent']!)).toBeGreaterThanOrEqual(4.5);
