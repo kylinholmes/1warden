@@ -8,12 +8,15 @@ export interface SelectProps extends Omit<ButtonHTMLAttributes<HTMLButtonElement
   options: readonly SelectOption[];
   onChange: (value: string) => void;
   placeholder?: string;
+  renderOption?: (option: SelectOption) => ReactNode;
+  renderValue?: (option: SelectOption | undefined) => ReactNode;
+  popupClassName?: string;
 }
 
 /** A select-only combobox. Focus stays on its trigger, so a popup never escapes
  * the surrounding dialog's focus trap. The HTML popover top layer escapes scroll
  * clipping without a body portal (which would land in an inert background). */
-export function Select({ value, options, onChange, placeholder = '请选择', className = '',
+export function Select({ value, options, onChange, placeholder = '请选择', className = '', renderOption, renderValue, popupClassName = '',
   disabled, id: suppliedId, onKeyDown, onBlur, ...props }: SelectProps) {
   const generatedId = useId();
   const id = suppliedId ?? generatedId;
@@ -176,11 +179,11 @@ export function Select({ value, options, onChange, placeholder = '请选择', cl
       data-escape-scope={open || undefined} onKeyDown={key}
       onBlur={event => { onBlur?.(event); if (event.relatedTarget && !popup.current?.contains(event.relatedTarget)) close(); }}
       onClick={() => { if (open) close(); else show(); }}>
-      <span className="select-value">{selected?.label ?? (value ? `已保存：${value}` : placeholder)}</span>
+      <span className="select-value">{renderValue ? renderValue(selected) : selected?.label ?? (value ? `已保存：${value}` : placeholder)}</span>
       {selected?.suffix}
       <IconChevronDown size={15} className="select-chevron" />
     </button>
-    {open && <div ref={popup} id={popupId} role="listbox" popover="manual" className="select-popup"
+    {open && <div ref={popup} id={popupId} role="listbox" popover="manual" className={`select-popup ${popupClassName}`}
       aria-label={props['aria-label']} aria-labelledby={props['aria-labelledby'] ?? (!props['aria-label'] ? id : undefined)}
       data-select-popup data-escape-scope="true">
       {options.map((option, index) => <div key={option.value} id={`${popupId}-${index}`} role="option"
@@ -189,7 +192,7 @@ export function Select({ value, options, onChange, placeholder = '请选择', cl
         onMouseDown={event => event.preventDefault()}
         onPointerMove={() => { if (!option.disabled) setActive(index); }}
         onClick={event => { event.preventDefault(); choose(index); }}>
-        <span>{option.label}</span>{option.suffix}<span className="select-check" aria-hidden="true">{option.value === value && <IconCheck size={15} />}</span>
+        <span>{renderOption ? renderOption(option) : option.label}</span>{option.suffix}<span className="select-check" aria-hidden="true">{option.value === value && <IconCheck size={15} />}</span>
       </div>)}
       {options.length === 0 && <div className="select-empty">暂无可选项</div>}
     </div>}

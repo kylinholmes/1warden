@@ -1,4 +1,4 @@
-import { FloatingPanel, GeneratorBody, PageHeader } from '@1warden/ui';
+import { FloatingPanel, GeneratorBody, PageHeader, useClipboardClearMs } from '@1warden/ui';
 import type { BrowserCredentialActions } from '../application/browser-credentials';
 import { GeneratedPasswordHistory } from '../components/BrowserCredentialReview';
 
@@ -19,6 +19,7 @@ import { GeneratedPasswordHistory } from '../components/BrowserCredentialReview'
  * 直接把内容铺在列表那一层。**两个外壳，一份内容。**
  */
 export function Generator({ open, onClose, credentials }: { open: boolean; onClose: () => void; credentials?: BrowserCredentialActions | undefined }) {
+  const clearMs = useClipboardClearMs();
   return (
     <FloatingPanel
       open={open}
@@ -28,7 +29,7 @@ export function Generator({ open, onClose, credentials }: { open: boolean; onClo
       footer={
         <>
           {/* 自动清空这件事必须说出来 —— 不说的话，用户会以为密码一直躺在剪贴板里 */}
-          <span className="min-w-0 truncate">复制后 30 秒自动清空剪贴板</span>
+          <span className="min-w-0 truncate">复制后 {clearMs / 1000} 秒自动清空剪贴板</span>
           <span className="shrink-0"><kbd className="text-2xs">esc</kbd> 关闭</span>
         </>
       }

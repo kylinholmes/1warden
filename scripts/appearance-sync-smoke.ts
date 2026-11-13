@@ -20,6 +20,7 @@ const email = 'appearance-sync@example.invalid', password = 'Synthetic-Appearanc
 const userKey = makeUserKey(), protocol = new MessagePackHubProtocol();
 const sockets = new Set<any>(), checks: string[] = [], errors: string[] = [];
 let profileCipher: any, revision = 0, writes = 0, syncing = 0, syncs = 0, slow = false;
+let heldSync: Promise<void> | undefined, releaseSync: (() => void) | undefined;
 const encryptedName = await encryptString('Synthetic selected login', userKey);
 const records = Array.from({ length: 200 }, (_, index) => ({ id: `synthetic-${index}`, type: 1, name: encryptedName,
   notes: null, login: { username: null, password: null, uris: [] }, fields: [], favorite: false,
@@ -32,6 +33,7 @@ const server = Bun.serve({ hostname: '127.0.0.1', port: 0, async fetch(request) 
   if (path === '/api/sync') {
     syncing++; syncs++;
     try {
+      if (heldSync) await heldSync;
       if (slow) await Bun.sleep(800);
       return Response.json({ profile: { id: 'synthetic-user', email }, ciphers: [...records, ...(profileCipher ? [profileCipher] : [])], folders: [], collections: [] });
     } finally { syncing--; }
@@ -78,18 +80,39 @@ try {
   browser = await connectNativeBrowser({ app, connect: (options: any) => puppeteer.connect(options), browserURL: `http://127.0.0.1:${port}` });
   await until(async () => { page = (await browser.pages()).find((p: any) => p.url() === 'http://tauri.localhost/'); return page; }, 'main WebView');
   page.setDefaultTimeout(10000); page.on('pageerror', (error: Error) => errors.push(error.message));
-  await page.waitForSelector('[data-add-server]'); await button('登录'); await page.waitForSelector('input[type=email]');
+  await page.waitForSelector('input[type=email]');
   await selectCustomServer(page); await input('input[type=url]', `http://127.0.0.1:${server.port}`);
   await input('input[type=email]', email); await input('input[type=password]', password); await page.click('button[type=submit]');
   await page.waitForSelector('.vault-list ul > li > button');
   await until(async () => profileCipher && parseProfileSettings(await decryptCipher(profileCipher, userKey)).devices.length > 0 && !syncing, 'verified profile and device registration');
   await until(() => sockets.size > 0, 'SignalR connection established');
   check('actual SignalR notification connection is established', sockets.size > 0);
+  // Reload and authenticate again to create a fresh UI autosave store. Hold
+  // only /api/sync after authentication; the unlocked controls must still work.
+  heldSync = new Promise<void>(resolve => { releaseSync = resolve; });
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await page.waitForSelector('input[type=password]');
+  await input('input[type=password]', password); await page.click('button[type=submit]');
+  await page.waitForSelector('[aria-label="账户菜单"]');
+  await until(() => syncing > 0, 'fresh unlock sync is held');
+  await page.click('[aria-label="账户菜单"]'); await button('设置'); await button('外观');
+  await page.waitForSelector('.appearance-picker');
+  const beforeFirstSyncEdit = writes;
+  check('fresh appearance controls stay enabled before the first verified snapshot', !await page.$eval('.appearance-picker', (node: Element) => node.closest('fieldset')!.disabled));
+  await page.click('.appearance-mode:has(.mode-dark)');
+  await page.waitForFunction(() => document.documentElement.dataset.theme === 'dark', { timeout: 500 });
+  await pause(750);
+  check('first-sync preview updates immediately without writing unverified metadata', writes === beforeFirstSyncEdit);
+  heldSync = undefined; releaseSync(); releaseSync = undefined;
+  await until(async () => (await preferences())?.mode === 'dark', 'first-sync draft saves after verification');
+  check('first-sync appearance draft saves once verification finishes', true);
+  await page.keyboard.press('Escape'); await page.waitForSelector('[role=dialog][aria-labelledby="settings-title"]', { hidden: true });
   await input('input[aria-label="搜索条目"]', 'Synthetic');
   await page.waitForSelector('.vault-list ul > li > button');
   await page.click('.vault-list ul > li > button'); await page.waitForSelector('.item-detail');
   await page.evaluate(() => { (window as any).__selectedBeforeSync = document.querySelector('.item-detail'); });
-  await page.click('[aria-label="账户菜单"]'); await button('设置'); await page.waitForSelector('.palette-trigger');
+  await page.click('[aria-label="账户菜单"]'); await button('设置');
+  await button('外观'); await page.waitForSelector('.palette-trigger');
   await page.evaluate(() => {
     const state = { picker: document.querySelector('.appearance-picker'), rootMutations: 0, removedDetails: 0 };
     (window as any).__syncProbe = state;
@@ -141,5 +164,6 @@ try {
   console.log(`Failure evidence: ${output}`); throw error;
 } finally {
   clearInterval(pushTimer);
+  releaseSync?.();
   try { await closeSmokeBrowser(browser); } finally { stopSmokeProcess(app); server.stop(true); }
 }

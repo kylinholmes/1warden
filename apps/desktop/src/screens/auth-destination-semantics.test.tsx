@@ -73,6 +73,9 @@ it('keeps the shared ConnectScreen composable and retains quick-password focus',
   await act(() => host.querySelector<HTMLButtonElement>('li button')!.click());
   expect(host.querySelectorAll('h1')).toHaveLength(1);
   expect(document.activeElement).toBe(host.querySelector('input[type="password"]'));
+  const password = host.querySelector<HTMLInputElement>('input[type="password"]')!;
+  expect(password.labels?.[0]?.textContent).toBe('主密码');
+  expect(password.closest('label')).toBeNull();
 });
 it('owns Unlock semantics and retains password and two-factor focus', async () => {
   await act(() => root.render(createElement(Unlock, { client: client({ unlock: vi.fn().mockRejectedValue({ kind: 'twoFactorRequired', providers: [0] }) }),

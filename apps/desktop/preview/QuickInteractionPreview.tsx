@@ -34,5 +34,5 @@ export function QuickInteractionPreview({ single, twoFactor }: { single: boolean
     locked={locked} busy={false} notice={notice} accounts={single ? identities.slice(0, 1) : identities}
     onAuthenticate={authenticate} onAuthenticationComplete={() => setLocked(false)} onCancelAuthentication={() => {}}
     onQueryChange={setQuery} onPick={() => setNotice('密码已复制，30 秒后清空')}
-    onClose={() => setClosed(true)} onTogglePin={() => {}} />;
+    onOpenMain={() => setClosed(true)} onClose={() => setClosed(true)} onTogglePin={() => {}} />;
 }

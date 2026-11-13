@@ -20,7 +20,8 @@ export interface SessionEvents {
 
 export interface SessionOptions extends SessionEvents {
   /**
-   * 空闲多久后自动锁定。0 或省略 = 不自动锁定。
+   * 解锁后多久自动锁定。0 或省略 = 不自动锁定。
+   * 只有显式调用 touchActivity() 才会从活动时间重新计时。
    * 外壳层应另外监听系统休眠/锁屏事件并直接调用 lock()。
    */
   autoLockMs?: number;
@@ -41,7 +42,8 @@ export class VaultSession {
   private _folders: VaultFolder[] = [];
   private _timer: ReturnType<typeof setTimeout> | null = null;
   private readonly events: SessionEvents;
-  private readonly autoLockMs: number;
+  private autoLockMs: number;
+  private timerStartedAt: number | null = null;
 
   constructor(opts: SessionOptions = {}) {
     // 条件赋值而非直接搬 —— `exactOptionalPropertyTypes` 下
@@ -148,6 +150,14 @@ export class VaultSession {
     this.resetTimer();
   }
 
+  /** Change the duration without granting a fresh unlock period. */
+  setAutoLockMs(ms: number): void {
+    if (!Number.isFinite(ms) || ms < 0) throw new RangeError('自动锁定时限无效');
+    if (ms === this.autoLockMs) return;
+    this.autoLockMs = ms;
+    if (this._status === 'unlocked') this.scheduleTimer();
+  }
+
   /**
    * 锁定并清空一切。
    *
@@ -161,6 +171,7 @@ export class VaultSession {
   lock(): void {
     const wasUnlocked = this._status === 'unlocked';
     this.clearTimer();
+    this.timerStartedAt = null;
     if (this._key) zeroizeKey(this._key);
     this._key = null;
     this._items = [];
@@ -179,9 +190,16 @@ export class VaultSession {
   }
 
   private resetTimer(): void {
+    this.timerStartedAt = Date.now();
+    this.scheduleTimer();
+  }
+
+  private scheduleTimer(): void {
     this.clearTimer();
-    if (this.autoLockMs <= 0) return;
-    this._timer = setTimeout(() => this.lock(), this.autoLockMs);
+    if (this.autoLockMs <= 0 || this.timerStartedAt === null) return;
+    const remaining = this.autoLockMs - (Date.now() - this.timerStartedAt);
+    if (remaining <= 0) { this.lock(); return; }
+    this._timer = setTimeout(() => this.lock(), remaining);
   }
 
   private clearTimer(): void {

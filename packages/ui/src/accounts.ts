@@ -47,6 +47,7 @@ export interface SavedAccount {
  * 的那一份凭空消失。
  */
 const ACCOUNTS_KEY = '1warden.accounts';
+const LAST_ACCOUNT_KEY = '1warden.lastAccount';
 const LEGACY_URL_KEY = '1warden.serverUrl';
 const LEGACY_EMAIL_KEY = '1warden.email';
 
@@ -79,6 +80,21 @@ export async function readAccounts(): Promise<SavedAccount[]> {
   return [];
 }
 
+/** A separate selection keeps remembered account lists stable while switching. */
+export async function readLastAccount(): Promise<SavedAccount | null> {
+  try {
+    const raw = await host().storage.get(LAST_ACCOUNT_KEY);
+    const value: unknown = raw ? JSON.parse(raw) : null;
+    return isSaved(value) ? { serverUrl: value.serverUrl, email: value.email } : null;
+  } catch { return null; }
+}
+
+export async function rememberLastAccount(account: SavedAccount): Promise<void> {
+  try {
+    await host().storage.set(LAST_ACCOUNT_KEY, JSON.stringify({ serverUrl: account.serverUrl, email: account.email }));
+  } catch { /* A convenience preference must not interrupt account navigation. */ }
+}
+
 /**
  * 记住一个账户（最近用的排最前）。
  *
@@ -90,6 +106,7 @@ export async function rememberAccount(a: SavedAccount): Promise<void> {
       (x) => !(x.serverUrl === a.serverUrl && x.email === a.email),
     );
     await host().storage.set(ACCOUNTS_KEY, JSON.stringify([a, ...rest].slice(0, MAX_ACCOUNTS)));
+    await rememberLastAccount(a);
     /*
      * 顺带写一份旧键：万一用户回退到上一版，仍然读得到。
      * 这两行在「旧结构会被当成新结构用」那类问题上是**相反**方向的安全网

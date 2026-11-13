@@ -72,7 +72,7 @@ createRoot(root).render(
     {webAssemblyAvailable() ? (
       <ErrorBoundary>
         {IS_DESKTOP && <DesktopEvents />}
-        <App client={runtime.client} subscribeQuickAccountNavigation={quickNavigation.subscribe} />
+        <App client={runtime.client} directEntry subscribeQuickAccountNavigation={quickNavigation.subscribe} />
         {tauriAvailable() && <Suspense fallback={null}><AppUpdateHost /></Suspense>}
       </ErrorBoundary>
     ) : (

@@ -39,7 +39,7 @@ export function useProfileDraft(client: ApplicationClient) {
   const state = useStoreSnapshot(own.subscribe, own.getSnapshot);
   return { store: own, ...state };
 }
-export function AutosaveStatus({ field, retry, discard }: { field: SaveField<unknown>; retry: () => void; discard: () => void }) {
+export function AutosaveStatus({ field, retry, discard, canDiscardPending = false }: { field: SaveField<unknown>; retry: () => void; discard: () => void; canDiscardPending?: boolean }) {
   return <div className="mt-3 text-xs" aria-live="polite">
     <p role="status" className={field.error ? 'text-[var(--risk)]' : 'text-[var(--ink-tertiary)]'}>
       {({ idle: '修改后自动加密保存', pending: '等待自动保存…', saving: '正在保存…', saved: '已同步', error: '保存失败，修改已保留在当前应用中' })[field.status]}
@@ -47,5 +47,6 @@ export function AutosaveStatus({ field, retry, discard }: { field: SaveField<unk
     {field.error && <div role="alert" className="mt-2 text-[var(--risk)]"><p>{field.error}</p>
       <div className="mt-2 flex flex-wrap gap-2"><button className="btn btn-quiet" onClick={retry}>重试保存</button><button className="btn btn-ghost" onClick={discard}>放弃修改</button></div>
     </div>}
+    {!field.error && field.status === 'pending' && canDiscardPending && <button className="btn btn-ghost mt-2" onClick={discard}>放弃修改</button>}
   </div>;
 }

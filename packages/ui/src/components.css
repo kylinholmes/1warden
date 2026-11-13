@@ -16,6 +16,71 @@
  * 抽出来时如果不包，工具类就压不住它了 —— 表现是「某处的 padding 改不动」。
  */
 @layer components {
+    .segmented {
+      --segment-inset: 2px;
+      display: inline-flex;
+      align-items: stretch;
+      vertical-align: middle;
+      gap: 2px;
+      padding: var(--segment-inset);
+      border: 1px solid var(--border-subtle);
+      border-radius: var(--radius-md);
+      background: var(--surface-well);
+    }
+    .segmented-option {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      min-height: 28px;
+      padding: 4px 10px;
+      /* Concentric inner/outer corners share a center: 10 - (2 + 1) = 7. */
+      border-radius: calc(var(--radius-md) - var(--segment-inset) - 1px);
+      color: var(--ink-secondary);
+      font-size: 12px;
+      line-height: 20px;
+      transition: background-color var(--dur-fast), color var(--dur-fast);
+    }
+    .segmented-option:hover { background: var(--surface-hover); color: var(--ink-primary); }
+    .segmented-option[aria-checked='true'] { background: var(--accent-tint); color: var(--accent); font-weight: 500; }
+    .auth-title { font-size: 28px; line-height: 1.35; font-weight: 600; letter-spacing: -0.025em; }
+    .auth-back { min-height: 36px; margin: 0 0 16px -8px; }
+    .auth-connect-content { margin-top: 26px; }
+    .auth-connect-form { display: grid; gap: 20px; }
+    .auth-login-credentials { display: grid; gap: 20px; min-width: 0; }
+    .auth-connect .field { min-height: 50px; font-size: 16px; border-radius: 8px; }
+    .auth-login-credentials > label > span:first-child { font-size: 13px; margin-bottom: 8px; }
+    .auth-field-label { display: block; margin-bottom: 8px; font-size: 13px; line-height: 1.55; font-weight: 500; color: var(--ink-secondary); }
+    .auth-password { position: relative; width: 100%; }
+    .auth-password > input { padding-right: 48px; }
+    .auth-password > input::placeholder { font-family: var(--font-ui); font-size: 14px; letter-spacing: normal; }
+    .auth-password-toggle { position: absolute; inset: 3px 3px 3px auto; width: 42px; min-height: 38px; padding: 0; }
+    .auth-submit { min-height: 48px; border-radius: 8px; margin-top: 4px; font-weight: 600; }
+    .auth-register { display: flex; align-items: center; justify-content: center; margin-top: 12px; font-size: 13px; color: var(--ink-secondary); }
+    .auth-register > button { min-height: 44px; }
+    .auth-security { display: flex; gap: 9px; margin-top: 32px; font-size: 12px; line-height: 1.7; color: var(--ink-tertiary); }
+    .auth-security > svg { flex-shrink: 0; margin-top: 3px; }
+    .auth-server { margin-bottom: 8px; }
+    .auth-server-details { padding-bottom: 14px; border-bottom: 1px solid var(--border-subtle); }
+    .auth-server-details > summary { display: flex; align-items: center; gap: 10px; min-height: 44px; list-style: none; cursor: pointer; }
+    .auth-server-details > summary::-webkit-details-marker { display: none; }
+    .auth-server-details > summary > svg { flex-shrink: 0; color: var(--ink-secondary); }
+    .auth-server-identity { flex: 1; min-width: 0; }
+    .auth-server-identity > span { display: block; font-size: 13px; color: var(--ink-secondary); }
+    .auth-server-identity > span + span { margin-top: 4px; overflow-wrap: anywhere; font-size: 12px; color: var(--ink-tertiary); }
+    .auth-server-change { display: flex; align-items: center; gap: 4px; font-size: 12px; color: var(--accent); }
+    .auth-server-options { display: grid; gap: 16px; padding-top: 18px; }
+    .auth-server-address { margin-top: 18px; }
+    .auth-connection-details { color: var(--ink-tertiary); font-size: 12px; }
+    .auth-connection-details > summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 36px; cursor: pointer; list-style: none; }
+    .auth-connection-details > summary::-webkit-details-marker { display: none; }
+    .auth-connection-server { display: flex; min-width: 0; align-items: center; gap: 7px; }
+    .auth-connection-server > span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .auth-connection-server > svg { flex-shrink: 0; }
+    .auth-connection-details[open] .auth-connection-server > svg:last-child { transform: rotate(180deg); }
+    .auth-connection-body { display: grid; gap: 8px; margin-top: 6px; padding: 10px 12px; border-radius: 6px; background: var(--surface-well); }
+    .auth-connection-address { display: flex; align-items: center; gap: 10px; }
+    .auth-connection-address > span { min-width: 0; flex: 1; overflow-wrap: anywhere; }
     .inline-copy { cursor: pointer; user-select: text; -webkit-user-select: text; }
     .inline-copy:hover { background: color-mix(in srgb, var(--surface-hover) 55%, transparent); }
     /* A field has one interaction surface. Its copy and reveal controls stay
@@ -81,14 +146,16 @@
       background: var(--surface-hover);
       color: var(--ink-secondary);
     }
-    .tile[data-type='login'] { background: color-mix(in oklab, var(--accent) 14%, var(--surface-paper)); color: var(--accent); }
-    .tile[data-type='card'] { background: color-mix(in oklab, var(--rose) 14%, var(--surface-paper)); color: var(--rose); }
-    .tile[data-type='identity'] { background: color-mix(in oklab, var(--teal) 14%, var(--surface-paper)); color: var(--teal); }
-    .tile[data-type='secureNote'] { background: color-mix(in oklab, var(--violet) 14%, var(--surface-paper)); color: var(--violet); }
-    .tile[data-type='sshKey'] { background: color-mix(in oklab, var(--favorite) 14%, var(--surface-paper)); color: var(--favorite); }
-    .tile[data-type='bankAccount'] { background: color-mix(in oklab, var(--teal) 14%, var(--surface-paper)); color: var(--teal); }
-    .tile[data-type='driversLicense'] { background: color-mix(in oklab, var(--accent) 14%, var(--surface-paper)); color: var(--accent); }
-    .tile[data-type='passport'] { background: color-mix(in oklab, var(--violet) 14%, var(--surface-paper)); color: var(--violet); }
+    :is(.tile, .type-icon)[data-type='login'],
+    :is(.tile, .type-icon)[data-type='driversLicense'] { --type-color: var(--accent); }
+    :is(.tile, .type-icon)[data-type='card'] { --type-color: var(--rose); }
+    :is(.tile, .type-icon)[data-type='identity'],
+    :is(.tile, .type-icon)[data-type='bankAccount'] { --type-color: var(--teal); }
+    :is(.tile, .type-icon)[data-type='secureNote'],
+    :is(.tile, .type-icon)[data-type='passport'] { --type-color: var(--violet); }
+    :is(.tile, .type-icon)[data-type='sshKey'] { --type-color: var(--favorite); }
+    .tile[data-type] { background: color-mix(in oklab, var(--type-color) 14%, var(--surface-paper)); color: var(--type-color); }
+    .type-icon { display: inline-flex; flex-shrink: 0; color: var(--type-color); }
 
     /* Navigation keeps the category color even when another row is selected. */
     .nav-icon { color: var(--accent); }
@@ -368,46 +435,6 @@
 
     /* 抽屉里的导航栏不受折叠态影响 —— 它只在滑出来时可见 */
     .nav-drawer-panel .vault-rail { height: 100%; }
-
-    /* 蓝色大肥鱼 keeps a black navigation zone in both modes. Scope the full
-       foreground/surface set here so drawers, inline fields and account menus
-       inherit it while the main content keeps its independent light/dark pair. */
-    :root[data-palette='whale'] .nav-drawer-panel {
-      color-scheme: dark;
-      --surface-canvas: #0c0d0f;
-      --surface-chrome: #0c0d0f;
-      --surface-content: #101216;
-      --surface-paper: #15181d;
-      --surface-card: #15181d;
-      --surface-well: #13161b;
-      --surface-overlay: #191d23;
-      --surface-glass: #0c0d0f;
-      --surface-hover: #222832;
-      --surface-selected: #153e6b;
-      --surface-brand: #153e6b;
-      --ink-primary: #f5f7fb;
-      --ink-secondary: #d4dae4;
-      --ink-tertiary: #b5bfcd;
-      --ink-inverse: #10243d;
-      --border-subtle: #274364;
-      --border-overlay: #4b6e9a;
-      --border-strong: #63758e;
-      --border-control: #8291a6;
-      --accent: #93bfff;
-      --accent-hover: #a8ccff;
-      --accent-tint: #153e6b;
-      --accent-ring: #93bfff;
-      --accent-ink: #10243d;
-      --violet: #93bfff;
-      --teal: #93bfff;
-      --rose: #93bfff;
-      --favorite: #93bfff;
-      --safe: #75e0ad;
-      --caution: #ffd17b;
-      --risk: #ff98aa;
-      background: var(--surface-canvas);
-      color: var(--ink-primary);
-    }
 
     /*
      * ── 宽屏时，抽屉变回**常驻侧栏** ──────────────────────────
@@ -771,6 +798,9 @@
   }
   .field-bare::placeholder { color: var(--ink-tertiary); }
 }
+
+/* Keep a focused segment inside its own inset without crossing the group frame. */
+.segmented-option:focus-visible { outline: 2px solid var(--accent-ring); outline-offset: -2px; }
 
 /* Keep this palette-specific title role above the shared tertiary text utility. */
 :root[data-palette='whale'] .vault-detail section > h3 { color: var(--accent); }

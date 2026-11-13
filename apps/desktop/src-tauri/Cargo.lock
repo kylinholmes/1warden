@@ -2711,6 +2711,8 @@ dependencies = [
  "tauri-plugin-updater",
  "tokio",
  "tokio-tungstenite",
+ "webview2-com",
+ "windows-core",
  "windows-sys 0.61.2",
  "x509-parser",
  "zeroize",

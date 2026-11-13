@@ -2,6 +2,7 @@ import { useEffect, useRef } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { type SiteProbeResult } from '@1warden/api';
 import { normalizeServerUrl, useServerLatencies, type LatencyState } from './server-latency';
+import { IconChevronDown, IconGlobe } from './icons';
 
 /** Color is supplementary: every light has readable latency or connection text. */
 export function ServerLatencyStatus({ state, valid = true }: { state: LatencyState; valid?: boolean }) {
@@ -17,7 +18,7 @@ export function ServerLatencyStatus({ state, valid = true }: { state: LatencySta
 }
 
 /** Shared automatic latency, with one explicit action for a full measurement. */
-export function ServerSpeed({ serverUrl, disabled = false }: { serverUrl: string; disabled?: boolean }) {
+export function ServerSpeed({ serverUrl, disabled = false, collapsible = false }: { serverUrl: string; disabled?: boolean; collapsible?: boolean }) {
   const url = normalizeServerUrl(serverUrl);
   const latency = useServerLatencies([url], 650, disabled);
   const store = useLocalStore(() => ({
@@ -47,6 +48,22 @@ export function ServerSpeed({ serverUrl, disabled = false }: { serverUrl: string
   const download = current.busy ? '测速中…' : current.result?.download
     ? `${(current.result.download.bytesPerSecond / 1_000_000).toFixed(2)} MB/s`
     : current.result ? '暂不可用' : '未测试';
+  const action = <button type="button" disabled={disabled || !url} className="btn btn-ghost shrink-0 px-1.5 py-1 text-xs"
+    onClick={() => { if (current.busy) { stop(); setFull({ url, busy: false, error: '已取消测速' }); } else void measure(); }}>
+    {current.busy ? '取消测速' : '测速'}
+  </button>;
+  if (collapsible) {
+    let label = url || '服务器地址';
+    try { const address = new URL(url); label = `${address.host}${address.pathname.replace(/\/$/, '')}`; } catch { /* Keep incomplete public URLs visible. */ }
+    return <details className="auth-connection-details" data-server-speed>
+      <summary aria-label="连接信息"><span className="auth-connection-server"><IconGlobe size={14} /><span title={url}>{label}</span><IconChevronDown size={14} /></span>
+        <ServerLatencyStatus state={shownLatency} valid={Boolean(url)} /></summary>
+      <div className="auth-connection-body"><div className="auth-connection-address"><span title={url}>{url}</span>{action}</div>
+        {(current.busy || current.result) && <p role="status">下载 <span className="tabular-nums">{download}</span></p>}
+        {current.error && <p role={current.error === '已取消测速' ? 'status' : 'alert'}>{current.error}</p>}
+      </div>
+    </details>;
+  }
   return <div className="space-y-1 text-xs" data-server-speed>
     <p className="truncate text-[var(--ink-tertiary)]" title={url}>{url || '服务器地址'}</p>
     <div data-server-speed-metrics className="flex items-center gap-2 whitespace-nowrap text-[var(--ink-tertiary)]">
@@ -56,10 +73,7 @@ export function ServerSpeed({ serverUrl, disabled = false }: { serverUrl: string
       <span className="inline-flex min-w-0 items-center gap-1.5" role="status" aria-live="polite">
         下载 <span className="truncate tabular-nums text-[var(--ink-secondary)]">{download}</span>
       </span>
-      <button type="button" disabled={disabled || !url} className="btn btn-ghost ml-auto shrink-0 px-1.5 py-1 text-xs"
-        onClick={() => { if (current.busy) { stop(); setFull({ url, busy: false, error: '已取消测速' }); } else void measure(); }}>
-        {current.busy ? '取消测速' : '测速'}
-      </button>
+      <span className="ml-auto">{action}</span>
     </div>
     {current.error && <p role={current.error === '已取消测速' ? 'status' : 'alert'} className="text-xs text-[var(--ink-secondary)]">{current.error}</p>}
   </div>;

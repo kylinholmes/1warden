@@ -1,6 +1,7 @@
 import { useLocalStore, useStoreField, useStoreSnapshot } from '@1warden/state/react';
 import { useLayoutEffect, useId, useRef, type CSSProperties } from 'react';
 import { IconCheck, IconChevronDown, Segmented } from '@1warden/ui';
+import type { ProfilePreferences } from '@1warden/vault';
 import { getResolvedTheme, getThemeMode, getThemePalette, getIconStyle, setThemeMode, setThemePalette, setIconStyle, subscribeTheme, type ThemeMode, type IconStyle } from '../theme';
 import { getPalette, PALETTES, type ThemePalette } from '../theme-palettes';
 
@@ -8,7 +9,7 @@ const MODES: { value: ThemeMode; label: string }[] = [
   { value: 'system', label: '跟随系统' }, { value: 'light', label: '浅色' }, { value: 'dark', label: '深色' },
 ];
 
-export function AppearancePicker({ onChange }: { onChange?: () => void } = {}) {
+export function AppearancePicker({ onChange }: { onChange?: (patch: Partial<ProfilePreferences>) => void } = {}) {
   const mode = useStoreSnapshot(subscribeTheme, getThemeMode);
   const palette = useStoreSnapshot(subscribeTheme, getThemePalette);
   const resolved = useStoreSnapshot(subscribeTheme, getResolvedTheme);
@@ -52,7 +53,7 @@ export function AppearancePicker({ onChange }: { onChange?: () => void } = {}) {
     window.addEventListener('resize', position);
     return () => { document.removeEventListener('pointerdown', outside); window.removeEventListener('resize', position); };
   }, [open, id, palette]);
-  function choose(value: ThemePalette) { setThemePalette(value); onChange?.(); setOpen(false); trigger.current?.focus(); }
+  function choose(value: ThemePalette) { setThemePalette(value); onChange?.({ palette: value }); setOpen(false); trigger.current?.focus(); }
   return <section className="appearance-picker">
     <h3 className="text-md font-medium">视觉风格</h3>
     <p className="mt-0.5 text-xs text-[var(--ink-tertiary)]">明暗与配色独立选择，立即在本机预览</p>
@@ -60,7 +61,7 @@ export function AppearancePicker({ onChange }: { onChange?: () => void } = {}) {
       <span className="text-md">模式</span>
       <div className="appearance-modes" role="group" aria-label="明暗模式">
         {MODES.map(option => <button key={option.value} type="button" className="appearance-mode"
-          aria-pressed={mode === option.value} onClick={() => { setThemeMode(option.value); onChange?.(); }}>
+          aria-pressed={mode === option.value} onClick={() => { setThemeMode(option.value); onChange?.({ mode: option.value }); }}>
           <span className={`appearance-mode-preview mode-${option.value}`} aria-hidden="true"><i /><i /><i /></span>
           <span>{option.label}</span>
         </button>)}
@@ -112,7 +113,7 @@ export function AppearancePicker({ onChange }: { onChange?: () => void } = {}) {
         <p className="text-md">图标样式</p>
         <p className="mt-1 text-xs leading-relaxed text-[var(--ink-tertiary)]">原貌保留素材自带背景；统一底板添加圆角背景。深色单色矢量随主题显示，彩色原图保持原色。</p>
       </div>
-      <Segmented<IconStyle> label="图标样式" value={iconStyle} onChange={value => { setIconStyle(value); onChange?.(); }}
+      <Segmented<IconStyle> label="图标样式" value={iconStyle} onChange={value => { setIconStyle(value); onChange?.({ iconStyle: value }); }}
         options={[{ value: 'original', label: '原貌' }, { value: 'plate', label: '统一底板' }]} />
     </div>
   </section>;

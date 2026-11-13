@@ -38,26 +38,23 @@ it('shows account identity and explicit unlock action; activates the chosen acco
   expect(cards()[1]!.querySelector('img')).toBeNull();
   expect(cards()[1]!.textContent).toContain('T');
 });
-it('focuses account cards and navigates horizontally without trapping modified keys or Escape', async () => {
+it('focuses account rows and navigates vertically without trapping modified keys or Escape', async () => {
   const props = await mount();
   expect(document.activeElement).toBe(cards()[0]);
-  await act(() => cards()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true, cancelable: true })));
+  await act(() => cards()[0]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })));
   expect(document.activeElement).toBe(cards()[1]);
-  const modified = new KeyboardEvent('keydown', { key: 'ArrowLeft', ctrlKey: true, bubbles: true, cancelable: true });
+  const modified = new KeyboardEvent('keydown', { key: 'ArrowUp', ctrlKey: true, bubbles: true, cancelable: true });
   await act(() => cards()[1]!.dispatchEvent(modified));
   expect(modified.defaultPrevented).toBe(false); expect(document.activeElement).toBe(cards()[1]);
   await act(() => cards()[1]!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
   expect(props.onClose).toHaveBeenCalledOnce();
 });
-it('converts vertical wheel only when account overflow can scroll and leaves zoom and edges alone', async () => {
+it('leaves scrolling and zoom to the native vertical account list', async () => {
   await mount(); const rail = node.querySelector<HTMLElement>('[data-quick-account-rail]')!;
   Object.defineProperties(rail, { scrollWidth: { configurable: true, value: 800 }, clientWidth: { configurable: true, value: 400 } });
   const wheel = (deltaY: number, options = {}) => { const e = new WheelEvent('wheel', { deltaY, bubbles: true, cancelable: true, ...options }); rail.dispatchEvent(e); return e; };
-  expect(wheel(100).defaultPrevented).toBe(true); expect(rail.scrollLeft).toBe(100);
-  expect(wheel(100, { ctrlKey: true }).defaultPrevented).toBe(false); expect(rail.scrollLeft).toBe(100);
-  rail.scrollLeft = 400; expect(wheel(100).defaultPrevented).toBe(false);
-  Object.defineProperty(rail, 'scrollWidth', { configurable: true, value: 400 }); rail.scrollLeft = 0;
-  expect(wheel(100).defaultPrevented).toBe(false);
+  expect(wheel(100).defaultPrevented).toBe(false); expect(rail.scrollLeft).toBe(0);
+  expect(wheel(100, { ctrlKey: true }).defaultPrevented).toBe(false); expect(rail.scrollLeft).toBe(0);
 });
 it('offers a working main-window login when there are no remembered accounts and disables activation while busy', async () => {
   const props = await mount({ accounts: [] });

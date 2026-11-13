@@ -1,11 +1,12 @@
 import { useEffect } from 'react';
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { AccountIdentity, AccountPicker, BrandMark, host, IconSpinner, knownServers, useServerLatencies, useAccounts, type SavedAccount } from '@1warden/ui';
+import { AccountIdentity, AccountPicker, host, IconSpinner, knownServers, useServerLatencies, useAccounts, type SavedAccount } from '@1warden/ui';
 import type { UserProfile } from '@1warden/vault';
 import type { ApplicationSnapshot } from '../application/types';
 import { accountKey } from '../application/account-target';
 import { createProfileCache } from '../application/profile-cache';
 import { ProfileAvatar } from '../components/ProfileAvatar';
+import { AuthPage } from '../components/AuthPage';
 
 /** Each row loads only its own existing presentation cache, never vault contents.
  * A fresh session profile takes precedence, including a deliberately removed avatar. */
@@ -26,26 +27,24 @@ function HomeAccountIdentity({ account, profile }: { account: SavedAccount; prof
     avatar={<ProfileAvatar profile={shown} fallback={email} className="h-9 w-9 text-md" />} />;
 }
 
-export function Home({ session, busy, onPick, onOther, onRegister }: { session: ApplicationSnapshot; busy: boolean; onPick: (account: SavedAccount) => void; onOther: () => void; onRegister: () => void }) {
+export function Home({ session, busy, onPick, onOther, onRegister, title = '登录你的保险库' }: { session: ApplicationSnapshot; busy: boolean; onPick: (account: SavedAccount) => void; onOther: () => void; onRegister: () => void; title?: string | undefined }) {
   const saved = useAccounts();
   const accounts = [...(saved ?? [])];
   if (session.account && !accounts.some(a => accountKey(a) === accountKey(session.account!))) accounts.unshift(session.account);
   useServerLatencies(knownServers(accounts).map(server => server.url));
-  return <main aria-label="账户首页" className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
-    <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
-      <div className="mb-7 flex items-center gap-2.5"><BrandMark /><span className="text-xl font-semibold">1Warden</span></div>
-      <h1 className="mb-2 text-xl font-semibold">{accounts.length ? '欢迎回来' : '你的密码，从这里开始'}</h1>
-      <p className="mb-6 text-sm leading-relaxed text-[var(--ink-secondary)]">{accounts.length ? '选择账户进入保险库，或登录其他账户。' : '登录已有保险库，或选择服务器创建账户。'}</p>
+  return <AuthPage label="账户首页">
+    <section className="auth-home">
+      <h1 className="auth-title">{title}</h1>
+      <div className="auth-home-content">
       {saved === null ? <p className="flex items-center gap-2 text-sm text-[var(--ink-tertiary)]"><IconSpinner size={16} />正在读取账户…</p> : <>
         {accounts.length > 0 ? <AccountPicker accounts={accounts} busy={busy} onPick={onPick} onOther={onOther}
         renderIdentity={account => <HomeAccountIdentity account={account}
           profile={session.account && accountKey(session.account) === accountKey(account)
             && (session.profile !== null || session.profileReady) ? session.profile : undefined} />} /> :
-          <button type="button" data-add-server disabled={busy} onClick={onOther} className="btn btn-primary w-full py-2.5">登录</button>}
-        <button type="button" disabled={busy} onClick={onRegister} className="btn btn-quiet mt-3 w-full py-2.5">注册</button>
+          <button type="button" data-add-server disabled={busy} onClick={onOther} className="btn btn-primary auth-submit w-full">登录</button>}
+        <button type="button" disabled={busy} onClick={onRegister} className="btn btn-ghost auth-home-register">注册</button>
       </>}
-      <p className="mt-8 text-xs leading-relaxed text-[var(--ink-tertiary)]">主密码只在本地用于派生密钥，永不发送到服务器。服务器地址和邮箱会留在本机，方便下次连接。</p>
-      {!!session.unlockedAccounts?.length && <p className="mt-3 text-xs text-[var(--ink-tertiary)]">已解锁的账户可以直接进入；返回首页不会退出账户，自动锁定仍按原期限生效。</p>}
-    </div>
-  </main>;
+      </div>
+    </section>
+  </AuthPage>;
 }

@@ -5,7 +5,7 @@ import { Connect } from './screens/Connect';
 import { VaultView } from './screens/VaultView';
 import { Unlock } from './screens/Unlock';
 import { screenFor } from './screens/screen-for';
-import { IconAlert, IconSpinner } from '@1warden/ui';
+import { IconAlert, IconSpinner, readAccounts, readLastAccount } from '@1warden/ui';
 import { ToastProvider } from './components/Toast';
 import { AccountMetadataProvider } from './components/AccountMetadata';
 import { ProfileAutosaveProvider, useProfileAutosave } from './components/ProfileAutosave';
@@ -17,11 +17,11 @@ import { UNSAVED_PROFILE_MESSAGE } from './profile-autosave';
 import type { QuickAccountNavigation, SubscribeQuickAccountNavigation } from './quick-accounts';
 
 /** One application tree; each entry supplies its own runtime. */
-interface AppProps { client: ApplicationClient; subscribeQuickAccountNavigation?: SubscribeQuickAccountNavigation | undefined; openActiveAccount?: boolean | undefined }
-export function App({ client, subscribeQuickAccountNavigation, openActiveAccount }: AppProps) {
-  return <ProfileAutosaveProvider client={client}><AccountMetadataProvider client={client}><ToastProvider><AppContent client={client} subscribeQuickAccountNavigation={subscribeQuickAccountNavigation} openActiveAccount={openActiveAccount} /></ToastProvider></AccountMetadataProvider></ProfileAutosaveProvider>;
+interface AppProps { client: ApplicationClient; subscribeQuickAccountNavigation?: SubscribeQuickAccountNavigation | undefined; openActiveAccount?: boolean | undefined; directEntry?: boolean | undefined }
+export function App({ client, subscribeQuickAccountNavigation, openActiveAccount, directEntry }: AppProps) {
+  return <ProfileAutosaveProvider client={client}><AccountMetadataProvider client={client}><ToastProvider><AppContent client={client} subscribeQuickAccountNavigation={subscribeQuickAccountNavigation} openActiveAccount={openActiveAccount} directEntry={directEntry} /></ToastProvider></AccountMetadataProvider></ProfileAutosaveProvider>;
 }
-function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount }: AppProps) {
+function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount, directEntry }: AppProps) {
   const subscribe = useCallback((listener: () => void) => client.subscribe(listener), [client]);
   const getSnapshot = useCallback(() => client.getSnapshot(), [client]);
   const session = useStoreSnapshot(subscribe, getSnapshot, getSnapshot);
@@ -29,7 +29,7 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
     const ready = false;
     const error = (null) as string | null;
     const attempt = 0;
-    const route = ('home') as 'home' | 'work' | 'register';
+    const route = (directEntry ? 'work' : 'home') as 'home' | 'work' | 'register';
     const entryDraft = undefined as ConnectionDraft | undefined;
     const navigating = false;
     return { ready, error, attempt, route, navigating, entryDraft };
@@ -62,7 +62,21 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
       const draft = await client.connectionDraft?.load().catch(() => null);
       if (alive) {
         const current = client.getSnapshot();
-        if (openActiveAccount && current.status === 'unlocked') { setEntryDraft(undefined); setRoute('work'); }
+        if (directEntry && !draft && !current.account) {
+          const [accounts, lastAccount] = await Promise.all([readAccounts(), readLastAccount()]);
+          const valid = accounts.filter(account => {
+            try { accountKey(account); return true; } catch { return false; }
+          });
+          let preferred = valid[0];
+          if (lastAccount) {
+            try { preferred = valid.find(account => accountKey(account) === accountKey(lastAccount)) ?? preferred; }
+            catch { /* Removed or invalid preferences fall back to a saved identity. */ }
+          }
+          if (!alive) return;
+          if (preferred) await client.switchAccount(preferred);
+          if (!alive) return;
+          setRoute('work');
+        } else if (openActiveAccount && current.status === 'unlocked') { setEntryDraft(undefined); setRoute('work'); }
         else if (draft) { setEntryDraft(draft); setRoute(draft.intent === 'register' ? 'register' : 'work'); }
         else if (openActiveAccount && current.account) setRoute('work');
         setReady(true);
@@ -71,16 +85,16 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
       if (alive) setError(e instanceof Error ? e.message : '无法载入保险库');
     });
     return () => { alive = false; entryOperation.current++; };
-  }, [client, attempt, openActiveAccount]);
+  }, [client, attempt, openActiveAccount, directEntry]);
 
   const handleLock = useCallback(() => {
     void client.lock().catch((e: unknown) => setError(e instanceof Error ? e.message : '锁定失败'));
   }, [client]);
   const screen = screenFor(session.status);
-  async function goHome() {
+  async function goHome(nextRoute: 'home' | 'work' = 'home') {
     if (navigation.current) return;
     entryOperation.current++;
-    navigation.current = true; setNavigating(true); setError(null); setEntryDraft(undefined); setRoute('home');
+    navigation.current = true; setNavigating(true); setError(null); setEntryDraft(undefined); setRoute(nextRoute);
     try {
       if (client.getSnapshot().status !== 'unlocked') await client.switchAccount(null);
       // A mode change may already be persisting its draft. Clear after that
@@ -144,7 +158,7 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
       await saveBeforeLeaving();
       setNavigating(true);
       await client.logout();
-      if (account) autosave?.forget(accountKey(account)); setRoute('home');
+      if (account) autosave?.forget(accountKey(account)); setRoute(directEntry ? 'work' : 'home');
     } catch (e) { setError(e instanceof Error ? e.message : '退出账户失败'); throw e; }
     finally { navigation.current = false; setNavigating(false); }
   }
@@ -160,15 +174,15 @@ function AppContent({ client, subscribeQuickAccountNavigation, openActiveAccount
         </div>
       ) : <>
         {error && <div role="alert" className="fixed bottom-4 left-4 z-50 rounded-[var(--radius-sm)] bg-[var(--surface-overlay)] p-3 text-sm text-[var(--risk)]">{error}</div>}
-        {route === 'home' ? <Home session={session} busy={navigating} onPick={account => { void switchAccount(account).catch(() => {}); }} onOther={() => { void switchAccount(null).catch(() => {}); }} onRegister={() => { void switchAccount(null, 'register').catch(() => {}); }} /> : navigating ? (
+        {route === 'home' ? <Home session={session} busy={navigating} title={directEntry ? '选择账户' : undefined} onPick={account => { void switchAccount(account).catch(() => {}); }} onOther={() => { void switchAccount(null).catch(() => {}); }} onRegister={() => { void switchAccount(null, 'register').catch(() => {}); }} /> : navigating ? (
           // A switch immediately clears the session. Do not mount Connect during
           // that intermediate snapshot: its field effect would create a false draft.
           <div role="status" className="flex h-full items-center justify-center gap-2 bg-[var(--surface-canvas)] text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在切换账户…</div>
-        ) : route === 'register' ? <Register client={client} initialDraft={entryDraft} onHome={goHome} onLogin={showLogin} /> : screen === 'vault' ? (
+        ) : route === 'register' ? <Register client={client} initialDraft={entryDraft} backLabel={directEntry ? '返回登录' : undefined} onHome={() => goHome(directEntry ? 'work' : 'home')} onLogin={showLogin} /> : screen === 'vault' ? (
           <VaultView key={`${session.account?.serverUrl}:${session.account?.email}`} client={client} onLock={handleLock} onSwitchAccount={switchAccount} onLogout={logout} />
         ) : screen === 'unlock' ? (
-          <Unlock client={client} onUnlocked={() => setError(null)} onDisconnect={() => { void goHome(); }} />
-        ) : <Connect client={client} onConnected={() => setError(null)} onHome={goHome} initialCredentials={entryDraft} onRegister={showRegistration} />}
+          <Unlock client={client} directEntry={directEntry} onSwitchAccount={directEntry ? switchAccount : undefined} onUnlocked={() => setError(null)} onDisconnect={() => { void goHome(); }} />
+        ) : <Connect client={client} formOnly={directEntry} onConnected={() => setError(null)} onHome={directEntry ? undefined : goHome} initialCredentials={entryDraft} onRegister={showRegistration} />}
       </>}
     </>
   );

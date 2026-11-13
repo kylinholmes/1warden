@@ -19,7 +19,7 @@ afterEach(() => vi.useRealTimers());
 describe('profile autosave', () => {
   it('keeps appearance edits during verified background sync and saves only after sync finishes', async () => {
     const { store, update, savePreferences } = setup();
-    const preferences = { mode: 'light' as const, palette: 'whale', showTypes: true };
+    const preferences = { mode: 'light' as const, palette: 'whale', showTypes: true, iconStyle: 'original' as const };
     update({ syncing: true, profileReady: false });
     store.editPreferences(preferences);
     expect(store.getSnapshot().preferences.value).toEqual(preferences);
@@ -29,15 +29,79 @@ describe('profile autosave', () => {
     expect(await store.flush()).toEqual({ saved: true, pending: [] });
     expect(savePreferences).toHaveBeenCalledExactlyOnceWith(preferences, null); store.stop();
   });
-  it.each(['initial', 'locked', 'account', 'syncError', 'profileError', 'profileSettingsError'] as const)('does not accept appearance edits during %s unverified sync', reason => {
+  it.each(['initial', 'reunlock', 'account', 'syncError', 'profileError', 'profileSettingsError'] as const)('previews but never writes appearance during %s unverified sync', async reason => {
     const { store, update, client, savePreferences } = setup(reason === 'initial' ? { profileReady: false, syncing: true } : {});
-    if (reason === 'locked') { update({ status: 'locked', profileReady: false }); update({ status: 'unlocked', syncing: true }); }
+    if (reason === 'reunlock') { update({ status: 'locked', profileReady: false }); update({ status: 'unlocked', syncing: true }); }
     if (reason === 'account') update({ account: { ...client.getSnapshot().account!, email: 'b@test.com' }, syncing: true, profileReady: false });
     if (reason.endsWith('Error')) update({ [reason]: 'unverified', syncing: true, profileReady: false });
-    const before = store.getSnapshot().preferences.value;
     store.editPreferences({ mode: 'light', palette: 'whale', showTypes: false });
-    expect(store.getSnapshot().preferences.value).toEqual(before);
+    expect(store.getSnapshot().preferences.value).toMatchObject({ mode: 'light', palette: 'whale', showTypes: false });
+    expect(await store.flush()).toEqual({ saved: false, pending: ['preferences'] });
     expect(savePreferences).not.toHaveBeenCalled(); store.stop();
+  });
+  it('ignores edits while locked or without an account', () => {
+    const { store, update } = setup(); const before = store.getSnapshot();
+    update({ status: 'locked' }); store.editPreferences({ mode: 'dark' }); store.editProfile({ displayName: 'Blocked' });
+    expect(store.getSnapshot().preferences.value).toEqual(before.preferences.value);
+    expect(store.getSnapshot().profile.value).toEqual(before.profile.value);
+    update({ status: 'unlocked', account: null }); store.editPreferences({ mode: 'dark' });
+    expect(store.getSnapshot().preferences.status).toBe('idle'); store.stop();
+  });
+  it('merges only explicit first-sync edits into the newly verified remote preferences and profile', async () => {
+    const { store, update, savePreferences, saveProfile } = setup({ profileReady: false, syncing: true, profile: null });
+    store.editPreferences({ mode: 'light' }); store.editProfile({ displayName: 'Mine' });
+    await store.flush(); expect(savePreferences).not.toHaveBeenCalled(); expect(saveProfile).not.toHaveBeenCalled();
+    const remote = { mode: 'dark' as const, palette: 'dracula', showTypes: false, iconStyle: 'plate' as const };
+    update({ syncing: false, profileReady: true, profileSettings: { preferences: remote, devices: [] },
+      profile: { displayName: 'Remote', avatarDataUrl: 'data:image/png;base64,remote' }, profileVersion: '2' });
+    expect(store.getSnapshot().preferences.value).toEqual({ ...remote, mode: 'light' });
+    await store.flush();
+    expect(savePreferences).toHaveBeenCalledExactlyOnceWith({ ...remote, mode: 'light' }, remote);
+    expect(saveProfile).toHaveBeenCalledExactlyOnceWith({ displayName: 'Mine', avatarDataUrl: 'data:image/png;base64,remote' }, '2'); store.stop();
+  });
+  it('retains the visible migrated appearance when editing an account without remote preferences', async () => {
+    const { store, savePreferences } = setup();
+    const preview = { mode: 'dark' as const, palette: 'dracula', showTypes: false, iconStyle: 'plate' as const };
+    store.editPreferences({ mode: 'dark' }, preview); await store.flush();
+    expect(savePreferences).toHaveBeenCalledExactlyOnceWith(preview, null); store.stop();
+  });
+  it('retains the account-local preview when first sync confirms absent remote preferences', async () => {
+    const { store, update, savePreferences } = setup({ syncing: true, profileReady: false });
+    const preview = { mode: 'dark' as const, palette: 'jade', showTypes: false, iconStyle: 'plate' as const };
+    store.editPreferences({ iconStyle: 'plate' }, preview);
+    update({ syncing: false, profileReady: true, profileSettings: { preferences: null, devices: [] } });
+    await store.flush();
+    expect(savePreferences).toHaveBeenCalledExactlyOnceWith(preview, null); store.stop();
+  });
+  it('allows profile typing during background sync and saves it after verification', async () => {
+    const { store, update, saveProfile } = setup(); update({ syncing: true, profileReady: false });
+    store.editProfile({ displayName: 'Edited while syncing' });
+    expect(store.getSnapshot().profile.value.displayName).toBe('Edited while syncing');
+    await store.flush(); expect(saveProfile).not.toHaveBeenCalled();
+    update({ syncing: false, profileReady: true }); await store.flush();
+    expect(saveProfile).toHaveBeenCalledExactlyOnceWith({ displayName: 'Edited while syncing', avatarDataUrl: null }, '1'); store.stop();
+  });
+  it('retains a preview on save failure and reports known-base remote conflicts instead of overwriting', async () => {
+    const { store, update, savePreferences } = setup();
+    savePreferences.mockRejectedValueOnce(new Error('Synthetic save offline'));
+    store.editPreferences({ mode: 'dark' }); await store.flush();
+    expect(store.getSnapshot().preferences).toMatchObject({ status: 'error', error: 'Synthetic save offline', value: { mode: 'dark' } });
+    await store.retry('preferences'); expect(store.getSnapshot().preferences.status).toBe('saved');
+    update({ syncing: true, profileReady: false }); store.editPreferences({ mode: 'light' });
+    const remote = { mode: 'dark' as const, palette: 'dracula', showTypes: false };
+    update({ syncing: false, profileReady: true, profileSettings: { preferences: remote, devices: [] } }); await store.flush();
+    expect(savePreferences).toHaveBeenCalledTimes(2);
+    expect(store.getSnapshot().preferences).toMatchObject({ status: 'error', value: { mode: 'light' } });
+    store.discard('preferences'); expect(store.getSnapshot().preferences.value).toEqual(remote); store.stop();
+  });
+  it('parks first-sync edits per account and never transfers them to another identity', async () => {
+    const { store, client, update, savePreferences } = setup({ profileReady: false, syncing: true }); const a = client.getSnapshot();
+    store.editPreferences({ mode: 'dark' });
+    update({ account: { ...a.account!, email: 'b@test.com' }, profileReady: true, syncing: false });
+    await store.flush(); expect(savePreferences).not.toHaveBeenCalled();
+    expect(store.getSnapshot().preferences.value.mode).toBe('system');
+    update({ ...a, profileReady: true, syncing: false }); await store.flush();
+    expect(savePreferences).toHaveBeenCalledTimes(1); expect(store.getSnapshot().preferences.value.mode).toBe('dark'); store.stop();
   });
   it('does not postpone a pending save when unrelated ready snapshots arrive', async () => {
     vi.useFakeTimers(); const { store, update, savePreferences } = setup();
@@ -134,7 +198,7 @@ describe('profile autosave', () => {
   });
   it('saves profile and preferences in sequence and preserves unsent locked edits', async () => {
     const { store, client, update, savePreferences } = setup();
-    const preferences = { mode: 'light' as const, palette: 'ayu', showTypes: false };
+    const preferences = { mode: 'light' as const, palette: 'ayu', showTypes: false, iconStyle: 'original' as const };
     store.editProfile({ displayName: 'Together' }); store.editPreferences(preferences); await store.flush();
     expect(client.getSnapshot().profile?.displayName).toBe('Together');
     expect(savePreferences).toHaveBeenCalledExactlyOnceWith(preferences, null);

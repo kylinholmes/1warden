@@ -16,6 +16,7 @@ interface RegisterProps {
   initialDraft: ConnectionDraft | undefined;
   onHome: () => Promise<void>;
   onLogin: (fields: PublicFields) => Promise<void>;
+  backLabel?: string | undefined;
 }
 
 export function Register(props: RegisterProps) {
@@ -25,7 +26,7 @@ export function Register(props: RegisterProps) {
 }
 
 /** Registration never creates a logged-in session or saves unencrypted credentials. */
-function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts }: RegisterProps & { accounts: SavedAccount[] }) {
+function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts, backLabel = '返回首页' }: RegisterProps & { accounts: SavedAccount[] }) {
   const store = useLocalStore(() => ({ serverUrl: initialServerUrl(initialDraft?.serverUrl, accounts), email: initialDraft?.email ?? '', name: '',
     password: '', confirmation: '', step: { kind: 'identity' } as Step,
     busy: false, error: null as string | null, cert: null as CertInfo | null }));
@@ -130,7 +131,7 @@ function RegistrationForm({ client, initialDraft, onHome, onLogin, accounts }: R
   return <main aria-label="注册账户" className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
     <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
       <div className="mb-7 flex items-center gap-2.5"><BrandMark /><span className="text-xl font-semibold">1Warden</span></div>
-      <BackButton label="返回首页" showLabel className="mb-4" onBack={() => { void leave('home'); }} />
+      <BackButton label={backLabel} showLabel className="mb-4" onBack={() => { void leave('home'); }} />
       <h1 className="text-xl font-semibold">{step.kind === 'complete' ? '账户已创建' : step.kind === 'verifyEmail' ? '检查你的邮箱' : step.kind === 'setPassword' ? '设置主密码' : '创建账户'}</h1>
       {cert ? <div className="mt-5"><CertificatePrompt cert={cert} host={new URL(serverUrl).host} busy={busy}
         onCancel={() => setCert(null)} onTrust={() => { void trustAndRetry(); }} /></div> : <>

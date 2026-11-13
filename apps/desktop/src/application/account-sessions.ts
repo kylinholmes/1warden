@@ -166,6 +166,10 @@ export function createAccountSessions(createVault: (onStatus: (status: SessionSt
 
   return {
     service,
+    setAutoLockMs(ms: number) {
+      const retained = new Set([...sessions.values(), active, ...(pending ? [pending.session] : [])]);
+      for (const session of retained) session.vault.getSession().setAutoLockMs(ms);
+    },
     getActiveVault: () => active.vault,
     subscribeActiveVault(listener: () => void) {
       listeners.add(listener);

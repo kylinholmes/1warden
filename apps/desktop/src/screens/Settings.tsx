@@ -4,14 +4,14 @@ import { primaryShortcut, quickShortcut, detectOs } from '../platform';
 import type { ApplicationClient, ApplicationCapabilities } from '../application/types';
 import { BrandMark, FloatingPanel, PageHeader, isCompactLayout, useCompactLayout } from '@1warden/ui';
 import { AccountAppearance } from '../components/AccountAppearance';
+import { SecuritySettings } from '../components/SecuritySettings';
 import { BUILTIN_ICON_COUNTS, BuiltinIcons } from '../components/BuiltinIcons';
 import {
   IconChevronDown, IconInfo, IconKeyboard, IconPalette, IconShield,
 } from '@1warden/ui';
 
 /**
- * 设置面板 —— 容器、分组、交互是真的；**「外观」这一组已经接入**，
- * 其余三组仍是外壳。
+ * 设置面板。外观按账户同步，安全时限由当前设备持久化。
  *
  * ## 为什么先把外壳做扎实
  *
@@ -123,11 +123,11 @@ export function Settings({ client, open, onClose, initialSection, capabilities =
       className="h-[min(520px,calc(100vh-32px))] max-w-[640px]"
       footer={
         <>
-          {/* 底栏按分组说实话：外观那组的主题是真能用的，其余三组还没接 */}
+          {/* 底栏说明当前分组的保存范围。 */}
           <span className="min-w-0 truncate">
             {showingIcons ? '只读目录 · 不会更改密码记录' : showingDirectory ? '1Warden' : section === 'appearance'
               ? '主题与类别显示立即生效并自动同步'
-              : section === 'security' ? '灰色选项暂不可调整'
+              : section === 'security' ? capabilities.browser ? '浏览器扩展的安全设置' : '安全设置仅保存在当前设备'
               : section === 'autofill' ? '在条目详情中使用自动填充'
               : '1Warden'}
           </span>
@@ -211,17 +211,7 @@ export function Settings({ client, open, onClose, initialSection, capabilities =
           className="min-w-0 flex-1 overflow-y-auto px-3 py-4 sm:px-5 outline-none"
         >
           {section === 'security' && (
-            <Group title="安全" hint="锁定与剪贴板的行为">
-              <Row label="解锁后自动锁定" hint="解锁 15 分钟后自动锁定；重新打开界面不会延长期限">
-                <span className="text-md text-[var(--ink-secondary)]">15 分钟</span>
-              </Row>
-              <Row label="复制后清空剪贴板" hint={capabilities.native && detectOs() === 'win'
-                ? '30 秒后清除本次复制；新复制的内容不进入 Windows 剪贴板历史或云同步。已有历史需自行删除。'
-                : '只在剪贴板里还是我们写进去的值时才清'}>
-                <span className="text-md text-[var(--ink-secondary)]">30 秒</span>
-              </Row>
-              <Row label="已泄露密码检查" hint="在安全报告中按需开启检查；只发送 SHA-1 哈希的前 5 个字符" />
-            </Group>
+            <SecuritySettings browser={capabilities.browser} windows={capabilities.native && detectOs() === 'win'} />
           )}
 
           {section === 'appearance' && (showingIcons ? <BuiltinIcons /> : <div className="space-y-6">

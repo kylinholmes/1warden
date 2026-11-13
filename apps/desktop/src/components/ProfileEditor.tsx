@@ -33,7 +33,7 @@ export function ProfileEditor({ client }: { client: ApplicationClient }) {
     } catch (e) { if (epoch === generation.current) setError(e instanceof Error ? e.message : '头像处理失败'); }
     finally { if (epoch === generation.current) setProcessing(false); }
   }
-  const unavailable = snapshot.status !== 'unlocked' || !snapshot.profileReady || !!snapshot.profileError || !!snapshot.profileSettingsError;
+  const unavailable = !store.canEditProfile();
   const disabled = processing || unavailable;
   return <section className="mb-6" aria-labelledby="profile-heading">
     <h2 id="profile-heading" className="sr-only">个人资料编辑</h2>
@@ -57,9 +57,10 @@ export function ProfileEditor({ client }: { client: ApplicationClient }) {
       <input id="profile-name" className="field" maxLength={80} value={draft.displayName} placeholder="怎么称呼你" disabled={disabled}
         onChange={(e) => update({ displayName: e.target.value })} onBlur={() => { void store.flush(); }} />
       <p className="mt-2 text-xs text-[var(--ink-tertiary)]">头像和名称随保险库加密同步，并缓存在本机供锁定时显示。</p>
-      {!snapshot.profileReady && <p role="status" className="mt-2 text-xs text-[var(--ink-secondary)]">{snapshot.syncing ? '正在同步个人资料…' : '个人资料尚未完成同步，请重新解锁后再编辑。'}</p>}
-      {(error || snapshot.profileError || snapshot.profileSettingsError) && <p role="alert" className="mt-2 text-xs text-[var(--risk)]">{error || snapshot.profileError || snapshot.profileSettingsError}</p>}
-      <AutosaveStatus field={field} retry={() => { void store.retry('profile'); }} discard={() => store.discard('profile')} />
+      {!snapshot.profileReady && <p role="status" className="mt-2 text-xs text-[var(--ink-secondary)]">{snapshot.syncing ? '正在同步，修改会在同步完成后保存。' : '个人资料尚未同步，修改暂存在本机。'}</p>}
+      {(error || snapshot.profileError || snapshot.profileSettingsError || snapshot.syncError) && <p role="alert" className="mt-2 text-xs text-[var(--risk)]">{error || snapshot.profileError || snapshot.profileSettingsError || snapshot.syncError}</p>}
+      <AutosaveStatus field={field} canDiscardPending={!snapshot.syncing && (!snapshot.profileReady || !!snapshot.syncError || !!snapshot.profileError || !!snapshot.profileSettingsError)}
+        retry={() => { void store.retry('profile'); }} discard={() => store.discard('profile')} />
     </div>
   </section>;
 }

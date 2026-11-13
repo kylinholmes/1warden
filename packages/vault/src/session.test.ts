@@ -121,6 +121,48 @@ describe('VaultSession — lock 必须清空一切', () => {
 });
 
 describe('VaultSession — 自动锁定', () => {
+  it('changes the deadline relative to the original unlock, without renewing it', () => {
+    vi.useFakeTimers();
+    const s = new VaultSession({ autoLockMs: 1000 });
+    unlockWith(s);
+    vi.advanceTimersByTime(800);
+    s.setAutoLockMs(1500);
+    vi.advanceTimersByTime(699);
+    expect(s.isUnlocked()).toBe(true);
+    vi.advanceTimersByTime(1);
+    expect(s.status).toBe('locked');
+    vi.useRealTimers();
+  });
+
+  it('locks immediately when a shorter duration has already elapsed', () => {
+    vi.useFakeTimers();
+    const onLock = vi.fn();
+    const s = new VaultSession({ autoLockMs: 1000, onLock });
+    const key = makeUserKey();
+    unlockWith(s, [], [], key);
+    vi.advanceTimersByTime(800);
+    s.setAutoLockMs(500);
+    expect(s.status).toBe('locked');
+    expect(key.encKey.every(byte => byte === 0)).toBe(true);
+    vi.advanceTimersByTime(1000);
+    expect(onLock).toHaveBeenCalledTimes(1);
+    vi.useRealTimers();
+  });
+
+  it('uses a changed duration for future unlocks and rejects invalid durations', () => {
+    vi.useFakeTimers();
+    const s = new VaultSession({ autoLockMs: 1000 });
+    s.setAutoLockMs(500);
+    expect(() => s.setAutoLockMs(NaN)).toThrow();
+    expect(() => s.setAutoLockMs(-1)).toThrow();
+    unlockWith(s);
+    vi.advanceTimersByTime(499);
+    s.setAutoLockMs(500);
+    vi.advanceTimersByTime(1);
+    expect(s.status).toBe('locked');
+    vi.useRealTimers();
+  });
+
   it('locks after the configured idle period', () => {
     vi.useFakeTimers();
     const s = new VaultSession({ autoLockMs: 1000 });

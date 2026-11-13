@@ -278,6 +278,13 @@ pub fn run() {
             Ok(())
         });
 
+    #[cfg(target_os = "windows")]
+    let builder = builder.on_page_load(|webview, payload| {
+        if payload.event() == tauri::webview::PageLoadEvent::Started {
+            windows::configure_browser_keys(&webview);
+        }
+    });
+
     // updater 不访问保险库密钥；安装必须通过配置公钥的 minisign 验证。
     // Cargo 依赖和插件初始化都排除 iOS/Android。
     #[cfg(desktop)]

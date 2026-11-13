@@ -1,6 +1,6 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { useCallback, useEffect, useId, useRef } from 'react';
-import { generatePassword, passwordStrength } from '@1warden/crypto';
+import { passwordStrength } from '@1warden/crypto';
 import type { VaultItem, VaultFolder, ItemType } from '@1warden/vault';
 import { emptyBankAccount, emptyDriversLicense, emptyPassport } from '@1warden/vault';
 import { FloatingPanel } from './FloatingPanel';
@@ -307,11 +307,11 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
           ...(value && !CARD_BRANDS.some(([brand]) => brand === value) ? [{ value, label: `已保存：${value}` }] : []),
           ...CARD_BRANDS.map(([value, label]) => ({ value, label }))]} />
       : field.kind === 'secret' || field.id === 'sshKey.privateKey' ? <>
-        <EditorSecretField key={`${open}-${field.id}`} label={field.label} value={value}
+        <EditorSecretField key={`${open}-${field.id}`} label={field.label} value={value} disabled={busy}
           multiline={field.id === 'sshKey.privateKey'}
           placeholder={field.id === 'sshKey.privateKey' ? '-----BEGIN OPENSSH PRIVATE KEY-----' : undefined}
           onChange={value => setDraft(current => updateNativeField(current, field.id, value))}
-          onGenerate={field.id === 'login.password' ? () => setDraft(current => updateNativeField(current, field.id, generatePassword({ length: 20 }))) : undefined} />
+          onGenerate={field.id === 'login.password' ? value => setDraft(current => updateNativeField(current, field.id, value)) : undefined} />
         {field.id === 'login.password' && <StrengthMeter value={value} />}
         {field.id === 'login.totp' && <p className="mt-1 text-xs text-[var(--ink-tertiary)]">otpauth:// 链接，或直接填 base32 密钥</p>}
       </>
@@ -469,6 +469,8 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
         {isNew && <Group title="类型">
           {compact ? <div className="py-2"><Select value={draft.type} aria-label="条目类型" disabled={busy}
             options={TYPE_ORDER.map(type => ({ value: type, label: TYPE_LABEL[type]! }))}
+            renderValue={option => option && <span className="flex items-center gap-2"><span className="type-icon" data-type={option.value}><TypeIcon type={option.value as ItemType} size={17} /></span>{option.label}</span>}
+            renderOption={option => <span className="flex items-center gap-2"><span className="type-icon" data-type={option.value}><TypeIcon type={option.value as ItemType} size={17} /></span>{option.label}</span>}
             onChange={value => changeType(value as ItemType)} /></div>
           : <div className="grid grid-cols-2 gap-2 py-3 @[400px]:grid-cols-4">
             {TYPE_ORDER.map(type => <button key={type} type="button" aria-pressed={draft.type === type}
@@ -476,7 +478,7 @@ export function ItemEditor({ folders, onSave, item, open, onDone, onCancel, onCr
               className={`flex min-w-0 flex-col items-center gap-1.5 rounded-[var(--radius-md)] border px-1 py-3 text-xs ${
                 draft.type === type ? 'border-[var(--accent)] bg-[var(--accent-tint)] text-[var(--ink-primary)]'
                   : 'border-[var(--border-subtle)] text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)]'}`}>
-              <span className={draft.type === type ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}><TypeIcon type={type} size={17} /></span>{TYPE_LABEL[type]}
+              <span className="type-icon" data-type={type}><TypeIcon type={type} size={17} /></span>{TYPE_LABEL[type]}
             </button>)}
           </div>}
         </Group>}

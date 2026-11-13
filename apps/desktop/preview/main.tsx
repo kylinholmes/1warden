@@ -18,6 +18,7 @@ import { ImportScreen } from '../src/screens/Import';
 
 import { Generator } from '../src/screens/Generator';
 import { Connect } from '../src/screens/Connect';
+import { Home } from '../src/screens/Home';
 import { Unlock } from '../src/screens/Unlock';
 import { ToastProvider, useToast, type ToastInput } from '../src/components/Toast';
 import { ItemEditor, installHost } from '@1warden/ui';
@@ -500,14 +501,16 @@ void fakeClient.initialize().then(() => createRoot(document.getElementById('root
       <EditorPreview item={DETAIL} />
     ) : which === 'generator' ? (
       <GeneratorPreview />
+    ) : which === 'home' ? (
+      <Home session={fakeClient.getSnapshot()} busy={false} onPick={() => {}} onOther={() => {}} onRegister={() => {}} />
     ) : which === 'connect' ? (
-      <Connect client={fakeClient} onConnected={() => {}} />
+      <Connect client={fakeClient} onConnected={() => {}} {...(params.has('entry') ? { formOnly: true, onRegister: async () => {} } : {})} />
     ) : which === 'unlock' ? (
-      <Unlock client={fakeClient} onUnlocked={() => {}} onDisconnect={() => {}} />
+      <Unlock client={fakeClient} directEntry onSwitchAccount={async () => {}} onUnlocked={() => {}} onDisconnect={() => {}} />
     ) : which === 'quick-unlock' ? (
       <div style={{ width: '100vw', height: '100vh' }}><QuickInteractionPreview single={params.has('single')} twoFactor={params.has('twoFactor')} /></div>
     ) : which === 'quick' || which === 'quick-locked' ? (
-      <div style={{ width: which === 'quick-locked' ? '100vw' : 620, height: which === 'quick-locked' ? '100vh' : 400 }}>
+      <div style={{ width: which === 'quick-locked' ? '100vw' : 860, height: which === 'quick-locked' ? '100vh' : 480 }}>
         <QuickAccess
           /*
            * ⚠️ 这些字段要和 `QuickItem` 对齐 —— 而**没有类型检查会提醒你**，
@@ -543,6 +546,7 @@ void fakeClient.initialize().then(() => createRoot(document.getElementById('root
           notice={null}
           onQueryChange={() => {}}
           onPick={() => {}}
+            onOpenMain={() => {}}
           onClose={() => {}}
         />
       </div>

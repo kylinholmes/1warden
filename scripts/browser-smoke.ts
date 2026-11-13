@@ -339,7 +339,7 @@ try {
   await popup.waitForSelector('main button');
   await popup.waitForSelector('[data-add-server]');
   check('empty home offers login and registration', await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录')
-    && await popup.$eval('h1', (node: Element) => node.textContent === '你的密码，从这里开始')
+    && await popup.$eval('h1', (node: Element) => node.textContent === '登录你的保险库')
     && await popup.evaluate(() => [...document.querySelectorAll('button')].some(button => button.textContent?.trim() === '注册')));
   await popup.waitForFunction(() => [...document.querySelectorAll<HTMLImageElement>('[data-brand-mark]')].every(node => node.complete && node.naturalWidth > 0));
   check('production brand asset loads inside extension CSP', await popup.$eval('[data-brand-mark]', (node: HTMLImageElement) => node.complete && node.naturalWidth > 0));
@@ -367,7 +367,7 @@ try {
   await popup.waitForSelector('input[type="email"]', { visible: true });
   await click('[aria-label="返回上一级"]');
   await popup.waitForSelector('main li button');
-  check('populated home retains account selection and another-account login', await popup.$eval('h1', (node: Element) => node.textContent === '欢迎回来')
+  check('populated home retains account selection and another-account login', await popup.$eval('h1', (node: Element) => node.textContent === '登录你的保险库')
     && await popup.$eval('[data-add-server]', (node: Element) => node.textContent?.trim() === '登录其他账户'));
   await click('main li button');
   await popup.waitForSelector('[aria-label="搜索条目"]', { visible: true });

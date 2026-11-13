@@ -3,36 +3,21 @@ import { ProfileAvatar } from '../components/ProfileAvatar';
 import { useEffect, useRef, type FormEvent } from 'react';
 import type { ApplicationClient } from '../application/types';
 import type { TwoFactorChallenge } from '@1warden/vault';
-import { BackButton, IconAlert, IconGlobe, IconSpinner, ServerSpeed, TwoFactorForm } from '@1warden/ui';
-import { twoFactorChallenge, twoFactorErrorMessage } from './auth-error';
+import { BackButton, IconAlert, IconGlobe, IconSpinner, PasswordInput, ServerSpeed, TwoFactorForm, type SavedAccount } from '@1warden/ui';
+import { authenticationErrorMessage, twoFactorChallenge, twoFactorErrorMessage } from './auth-error';
+import { AuthPage } from '../components/AuthPage';
+import { AuthAccountSwitcher } from '../components/AuthAccountSwitcher';
 
 interface Props {
   client: ApplicationClient;
   onUnlocked: () => void;
   onDisconnect: () => void;
+  directEntry?: boolean | undefined;
+  onSwitchAccount?: ((account: SavedAccount | null) => Promise<void>) | undefined;
 }
 
-/**
- * 已登录但被锁定时的解锁屏。
- *
- * 与连接屏的区别：这里已经有账户信息了，只需要主密码。
- * 这个区分很重要 —— 解锁是高频动作，不该每次都让用户面对一整张表单。
- *
- * ── 动效
- *
- * 这一屏只有一处动效：按下解锁之后，头像外圈开始缓缓扩散（`.breathe`），
- * 直到保险库出现。
- *
- * 它存在的理由是**等待**：派生密钥加一次网络往返接近一秒，
- * 界面在这段时间里完全不动的话，用户会以为没点上然后再点一次。
- * 所以动效回答的是「收到了，正在开」，而不是「看我会动」。
- *
- * 刻意没做「解锁成功再播一段动画然后才进保险库」：那会让每一次解锁都
- * 慢上半秒，而解锁是这个应用里最高频的动作。**该快的地方不快，
- * 就是在用别人的时间换自己的好看。** 进保险库的爽感由保险库本身的
- * 淡入承担（`.screen-in`）。
- */
-export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
+/** Saved-account unlock shares the login page's layout and asks only for the secret. */
+export function Unlock({ client, onUnlocked, onDisconnect, directEntry, onSwitchAccount }: Props) {
   const viewStore = useLocalStore(() => {
     const password = '';
     const busy = false;
@@ -67,7 +52,7 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
       if (version !== operation.current) return;
       const nextChallenge = twoFactorChallenge(err);
       if (nextChallenge) setChallenge(nextChallenge);
-      else setError(messageOf(err));
+      else setError(authenticationErrorMessage(err));
       setPassword('');
       // Focus is restored after React has re-enabled the input.
     } finally {
@@ -86,43 +71,48 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
     } catch (err) {
       if (version !== operation.current) return;
       if ((err as { kind?: string } | null)?.kind === 'authRestartRequired') setChallenge(null);
-      setError(twoFactorErrorMessage(err, messageOf));
+      setError(twoFactorErrorMessage(err, authenticationErrorMessage));
     } finally { if (version === operation.current) setBusy(false); }
   }
 
   return (
     /* 整块背景可拖 —— 和连接屏同理，这一屏没有顶部带子（见 Connect.tsx） */
-    <main className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
-      <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
-        <h1 className="sr-only">{challenge ? '两步验证，解锁保险库' : '解锁保险库'}</h1>
-        <BackButton label="返回首页" showLabel className="mb-6" onBack={() => { operation.current++; setPassword(''); onDisconnect(); }} />
-        <div className="flex flex-col items-center text-center">
-          <ProfileAvatar profile={profile} fallback={account?.email ?? ''} className={`mb-4 h-16 w-16 text-xl ${busy ? 'breathe' : ''}`} />
-          <p className="text-md font-medium">{profile?.displayName || account?.email}</p>
-          {profile?.displayName && <p className="mt-1 text-xs text-[var(--ink-secondary)]">{account?.email}</p>}
+    <AuthPage>
+      <section className="auth-connect auth-unlock">
+        {!directEntry && <BackButton label="返回首页" showLabel className="auth-back" onBack={() => { operation.current++; setPassword(''); onDisconnect(); }} />}
+        <h1 className="auth-title">{challenge ? '两步验证，解锁保险库' : '解锁保险库'}</h1>
+        <div className="auth-unlock-grid">
+        <div className="auth-unlock-account">
+        {directEntry && account && onSwitchAccount ? <AuthAccountSwitcher account={account} profile={profile}
+          onChoose={async target => { operation.current++; setPassword(''); setError(null); setChallenge(null); await onSwitchAccount(target); }} /> : <div className="auth-unlock-identity">
+          <ProfileAvatar profile={profile} fallback={account?.email ?? ''} className="h-9 w-9 text-md" />
+          <div className="min-w-0 flex-1"><p className="truncate text-md font-medium">{profile?.displayName || account?.email}</p>
+          {profile?.displayName && <p className="mt-1 truncate text-xs text-[var(--ink-secondary)]">{account?.email}</p>}
           <p className="mt-1 flex items-center gap-1.5 text-xs text-[var(--ink-tertiary)]">
             <IconGlobe size={12} className="shrink-0" />
             <span className="truncate">{hostOf(account?.serverUrl ?? '')}</span>
-          </p>
+          </p></div>
+        </div>}
+
+        {!challenge && account && <ServerSpeed collapsible serverUrl={account.serverUrl} disabled={busy} />}
         </div>
-
-        {!challenge && account && <div className="mt-5"><ServerSpeed serverUrl={account.serverUrl} disabled={busy} /></div>}
-
-        {challenge ? <div className="mt-7"><TwoFactorForm providers={challenge.providers} busy={busy}
+        <div className="auth-unlock-action">
+        {challenge ? <div><TwoFactorForm providers={challenge.providers} busy={busy}
           onSubmit={({ code, provider, remember }) => { void submitCode(code, provider, remember); }} /></div>
-          : <form onSubmit={submit} className="mt-7 space-y-3">
-          <input
+          : <form onSubmit={submit} className="auth-unlock-form">
+          <div><label className="auth-field-label" htmlFor="unlock-password">主密码</label>
+          <PasswordInput
             ref={inputRef}
             id="unlock-password"
-            type="password" required value={password} disabled={busy}
+            required value={password} disabled={busy} autoComplete="current-password"
             onChange={(e) => setPassword(e.target.value)}
-            placeholder="主密码"
+            placeholder="输入主密码"
             aria-label="主密码"
-            className="field secret py-2.5 text-center"
-          />
+            aria-invalid={!!error} aria-describedby={error ? 'unlock-error' : undefined}
+          /></div>
           <button
             type="submit" disabled={busy || password.length === 0}
-            className="btn btn-primary w-full py-2.5"
+            className="btn btn-primary auth-submit w-full"
           >
             {busy && <IconSpinner size={15} />}
             {busy ? '解锁中…' : '解锁'}
@@ -130,29 +120,19 @@ export function Unlock({ client, onUnlocked, onDisconnect }: Props) {
         </form>}
 
         {error && (
-          <p role="alert" className="mt-4 flex items-start justify-center gap-2 text-sm text-[var(--risk)]">
+          <p id="unlock-error" role="alert" className="mt-4 flex items-start gap-2 text-sm text-[var(--risk)]">
             <IconAlert size={15} className="mt-0.5 shrink-0" />
             <span>{error}</span>
           </p>
         )}
-
-      </div>
-    </main>
+        </div>
+        </div>
+      </section>
+    </AuthPage>
   );
 }
 
 /** 只用于展示的主机名 —— 真正的解析在 Rust 侧，这里不参与逻辑 */
 function hostOf(url: string): string {
   try { return new URL(url).host; } catch { return url; }
-}
-
-function messageOf(err: unknown): string {
-  const kind = (err as { kind?: string } | null)?.kind;
-  switch (kind) {
-    case 'network': return '连不上服务器';
-    case 'timeout': return '服务器响应超时';
-    case 'auth': return '主密码不正确';
-    case 'rateLimited': return '尝试过于频繁，请稍后再试';
-    default: return err instanceof Error ? err.message : '解锁失败';
-  }
 }

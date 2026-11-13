@@ -28,13 +28,15 @@ let root: Root;
 let node: HTMLDivElement;
 let request: ReturnType<typeof vi.fn>;
 let saved: string | null;
+let lastAccount: string | null;
 (globalThis as Record<string, unknown>).IS_REACT_ACT_ENVIRONMENT = true;
 beforeEach(() => {
   probe.mockReset();
   probe.mockImplementation(async (serverUrl: string) => ({ serverUrl, latencyMs: 42, samples: 3, download: null, downloadNote: null }));
   request = vi.fn();
   saved = null;
-  installHost({ fetch: request as typeof fetch, storage: { get: async key => key === '1warden.accounts' ? saved : null, set: async () => {}, remove: async () => {} } });
+  lastAccount = null;
+  installHost({ fetch: request as typeof fetch, storage: { get: async key => key === '1warden.accounts' ? saved : key === '1warden.lastAccount' ? lastAccount : null, set: async () => {}, remove: async () => {} } });
   node = document.createElement('div'); document.body.append(node); root = createRoot(node);
 });
 afterEach(async () => { await act(() => root.unmount()); node.remove(); resetHost(); });
@@ -55,7 +57,7 @@ async function click(text: string) {
   await act(() => button.click());
 }
 async function input(label: string, value: string) {
-  const field = [...node.querySelectorAll('label')].find(item => item.textContent?.startsWith(label))?.querySelector('input');
+  const field = [...node.querySelectorAll('label')].find(item => item.textContent?.startsWith(label))?.control as HTMLInputElement | null | undefined;
   if (!field) throw new Error(`Missing field ${label}`);
   await act(() => {
     Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!.call(field, value);
@@ -63,7 +65,7 @@ async function input(label: string, value: string) {
   });
 }
 function value(label: string) {
-  return [...node.querySelectorAll('label')].find(item => item.textContent?.startsWith(label))?.querySelector('input')?.value;
+  return ([...node.querySelectorAll('label')].find(item => item.textContent?.startsWith(label))?.control as HTMLInputElement | null | undefined)?.value;
 }
 async function submit() { await act(() => node.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }))); }
 async function chooseServer(choice: string) {
@@ -74,6 +76,83 @@ async function chooseServer(choice: string) {
 }
 
 describe('login and registration entry', () => {
+  it('opens desktop login directly without an account-home step or a back button', async () => {
+    const test = client();
+    await act(() => root.render(createElement(App, { client: test.value, directEntry: true })));
+    expect(node.querySelector('input[type="email"]')).not.toBeNull();
+    expect(node.querySelector('input[type="password"]')).not.toBeNull();
+    expect(node.querySelector('[aria-label="账户首页"]')).toBeNull();
+    expect(node.querySelector('[data-page-back]')).toBeNull();
+    expect(test.value.switchAccount).not.toHaveBeenCalled();
+  });
+  it('opens the latest valid saved account directly at its unlock field', async () => {
+    const target = { serverUrl: 'https://saved.example', email: 'saved@example.test' };
+    saved = JSON.stringify([{ serverUrl: 'invalid', email: 'bad' }, target]);
+    const test = client(); let snapshot = EMPTY_SNAPSHOT;
+    test.value.getSnapshot = () => snapshot;
+    test.value.switchAccount = vi.fn(async account => {
+      snapshot = { ...EMPTY_SNAPSHOT, status: 'locked', account: { ...account!, userId: '', kdf: { kdf: 0, iterations: 1000 } } };
+    });
+    await act(() => root.render(createElement(App, { client: test.value, directEntry: true })));
+    expect(test.value.switchAccount).toHaveBeenCalledExactlyOnceWith(target);
+    expect(node.querySelector('#unlock-password')).not.toBeNull();
+    expect(node.querySelector('[aria-label="账户首页"]')).toBeNull();
+    expect(node.querySelector('[data-page-back]')).toBeNull();
+    expect(node.querySelector('[aria-label="切换账户"]')).not.toBeNull();
+  });
+  it('returns from registration to the direct login form', async () => {
+    const test = client();
+    await act(() => root.render(createElement(App, { client: test.value, directEntry: true })));
+    await click('创建账户');
+    await act(() => node.querySelector<HTMLButtonElement>('[aria-label="返回登录"]')!.click());
+    expect(node.querySelector('input[type="email"]')).not.toBeNull();
+    expect(node.querySelector('[aria-label="账户首页"]')).toBeNull();
+    expect(node.querySelector('[data-page-back]')).toBeNull();
+  });
+  it.each(['saved', 'removed', 'invalid', 'corrupt'] as const)('restores the last account with a safe fallback when the preference is %s', async preference => {
+    const first = { serverUrl: 'https://one.example', email: 'same@example.test' };
+    const second = { serverUrl: 'https://two.example', email: 'same@example.test' };
+    saved = JSON.stringify([first, second]);
+    lastAccount = preference === 'saved' ? JSON.stringify({ serverUrl: 'HTTPS://TWO.EXAMPLE/', email: ' SAME@EXAMPLE.TEST ' })
+      : preference === 'removed' ? JSON.stringify({ ...second, serverUrl: 'https://removed.example' })
+        : preference === 'invalid' ? JSON.stringify({ ...second, serverUrl: 'file:///invalid' }) : 'broken json';
+    const test = client(); let snapshot = EMPTY_SNAPSHOT;
+    test.value.getSnapshot = () => snapshot;
+    test.value.switchAccount = vi.fn(async account => {
+      snapshot = { ...EMPTY_SNAPSHOT, status: 'locked', account: { ...account!, userId: '', kdf: { kdf: 0, iterations: 1000 } } };
+    });
+    await act(() => root.render(createElement(App, { client: test.value, directEntry: true })));
+    expect(test.value.switchAccount).toHaveBeenCalledExactlyOnceWith(preference === 'saved' ? second : first);
+    expect(node.querySelector('#unlock-password')).not.toBeNull();
+    expect(node.querySelector('[aria-label="账户首页"]')).toBeNull();
+  });
+  it('switches identities from the full account dropdown and opens Add Account directly', async () => {
+    const first = { serverUrl: 'https://one.example', email: 'same@example.test' };
+    const second = { serverUrl: 'https://two.example', email: 'same@example.test' };
+    saved = JSON.stringify([first, second]);
+    const test = client(); let snapshot = EMPTY_SNAPSHOT;
+    test.value.getSnapshot = () => snapshot;
+    test.value.switchAccount = vi.fn(async account => {
+      snapshot = account ? { ...EMPTY_SNAPSHOT, status: 'locked', account: { ...account, userId: '', kdf: { kdf: 0, iterations: 1000 } } } : EMPTY_SNAPSHOT;
+    });
+    await act(() => root.render(createElement(App, { client: test.value, directEntry: true })));
+    await input('主密码', 'unfinished-first-password');
+    await act(() => node.querySelector<HTMLButtonElement>('[aria-label="切换账户"]')!.click());
+    const list = node.querySelector('[role="listbox"]')!;
+    expect(list.textContent).toContain(first.serverUrl.replace('https://', ''));
+    expect(list.textContent).toContain(second.serverUrl.replace('https://', ''));
+    await act(() => ([...list.querySelectorAll<HTMLElement>('[role="option"]')].find(option => option.textContent?.includes('two.example')))!.click());
+    expect(test.value.switchAccount).toHaveBeenLastCalledWith(second);
+    expect(node.querySelector<HTMLInputElement>('#unlock-password')!.value).toBe('');
+    expect(node.querySelector('[aria-label="账户首页"]')).toBeNull();
+    const trigger = node.querySelector<HTMLButtonElement>('[aria-label="切换账户"]')!;
+    await act(() => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowDown', bubbles: true, cancelable: true })));
+    await act(() => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'End', bubbles: true, cancelable: true })));
+    await act(() => trigger.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true })));
+    expect(test.value.switchAccount).toHaveBeenLastCalledWith(null);
+    expect(node.querySelector('input[type="email"]')).not.toBeNull();
+    expect(node.querySelector('[aria-label="账户首页"]')).toBeNull();
+  });
   it('opens the active extension vault directly so pending capture review is visible', async () => {
     const test = client();
     const snapshot = { ...EMPTY_SNAPSHOT, status: 'unlocked' as const,
@@ -291,9 +370,9 @@ describe('login and registration entry', () => {
     await click('创建账户');
     expect(held).toBe(true);
     await click('返回上一级');
-    expect(node.querySelector('h1')?.textContent).toBe('你的密码，从这里开始');
+    expect(node.querySelector('h1')?.textContent).toBe('登录你的保险库');
     await act(async () => { release(); await pending; });
-    expect(node.querySelector('h1')?.textContent).toBe('你的密码，从这里开始');
+    expect(node.querySelector('h1')?.textContent).toBe('登录你的保险库');
     expect(test.draft()).toBeNull();
   });
   it('starts with login and registration choices, then preserves public fields across both flows', async () => {

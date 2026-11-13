@@ -282,11 +282,11 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
     };
   }, [detailOpen]);
   useEffect(() => {
-    if (focusSearchAfterNavigation.current && !detailOpen && !fullWidth) {
+    if (focusSearchAfterNavigation.current && !detailOpen && !fullWidth && !settingsOpen) {
       focusSearchAfterNavigation.current = false;
       searchRef.current?.focus();
     }
-  }, [detailOpen, fullWidth]);
+  }, [detailOpen, fullWidth, settingsOpen]);
 
   /**
    * 有没有浮层压在上面。
@@ -325,25 +325,30 @@ export function VaultView({ client, onLock, onSwitchAccount, onLogout }: Props) 
   // ⌘F 聚焦搜索；⌘L 锁定；⌘N 新建；⌘, 设置 —— 键盘优先是安全工具的基本要求
   useEffect(() => {
     function onKey(e: KeyboardEvent) {
-      // 浮层开着时这些快捷键全部让路：焦点在浮层里，
-      // 而 ⌘F 会把焦点抢到背后的搜索框上 —— 那就是焦点跑到模态外面去了
-      if (overlayOpen || (transferBusy.current && e.key.toLowerCase() !== 'l')) return;
-      if (!(e.metaKey || e.ctrlKey)) return;
-      if (e.key.toLowerCase() === 'f') {
+      if (e.isComposing || e.altKey || !(e.metaKey || e.ctrlKey)) return;
+      const key = e.key.toLowerCase();
+      // Lock stays available while a dialog or transfer owns the rest of the UI.
+      if (key === 'l') { e.preventDefault(); onLock(); return; }
+      if (key === 'f') {
         e.preventDefault();
-        if (detailOpen || fullWidth) {
+        // Settings can yield to vault search; editors and other modal tasks
+        // retain their draft/focus instead of falling through to browser Find.
+        if (transferBusy.current || (overlayOpen && !settingsOpen)) return;
+        if (settingsOpen) setSettingsOpen(false);
+        if (detailOpen || fullWidth || settingsOpen) {
           focusSearchAfterNavigation.current = true;
           setSelectedId(null);
           if (fullWidth) setCategory({ kind: 'all' });
         } else searchRef.current?.focus();
+        return;
       }
-      if (e.key === 'l') { e.preventDefault(); onLock(); }
-      if (e.key === 'n') { e.preventDefault(); setMode({ kind: 'new' }); }
-      if (e.key === ',') { e.preventDefault(); setSettingsOpen(true); }
+      if (overlayOpen || transferBusy.current) return;
+      if (key === 'n') { e.preventDefault(); setMode({ kind: 'new' }); }
+      if (key === ',') { e.preventDefault(); setSettingsOpen(true); }
     }
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [onLock, overlayOpen, detailOpen, fullWidth]);
+  }, [onLock, overlayOpen, detailOpen, fullWidth, settingsOpen]);
 
   const sidebar = (
     <Sidebar

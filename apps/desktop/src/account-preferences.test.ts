@@ -33,12 +33,23 @@ describe('account presentation projection', () => {
     receive({ ...unlocked, profileSettings: { ...settings, preferences: remote } });
     expect(apply).toHaveBeenLastCalledWith(remote);
   });
-  it('does not apply absent settings until verified sync and reapplies after unlock', () => {
-    const { receive, apply } = fixture();
-    receive({ ...unlocked, profileReady: false }); expect(apply).not.toHaveBeenCalled();
-    receive({ ...unlocked, profileSettingsError: 'future' }); expect(apply).not.toHaveBeenCalled();
+  it('previews account-local settings without persisting before verified sync and reapplies after unlock', () => {
+    const { receive, apply, values } = fixture();
+    receive({ ...unlocked, profileReady: false }); expect(apply).toHaveBeenLastCalledWith(legacy); expect(values.size).toBe(0);
+    receive({ ...unlocked, profileSettingsError: 'future' }); expect(apply).toHaveBeenCalledTimes(1); expect(values.size).toBe(0);
     receive(unlocked); receive({ ...unlocked, status: 'locked' }); receive(unlocked);
-    expect(apply).toHaveBeenCalledTimes(2);
+    expect(apply).toHaveBeenCalledTimes(3);
+  });
+  it('uses a new account cache or defaults while unverified, never the previous account appearance', () => {
+    const { receive, apply, values } = fixture(); receive({ ...unlocked, profileSettings: { preferences: legacy, devices: [] } });
+    const b = { ...account, email: 'b@example.com' };
+    const bKey = `1warden.preferences.v1.${JSON.stringify([b.serverUrl, b.email])}`;
+    receive({ ...unlocked, account: b, profileReady: false, syncing: true });
+    expect(apply).toHaveBeenLastCalledWith(DEFAULT_PROFILE_PREFERENCES); expect(values.has(bKey)).toBe(false);
+    const cached = { ...legacy, mode: 'light' as const, palette: 'brass' };
+    values.set(bKey, JSON.stringify(cached)); receive(unlocked);
+    receive({ ...unlocked, account: b, profileReady: false, syncing: true });
+    expect(apply).toHaveBeenLastCalledWith(cached);
   });
   it('treats corrupt caches as untrusted and clears the presentation cache on logout', () => {
     const { receive, values } = fixture();

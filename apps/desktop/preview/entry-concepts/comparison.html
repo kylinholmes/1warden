@@ -1,0 +1,16 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8" /><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" /><title>1Warden · 三种结构对比</title><link rel="stylesheet" href="./gallery.css" /></head>
+<body><main class="comparison"><header><div><h1 id="title">登录与解锁结构对比</h1><p>相同主题，比较信息层级、账户选择与主密码输入方式。</p></div><a href="./">打开交互预览 ↗</a></header><div class="comparison-grid" id="grid"></div><p class="comparison-foot">1Warden · 结构提案 · 虚构账户数据 · 界面原型，未替换正式页面</p></main>
+<script type="module">
+  const surface = new URLSearchParams(location.search).get('surface') === 'quick' ? 'quick' : 'login';
+  const device = new URLSearchParams(location.search).get('device');
+  const quick = surface === 'quick';
+  const width = quick ? device === 'mobile' ? 360 : 620 : device === 'desktop' ? 960 : 390;
+  const height = quick ? 400 : 760;
+  const names = ['A · 聚焦表单', 'B · 明确分区', 'C · 账户优先'];
+  const copy = quick ? ['紧凑账户切换，直接输入主密码。', '账户与密码分区，窄窗口自动折叠。', '主密码在选中的账户下展开。'] : ['单页表单，服务器信息按需展开。', '服务器与账户分步，当前为第 2 步。', '回访解锁优先，保留新账户登录。'];
+  document.getElementById('title').textContent = `${quick ? '快捷解锁' : '登录页'} · ${width}px · 三种结构`;
+  document.getElementById('grid').innerHTML = names.map((name,index) => `<section><h2>${name}</h2><p class="caption">${copy[index]}</p><div class="frame-space"><iframe title="${name}" src="./concept.html?surface=${surface}&variant=${'abc'[index]}&theme=light" style="width:${width}px;height:${height}px"></iframe></div></section>`).join('');
+  function fit() { document.querySelectorAll('.frame-space').forEach(box => { const scale = Math.min(1,box.parentElement.clientWidth/width); box.style.width = `${width*scale}px`;box.style.height = `${height*scale}px`;box.firstElementChild.style.transform = `scale(${scale})`; }); }
+  new ResizeObserver(fit).observe(document.getElementById('grid'));fit();
+</script></body></html>

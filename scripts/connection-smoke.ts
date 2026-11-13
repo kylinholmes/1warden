@@ -70,7 +70,7 @@ try {
     await page.waitForSelector(selector, { timeout: 10_000 });
   }
   await open('[data-add-server]');
-  check(await page.$eval('h1', (node: Element) => node.textContent) === '你的密码，从这里开始'
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '登录你的保险库'
     && await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim()) === '登录'
     && await page.evaluate(() => [...document.querySelectorAll('button')].some(button => button.textContent?.trim() === '注册')),
     'empty account home offers login and registration');
@@ -174,7 +174,7 @@ try {
   });
   await page.close();
   await open('h1');
-  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '欢迎回来');
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '登录你的保险库');
   check(await page.$eval('[data-add-server]', (node: Element) => node.textContent?.trim()) === '登录其他账户',
     'remembered accounts offer another-account login');
   await page.evaluate(() => new Promise((resolve) => setTimeout(resolve, 150)));
@@ -184,7 +184,7 @@ try {
   }), 'opening the account picker does not silently select or save its first account');
   await page.close();
   await open('h1');
-  check(await page.$eval('h1', (node: Element) => node.textContent) === '欢迎回来',
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '登录你的保险库',
     'reopening keeps the account picker until an account is chosen');
   async function back() {
     const button = await page.evaluateHandle(() => document.querySelector('[aria-label="返回上一级"]'));
@@ -211,7 +211,7 @@ try {
   await page.evaluate(() => (document.querySelector('button[type="submit"]') as HTMLButtonElement).click());
   await page.waitForSelector('[role="alert"]');
   await back();
-  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '欢迎回来');
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '登录你的保险库');
   check(await page.$('[role="alert"]') === null, 'Back removes the abandoned login error');
   await page.waitForFunction(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
@@ -224,12 +224,12 @@ try {
   await page.close();
   await open('h1');
   const afterBackHeading = await page.$eval('h1', (node: Element) => node.textContent);
-  if (afterBackHeading !== '欢迎回来') console.error(await page.evaluate(async () => {
+  if (afterBackHeading !== '登录你的保险库') console.error(await page.evaluate(async () => {
     const api = (globalThis as any).browser ?? (globalThis as any).chrome;
     return { heading: document.querySelector('h1')?.textContent,
       draft: (await api.storage.session.get('1warden.connectionDraft'))['1warden.connectionDraft'] };
   }));
-  check(afterBackHeading === '欢迎回来',
+  check(afterBackHeading === '登录你的保险库',
     'Back clears the draft so a reopened popup returns to the picker');
 
   await otherServer();
@@ -246,7 +246,7 @@ try {
   while (!releaseFailure && Date.now() < heldRequestDeadline) await Bun.sleep(10);
   check(Boolean(releaseFailure), 'login request is still pending when Back is pressed');
   await back();
-  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '欢迎回来'
+  await page.waitForFunction(() => document.querySelector('h1')?.textContent === '登录你的保险库'
     && [...document.querySelectorAll('button')].every(button => !button.disabled));
   holdFailure = false;
   (releaseFailure as unknown as () => void)();
@@ -268,7 +268,7 @@ try {
   await open();
   await back();
   await page.waitForSelector('main li button');
-  check(await page.$eval('h1', (node: Element) => node.textContent) === '欢迎回来',
+  check(await page.$eval('h1', (node: Element) => node.textContent) === '登录你的保险库',
     'Back from a resumed Add Account draft returns to the common account home');
   await page.evaluate(() => [...document.querySelectorAll<HTMLButtonElement>('main li button')]
     .find(button => button.textContent?.includes('first@example.invalid'))!.click());

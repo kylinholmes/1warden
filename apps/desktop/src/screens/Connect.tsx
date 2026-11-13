@@ -3,11 +3,12 @@ import { useCallback, useEffect, useRef } from 'react';
 import type { TwoFactorChallenge } from '@1warden/vault';
 import type { ApplicationClient, ConnectionDraft } from '../application/types';
 import type { CertInfo } from '../trust';
-import { twoFactorChallenge, twoFactorErrorMessage } from './auth-error';
+import { authenticationErrorMessage, twoFactorChallenge, twoFactorErrorMessage } from './auth-error';
 import {
-  ConnectScreen, BrandMark, IconSpinner, apiMessageOf, initialServerUrl, rememberAccount, useAccounts,
+  ConnectScreen, IconSpinner, apiMessageOf, initialServerUrl, rememberAccount, useAccounts,
   type ConnectCreds, type SavedAccount,
 } from '@1warden/ui';
+import { AuthPage } from '../components/AuthPage';
 
 /**
  * 连接 / 解锁 —— **桌面端这里只剩外壳和平台专有的那一屏**。
@@ -27,7 +28,8 @@ import {
 interface Props {
   client: ApplicationClient;
   onConnected: () => void;
-  onHome?: () => Promise<void>;
+  onHome?: (() => Promise<void>) | undefined;
+  formOnly?: boolean | undefined;
   initialCredentials?: Pick<ConnectCreds, 'serverUrl' | 'email'> | undefined;
   onRegister?: ((draft: ConnectionDraft) => Promise<void>) | undefined;
 }
@@ -36,7 +38,7 @@ function isCertUntrusted(e: unknown): e is { kind: 'certUntrusted'; fingerprint?
   return (e as { kind?: string } | null)?.kind === 'certUntrusted';
 }
 
-export function Connect({ client, onConnected, onHome, initialCredentials, onRegister }: Props) {
+export function Connect({ client, onConnected, onHome, initialCredentials, onRegister, formOnly }: Props) {
   const accounts = useAccounts();
 
   const viewStore = useLocalStore(() => {
@@ -151,7 +153,7 @@ export function Connect({ client, onConnected, onHome, initialCredentials, onReg
         setPending(c);
         await offerCertificate(c.serverUrl, version);
       } else {
-        const message = apiMessageOf(err);
+        const message = authenticationErrorMessage(err, 'login');
         setError(message);
         rememberError(message, c);
       }
@@ -193,7 +195,7 @@ export function Connect({ client, onConnected, onHome, initialCredentials, onReg
     } catch (err) {
       if (!mounted.current || version !== operation.current || leaving.current) return;
       if ((err as { kind?: string } | null)?.kind === 'authRestartRequired') setChallenge(null);
-      setError(twoFactorErrorMessage(err, apiMessageOf));
+      setError(twoFactorErrorMessage(err, error => authenticationErrorMessage(error, 'login')));
     } finally {
       if (mounted.current && version === operation.current) setBusy(false);
     }
@@ -229,13 +231,14 @@ export function Connect({ client, onConnected, onHome, initialCredentials, onReg
       不带值的写法只在**正好按在那张元素本身**时才拖 —— 而这一屏的
       背景几乎都被卡片盖着，那样等于哪儿都拖不动。
     */
-    <main className="below-titlebar flex h-full flex-col items-center overflow-y-auto bg-[var(--surface-canvas)] p-8" data-tauri-drag-region="deep">
-      <div className="screen-in my-auto w-full max-w-[380px] shrink-0">
+    <AuthPage>
         {restored === undefined || accounts === null ? <><h1 className="sr-only">登录你的保险库</h1><p className="flex items-center gap-2 text-sm text-[var(--ink-secondary)]"><IconSpinner size={16} />正在恢复表单…</p></> : <ConnectScreen
           accounts={accounts}
-          initialCredentials={initialCredentials ?? restored ?? (onHome ? { serverUrl: initialServerUrl(undefined, accounts), email: '' } : undefined)}
+          initialCredentials={initialCredentials ?? restored ?? (onHome || formOnly ? { serverUrl: initialServerUrl(undefined, accounts), email: '' } : undefined)}
           onCredentialsChange={rememberFields}
           canGoBack={!!onHome || Boolean(restored?.returnAccount)}
+          allowAccountPicker={!formOnly}
+          backLabel={formOnly ? '返回账户' : '返回上一级'}
           onBack={() => {
             if (!onHome) { void navigate(currentDraft.current?.returnAccount ?? null); return; }
             const version = ++operation.current; leaving.current = true;
@@ -256,12 +259,6 @@ export function Connect({ client, onConnected, onHome, initialCredentials, onReg
               onTrust={() => { void trustAndRetry(); }}
             />
           ) : undefined}
-          brand={
-            <>
-              <BrandMark />
-              <span className="text-xl font-semibold tracking-[-0.01em]">1Warden</span>
-            </>
-          }
           onSubmit={(c) => { void doConnect(c); }}
           onRegister={onRegister ? fields => {
             if (busy || leaving.current) return;
@@ -278,8 +275,7 @@ export function Connect({ client, onConnected, onHome, initialCredentials, onReg
           } : undefined}
           onTwoFactor={({ code, provider, remember }) => { void submitCode(code, provider, remember); }}
         />}
-      </div>
-    </main>
+    </AuthPage>
   );
 }
 

@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { PALETTES, paletteTokens } from './theme-palettes';
 import themeCss from '../../../packages/ui/src/theme.css?raw';
-import componentsCss from '../../../packages/ui/src/components.css?raw';
 
 function resolvedTokens(id: typeof PALETTES[number]['id'], mode: 'light' | 'dark') {
   const block = mode === 'light' ? themeCss.split(':root {')[1]!.split('}')[0]!
@@ -28,7 +27,7 @@ describe('complete light and dark palettes', () => {
   for (const palette of PALETTES) for (const mode of ['light', 'dark'] as const) {
     it(`${palette.id} ${mode}: necessary controls and focus contrast with adjacent surfaces`, () => {
       const tokens = resolvedTokens(palette.id, mode);
-      for (const surface of ['canvas', 'chrome', 'content', 'paper', 'overlay', 'well', 'hover']) {
+      for (const surface of ['canvas', 'chrome', 'content', 'paper', 'overlay', 'well', 'hover', 'selected', 'brand']) {
         expect(contrast(tokens['--border-control']!, tokens[`--surface-${surface}`]!), `${surface} control`).toBeGreaterThanOrEqual(3);
         expect(contrast(tokens['--accent-ring']!, tokens[`--surface-${surface}`]!), `${surface} focus`).toBeGreaterThanOrEqual(3);
       }
@@ -42,33 +41,21 @@ describe('complete light and dark palettes', () => {
       expect(contrast(tokens['--accent']!, tokens['--surface-selected']!)).toBeGreaterThanOrEqual(4.5);
     });
   }
-  it('keeps navigation text, category icons, controls and focus legible across its black zone', () => {
-    const block = componentsCss.split(":root[data-palette='whale'] .nav-drawer-panel {")[1]!.split('}')[0]!;
-    const tokens = Object.fromEntries([...block.matchAll(/(--[\w-]+):\s*(#[\da-f]{6});/gi)].map(m => [m[1], m[2]]));
-    for (const surface of ['canvas', 'chrome', 'content', 'paper', 'overlay', 'well', 'hover', 'selected']) {
-      for (const ink of ['primary', 'secondary', 'tertiary']) {
-        expect(contrast(tokens[`--ink-${ink}`]!, tokens[`--surface-${surface}`]!), `${surface} ${ink}`).toBeGreaterThanOrEqual(4.5);
-      }
-      for (const role of ['accent', 'accent-ring', 'violet', 'teal', 'rose', 'favorite', 'border-control']) {
-        expect(contrast(tokens[`--${role}`]!, tokens[`--surface-${surface}`]!), `${surface} ${role}`).toBeGreaterThanOrEqual(3);
-      }
-      for (const role of ['safe', 'caution', 'risk']) {
-        expect(contrast(tokens[`--${role}`]!, tokens[`--surface-${surface}`]!), `${surface} ${role}`).toBeGreaterThanOrEqual(4.5);
-      }
-    }
-    expect(contrast(tokens['--accent-ink']!, tokens['--accent']!)).toBeGreaterThanOrEqual(4.5);
-  });
-  for (const palette of PALETTES.filter(p => p.id !== 'original')) {
+  for (const palette of PALETTES) {
     for (const mode of ['light', 'dark'] as const) {
       it(`${palette.id} ${mode}: readable text and action labels`, () => {
-        const tokens = paletteTokens(palette.id, mode);
-        for (const surface of ['chrome', 'content', 'paper', 'overlay', 'hover', 'selected', 'well']) {
-          for (const ink of ['primary', 'secondary', 'tertiary']) {
-            expect(contrast(tokens[`--ink-${ink}`]!, tokens[`--surface-${surface}`]!)).toBeGreaterThanOrEqual(4.5);
+        const tokens = resolvedTokens(palette.id, mode);
+        for (const surface of ['canvas', 'chrome', 'content', 'paper', 'overlay', 'hover', 'selected', 'well', 'brand']) {
+          for (const ink of ['ink-primary', 'ink-secondary', 'ink-tertiary', 'accent', 'safe', 'caution', 'risk']) {
+            expect(contrast(tokens[`--${ink}`]!, tokens[`--surface-${surface}`]!), `${surface} ${ink}`).toBeGreaterThanOrEqual(4.5);
+          }
+          for (const icon of ['violet', 'teal', 'rose', 'favorite']) {
+            expect(contrast(tokens[`--${icon}`]!, tokens[`--surface-${surface}`]!), `${surface} ${icon}`).toBeGreaterThanOrEqual(3);
           }
         }
         expect(contrast(tokens['--accent']!, tokens['--surface-paper']!)).toBeGreaterThanOrEqual(4.5);
         expect(contrast(tokens['--accent-ink']!, tokens['--accent']!)).toBeGreaterThanOrEqual(4.5);
+        expect(contrast(tokens['--accent-ink']!, tokens['--accent-hover']!)).toBeGreaterThanOrEqual(4.5);
       });
     }
   }

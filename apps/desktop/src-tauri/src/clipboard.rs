@@ -2,7 +2,12 @@
 use std::{time::Duration, sync::{OnceLock, atomic::{AtomicU64, Ordering}}};
 use windows_sys::Win32::{Foundation::{GlobalFree, HGLOBAL, HWND}, System::{DataExchange::*, Memory::*}};
 const UNICODE_TEXT: u32 = 13;
-const CLEAR_AFTER: Duration = Duration::from_secs(30);
+fn clear_duration(seconds: Option<u64>) -> Result<Duration, String> {
+    match seconds.unwrap_or(30) {
+        seconds @ (10 | 30 | 60 | 120) => Ok(Duration::from_secs(seconds)),
+        _ => Err("剪贴板清理时限无效，未复制".into()),
+    }
+}
 static COPY_ID: AtomicU64 = AtomicU64::new(1);
 static FORMATS: OnceLock<Formats> = OnceLock::new();
 struct Formats { marker: u32, exclude_monitoring: u32, allow_history: u32, allow_cloud: u32 }
@@ -124,13 +129,14 @@ fn write(owner: HWND, value: &str) -> Result<(u32, u64), String> {
     Ok((formats.marker, token))
 }
 #[tauri::command]
-pub async fn clipboard_copy(window: tauri::WebviewWindow, value: String) -> Result<(), String> {
+pub async fn clipboard_copy(window: tauri::WebviewWindow, value: String, clear_after_seconds: Option<u64>) -> Result<(), String> {
     authorize(window.label())?;
+    let duration = clear_duration(clear_after_seconds)?;
     let owner = window.hwnd().map_err(|_| "主窗口不可用")?.0 as usize;
     let (format, token) = write(owner as HWND, &value)?;
     // The timer retains only this copy's identifier, not plaintext.
     if std::thread::Builder::new().name("1warden-clipboard-expiry".into()).spawn(move || {
-        std::thread::sleep(CLEAR_AFTER); clear_if_unchanged(owner, format, token);
+        std::thread::sleep(duration); clear_if_unchanged(owner, format, token);
     }).is_err() {
         clear_if_unchanged(owner, format, token);
         return Err("无法安排剪贴板清理，已取消复制，请重试".into());
@@ -140,6 +146,11 @@ pub async fn clipboard_copy(window: tauri::WebviewWindow, value: String) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test] fn expiry_duration_is_bounded() {
+        assert_eq!(clear_duration(None).unwrap(), Duration::from_secs(30));
+        for seconds in [10, 30, 60, 120] { assert_eq!(clear_duration(Some(seconds)).unwrap(), Duration::from_secs(seconds)); }
+        for seconds in [0, 1, 29, 121, u64::MAX] { assert!(clear_duration(Some(seconds)).is_err()); }
+    }
     #[test] fn only_main_can_write() { assert!(authorize("main").is_ok()); assert!(authorize("quick").is_err()); }
     #[test] fn unicode_is_lossless_and_nul_is_rejected() {
         let units = encode("密🔑a").unwrap(); assert_eq!(units.last(), Some(&0));

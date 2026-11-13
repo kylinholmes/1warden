@@ -5,7 +5,7 @@ import type { ApplicationClient, ApplicationSnapshot } from './application/types
 
 export type SaveStatus = 'idle' | 'pending' | 'saving' | 'saved' | 'error';
 export interface SaveField<T> { value: T; status: SaveStatus; error: string | null }
-interface Draft<T> extends SaveField<T> { base: T | null; dirty: boolean }
+interface Draft<T> extends SaveField<T> { base: T | null; baseKnown: boolean; patch: Partial<T>; dirty: boolean }
 interface Entry { profile: Draft<UserProfile>; preferences: Draft<ProfilePreferences>; dueAt: number }
 export interface AutosaveSnapshot { profile: SaveField<UserProfile>; preferences: SaveField<ProfilePreferences> }
 type SaveKind = keyof AutosaveSnapshot;
@@ -14,8 +14,8 @@ export const UNSAVED_PROFILE_MESSAGE = '个人资料或外观偏好尚未保存�
 const emptyProfile = (): UserProfile => ({ displayName: '', avatarDataUrl: null });
 const same = (a: unknown, b: unknown) => JSON.stringify(a) === JSON.stringify(b);
 const identity = (s: ApplicationSnapshot) => s.account ? accountKey(s.account) : null;
-const ready = (s: ApplicationSnapshot) => s.status === 'unlocked' && s.profileReady && !s.syncing && !s.profileError && !s.profileSettingsError;
-const draft = <T>(value: T, base: T | null = value): Draft<T> => ({ value, base, dirty: false, status: 'idle', error: null });
+const ready = (s: ApplicationSnapshot) => s.status === 'unlocked' && s.profileReady && !s.syncing && !s.syncError && !s.profileError && !s.profileSettingsError;
+const draft = <T>(value: T, base: T | null = value, baseKnown = true): Draft<T> => ({ value, base, baseKnown, patch: {}, dirty: false, status: 'idle', error: null });
 
 /** App-owned, memory-only drafts survive page navigation, but never cross account identities.
  * Authentication changes park pending edits; returning to a verified account resumes them.
@@ -27,7 +27,6 @@ export function createProfileAutosave(client: ApplicationClient) {
   let unsubscribe: (() => void) | undefined;
   let running: Promise<void> | null = null;
   let started = false;
-  let verifiedIdentity: string | null = null;
   const blank: Entry = { profile: draft(emptyProfile()), preferences: draft({ ...DEFAULT_PROFILE_PREFERENCES }, null), dueAt: 0 };
   const state = createStore<AutosaveSnapshot>(() => blank);
   function entry(): Entry {
@@ -35,7 +34,8 @@ export function createProfileAutosave(client: ApplicationClient) {
     if (!key) return blank;
     let value = entries.get(key);
     if (!value) {
-      value = { profile: draft(s.profile ?? emptyProfile()), preferences: draft(s.profileSettings?.preferences ?? { ...DEFAULT_PROFILE_PREFERENCES }, s.profileSettings?.preferences ?? null), dueAt: 0 };
+      value = { profile: draft(s.profile ?? emptyProfile(), s.profile ?? emptyProfile(), ready(s)),
+        preferences: draft(s.profileSettings?.preferences ?? { ...DEFAULT_PROFILE_PREFERENCES }, s.profileSettings?.preferences ?? null, ready(s)), dueAt: 0 };
       entries.set(key, value);
     }
     return value;
@@ -56,21 +56,36 @@ export function createProfileAutosave(client: ApplicationClient) {
   }
   function canEditPreferences() {
     const s = client.getSnapshot();
-    if (s.status !== 'unlocked' || s.syncError || s.profileError || s.profileSettingsError) return false;
-    return ready(s) || (s.syncing && verifiedIdentity !== null && identity(s) === verifiedIdentity);
+    // Editing a local draft does not require network verification. Only drain()
+    // may write; it still requires a verified, error-free snapshot.
+    return s.status === 'unlocked' && identity(s) !== null;
+  }
+  function canEditProfile() {
+    const s = client.getSnapshot();
+    return canEditPreferences() && !s.profileError && !s.profileSettingsError;
+  }
+  function reconcile<T extends object>(field: Draft<T>, remote: T | null, fallback: T) {
+    if (!field.dirty) {
+      field.base = remote; field.value = remote ?? fallback; field.baseKnown = true;
+    } else if (!field.baseKnown) {
+      // The first sync establishes the base. Apply only explicitly edited fields
+      // so a preview cannot replace settings that had not been loaded yet.
+      // No remote preferences means the account's visible local migration/cache
+      // is still the fallback. A non-null remote always owns untouched fields.
+      field.base = remote; field.value = { ...(remote ?? field.value), ...field.patch }; field.baseKnown = true;
+    }
   }
   function observe() {
     const s = client.getSnapshot(); const value = entry();
-    if (s.status !== 'unlocked' || identity(s) !== verifiedIdentity || s.syncError || s.profileError || s.profileSettingsError) verifiedIdentity = null;
-    if (ready(s) && !s.syncError) verifiedIdentity = identity(s);
     if (ready(s)) {
-      if (!value.profile.dirty) value.profile = { ...value.profile, base: s.profile ?? emptyProfile(), value: s.profile ?? emptyProfile() };
-      if (!value.preferences.dirty) value.preferences = { ...value.preferences, base: s.profileSettings?.preferences ?? null, value: s.profileSettings?.preferences ?? { ...DEFAULT_PROFILE_PREFERENCES } };
+      reconcile(value.profile, s.profile ?? emptyProfile(), emptyProfile());
+      reconcile(value.preferences, s.profileSettings?.preferences ?? null, { ...DEFAULT_PROFILE_PREFERENCES });
     }
     emit(); schedule();
   }
-  function edit<T>(field: Draft<T>, value: T) {
-    field.value = value; field.dirty = true; field.status = 'pending'; field.error = null;
+  function edit<T>(field: Draft<T>, patch: Partial<T>) {
+    field.value = { ...field.value, ...patch }; field.patch = { ...field.patch, ...patch };
+    field.dirty = true; field.status = 'pending'; field.error = null;
     entry().dueAt = Date.now() + 650;
     emit(); schedule();
   }
@@ -82,7 +97,7 @@ export function createProfileAutosave(client: ApplicationClient) {
       if (!kind) break;
       const field = value[kind]; const sent = field.value;
       const remote = kind === 'profile' ? s.profile ?? emptyProfile() : s.profileSettings?.preferences ?? null;
-      if (same(remote, sent)) { field.dirty = false; field.status = 'saved'; field.base = remote as never; emit(); continue; }
+      if (same(remote, sent)) { field.dirty = false; field.patch = {}; field.status = 'saved'; field.base = remote as never; emit(); continue; }
       if (!same(remote, field.base)) {
         field.error = '此部分已被其他设备修改。你的修改仍在本页；可放弃修改后查看最新资料。'; field.status = 'error'; emit(); continue;
       }
@@ -95,7 +110,7 @@ export function createProfileAutosave(client: ApplicationClient) {
           ? kind === 'profile' ? latest.profile ?? sent : latest.profileSettings?.preferences ?? sent : sent;
         field.base = acknowledged as never;
         field.dirty = !same(sent, field.value);
-        if (!field.dirty) field.value = acknowledged as never;
+        if (!field.dirty) { field.value = acknowledged as never; field.patch = {}; }
         field.status = field.dirty ? 'pending' : 'saved';
       } catch (e) {
         field.error = e instanceof Error ? e.message : '保存失败，请重试'; field.status = 'error';
@@ -122,15 +137,23 @@ export function createProfileAutosave(client: ApplicationClient) {
     subscribe: state.subscribe,
     start: () => { started = true; unsubscribe?.(); unsubscribe = client.subscribe(observe); observe(); },
     stop: () => { started = false; unsubscribe?.(); unsubscribe = undefined; cancelTimer(); },
-    editProfile: (patch: Partial<UserProfile>) => { if (ready(client.getSnapshot())) edit(entry().profile, { ...entry().profile.value, ...patch }); },
-    // A previously verified account can preview/queue appearance while a new
-    // background sync is running. drain() still requires completed verification.
+    canEditProfile,
+    editProfile: (patch: Partial<UserProfile>) => { if (canEditProfile()) edit(entry().profile, patch); },
     canEditPreferences,
-    editPreferences: (value: ProfilePreferences) => { if (canEditPreferences()) edit(entry().preferences, value); },
+    editPreferences: (patch: Partial<ProfilePreferences>, preview?: ProfilePreferences) => {
+      if (!canEditPreferences()) return;
+      const field = entry().preferences;
+      // Preserve the account's migrated local appearance when the server has no
+      // preferences. An unknown base still replaces untouched fields at sync.
+      if (!field.dirty && field.base === null && preview) field.value = preview;
+      edit(field, patch);
+    },
     pendingPreferences: () => entry().preferences.dirty ? entry().preferences.value : null,
     flush,
     retry: (kind: SaveKind) => { const field = entry()[kind]; field.error = null; field.status = 'pending'; emit(); return flush(); },
-    discard: (kind: SaveKind) => { const field = entry()[kind]; if (field.status === 'saving') return; field.dirty = false; field.error = null; field.status = 'idle'; observe(); },
+    discard: (kind: SaveKind) => { const field = entry()[kind]; if (field.status === 'saving') return;
+      field.dirty = false; field.patch = {}; field.error = null; field.status = 'idle';
+      field.value = (field.base ?? (kind === 'profile' ? emptyProfile() : { ...DEFAULT_PROFILE_PREFERENCES })) as never; observe(); },
     forget: (key = identity(client.getSnapshot())) => {
       const value = key ? entries.get(key) : undefined;
       if (value && (value.profile.dirty || value.preferences.dirty)) throw new Error(UNSAVED_PROFILE_MESSAGE);

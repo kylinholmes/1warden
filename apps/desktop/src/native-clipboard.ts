@@ -1,5 +1,5 @@
 import { invoke } from '@tauri-apps/api/core';
-import { installNativeClipboardCopy } from '@1warden/ui/clipboard';
+import { getClipboardClearMs, installNativeClipboardCopy } from '@1warden/ui/clipboard';
 import { tauriAvailable } from './capabilities';
 import { detectOs } from './platform';
 
@@ -11,7 +11,7 @@ export function usesWindowsNativeClipboard(): boolean {
  * it never returns clipboard text or keeps plaintext for the expiry timer.
  */
 export async function copyWindowsClipboard(value: string): Promise<void> {
-  await invoke('clipboard_copy', { value });
+  await invoke('clipboard_copy', { value, clearAfterSeconds: getClipboardClearMs() / 1000 });
 }
 
 /** Install before any UI copy can run. Do not patch browser globals or grant

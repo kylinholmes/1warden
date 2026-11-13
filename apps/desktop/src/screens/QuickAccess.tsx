@@ -1,7 +1,7 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
 import { useEffect, useId, useRef } from 'react';
 import type { QuickAccount, QuickItem } from '../quick-bridge';
-import { IconLock, IconSearch } from '@1warden/ui';
+import { BrandMark, IconClose, IconSearch } from '@1warden/ui';
 import { QuickLockedAccounts } from '../components/QuickLockedAccounts';
 import { QuickUnlockPanel, type QuickAuthentication } from '../components/QuickUnlockPanel';
 
@@ -20,12 +20,12 @@ import type { IconStore } from '@1warden/vault';
  *
  * ── 版面
  *
- * 这是个 620×400 上下的浮窗，浮在别人的窗口上面。
+ * 桌面快捷窗口为 800×440，浮在其他窗口上面。
  * 所以它自己必须是一块**完整的表面**（overlay 层 + 浮层阴影 + 圆角），
  * 而不是主窗口那种三栏结构。窗口边缘那一圈圆角由外壳给（透明窗口），
  * 这里只负责内部。
  */
-export function QuickAccess({ items, icons, locked, busy, notice, accounts = [], onOpenAccount, onAuthenticate, onChooseAccounts, onCancelAuthentication, onAuthenticationComplete, authReset = 0, authError = null, syncing = false, syncError = null, activeAccount, onRetrySync, pinned = false, onTogglePin, onQueryChange, onPick, onClose }: {
+export function QuickAccess({ items, icons, locked, busy, notice, accounts = [], onOpenAccount, onOpenMain, onAuthenticate, onChooseAccounts, onCancelAuthentication, onAuthenticationComplete, authReset = 0, authError = null, syncing = false, syncError = null, activeAccount, onRetrySync, pinned = false, onTogglePin, onQueryChange, onPick, onClose }: {
   items: readonly QuickItem[];
   /** 站点图标的缓存。主窗口过桥传来服务端地址后建的；没有就只显示彩色徽标 */
   icons: IconStore | null;
@@ -34,6 +34,7 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
   notice: string | null;
   accounts?: readonly QuickAccount[];
   onOpenAccount?: (id: string | null) => void;
+  onOpenMain?: () => void;
   onAuthenticate?: QuickAuthentication;
   onChooseAccounts?: () => void;
   onCancelAuthentication?: () => void;
@@ -76,6 +77,7 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
   const selectedRef = useRef<HTMLLIElement>(null);
   const seq = useRef(0);
   const authBack = useRef<(() => void) | null>(null);
+  const authCancel = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     if (authenticating) (panelRef.current?.querySelector<HTMLButtonElement>('[data-quick-account]:not(:disabled)') ?? panelRef.current)?.focus();
@@ -98,6 +100,11 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
 
   function onKeyDown(e: React.KeyboardEvent) {
     if (e.nativeEvent.isComposing) return;
+    if ((e.ctrlKey || e.metaKey) && !e.altKey && e.key.toLowerCase() === 'f') {
+      e.preventDefault();
+      if (!authenticating) inputRef.current?.focus();
+      return;
+    }
     if (e.key === 'Escape') {
       e.preventDefault();
       if (authenticating && authBack.current) authBack.current();
@@ -127,9 +134,8 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
       {!authenticating && <h1 className="sr-only">快速搜索</h1>}
       {/* 搜索就是这一屏的主角 —— 给它 --text-lg，比列表里的条目名还大一号，
           因为用户打开面板时脑子里想的是「我要找的那个东西叫什么」 */}
-      <div className="panel-head quick-search-head gap-3 px-4 py-3.5">
-        {authenticating
-          ? <IconLock size={18} className="shrink-0 text-[var(--ink-tertiary)]" />
+      <div className={`panel-head gap-3 px-4 py-3.5 ${authenticating ? 'quick-auth-head' : 'quick-search-head'}`}>
+        {authenticating ? <div className="quick-auth-brand"><BrandMark size={24} /><span>1Warden</span></div>
           : <IconSearch size={18} className="shrink-0 text-[var(--ink-tertiary)]" />}
         <input
           ref={inputRef}
@@ -142,18 +148,27 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
           aria-activedescendant={!authenticating && active ? optionId(active.id) : undefined}
           aria-describedby={`${statusId} ${hintId}`}
           disabled={authenticating}
+          hidden={authenticating}
           className="quick-search-input min-w-0 flex-1 bg-transparent text-lg placeholder:text-[var(--ink-tertiary)] disabled:cursor-not-allowed"
         />
         {busy && <span className="shrink-0 text-xs text-[var(--ink-tertiary)]">…</span>}
         {!authenticating && onAuthenticate && <button type="button" className="btn btn-ghost h-8 px-2 text-xs"
           aria-label="切换搜索账户" title={activeAccount ? `${activeAccount.email}\n${activeAccount.serverUrl}` : '切换账户'}
           onClick={() => { setChoosingAccount(true); onChooseAccounts?.(); }}><span className="max-w-[120px] truncate">{activeAccount?.email ?? '切换账户'}</span></button>}
+        {onOpenMain && <button type="button" className="btn btn-ghost h-8 w-8 shrink-0 p-1.5" aria-label="打开主窗口" title="打开主窗口"
+          onClick={() => { if (authCancel.current) authCancel.current(); else onCancelAuthentication?.(); onOpenMain(); }}>
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true" focusable="false">
+            <path d="M14 3h7v7M21 3l-9 9" /><path d="M10 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5" />
+          </svg>
+        </button>}
         {onTogglePin && <button type="button" className="btn btn-ghost h-8 w-8 p-1.5" aria-label={pinned ? '取消固定快速搜索' : '固定快速搜索'}
           aria-pressed={pinned} title={pinned ? '已临时固定；Esc 仍可关闭' : '临时固定，点击外部不关闭'} onClick={onTogglePin}>
           <svg width="17" height="17" viewBox="0 0 24 24" fill={pinned ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
             <path d="M8 3h8l-1 7 3 3v2H6v-2l3-3-1-7Z" /><path d="M12 15v6" />
           </svg>
         </button>}
+        {authenticating && <button type="button" className="btn btn-ghost h-8 w-8 quick-close" aria-label="关闭快速搜索"
+          onClick={() => { if (authCancel.current) authCancel.current(); else onCancelAuthentication?.(); onClose(); }}><IconClose size={17} /></button>}
       </div>
 
       {!authenticating && syncError && <div role="alert" className="flex items-center gap-2 px-4 py-2 text-xs text-[var(--risk)]">
@@ -162,7 +177,9 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
       </div>}
 
       {authenticating ? (
-        onAuthenticate ? <QuickUnlockPanel accounts={accounts} loading={busy} autoSelect={!choosingAccount} reset={authReset} externalError={authError} backRef={authBack}
+        onAuthenticate ? <QuickUnlockPanel accounts={accounts} loading={busy} autoSelect={!choosingAccount}
+          initialAccountId={accounts.find(account => account.email === activeAccount?.email && account.serverUrl === activeAccount.serverUrl)?.id}
+          reset={authReset} externalError={authError} backRef={authBack} cancelRef={authCancel}
           onAuthenticate={onAuthenticate} onCancel={() => onCancelAuthentication?.()}
           onUnlocked={() => { setChoosingAccount(false); onAuthenticationComplete?.(); }}
           onLogin={() => onOpenAccount?.(null)} onClose={() => {
@@ -205,10 +222,10 @@ export function QuickAccess({ items, icons, locked, busy, notice, accounts = [],
       )}
 
       <p id={statusId} role="status" aria-atomic="true" className="sr-only">{!authenticating ? syncing ? '正在同步保险库…' : busy ? '正在处理…' : items.length ? `${items.length} 个搜索结果` : query ? '没有匹配条目' : '输入以搜索' : ''}</p>
-      <p id={hintId} className="sr-only">上下方向键选择条目，回车复制所选条目的密码。</p>
+      {!authenticating && <p id={hintId} className="sr-only">上下方向键选择条目，回车复制所选条目的密码。</p>}
       <footer className="panel-foot px-4 py-2.5">
-        <span aria-live="polite" className="min-w-0 truncate">{notice ?? (authenticating ? (accounts.length ? '解锁后即可搜索此账户' : '登录后即可快速搜索') : '⏎ 复制密码')}</span>
-        <span className="shrink-0">{authenticating ? 'esc 返回 / 关闭' : 'esc 关闭'}</span>
+        <span aria-live="polite" className="min-w-0 truncate">{notice ?? (authenticating ? '' : '⏎ 复制密码')}</span>
+        <span className="shrink-0">Esc 关闭</span>
       </footer>
     </main>
   );

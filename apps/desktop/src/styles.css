@@ -95,6 +95,89 @@
 :root[data-quick-window] { --titlebar-h: 0px; background: transparent; }
 :root[data-quick-window] body, :root[data-quick-window] #root { background: transparent; }
 .quick-panel { box-shadow: none; }
+.auth-page { display: flex; flex-direction: column; height: 100%; overflow-y: auto; background: var(--surface-paper); }
+.auth-page-header { display: flex; align-items: center; gap: 10px; padding: 24px clamp(24px, 3vw, 36px); flex-shrink: 0; font-size: 18px; font-weight: 600; letter-spacing: -0.02em; }
+.auth-page-body { display: flex; flex: 1 0 auto; align-items: flex-start; justify-content: center; padding: 24px 24px 40px; }
+.auth-page-form { width: 100%; max-width: 388px; margin-inline: auto; }
+.auth-home-content { margin-top: 28px; }
+.auth-home ul > li { margin-block: 0; }
+.auth-home li + li { border-top: 1px solid var(--border-subtle); }
+.auth-home li > button { min-height: 88px; padding: 16px 8px; border: 0; background: transparent; border-radius: 8px; }
+.auth-home li > button:hover { background: var(--surface-hover); }
+.auth-home [data-add-server]:not(.btn-primary) { margin-top: 20px; min-height: 44px; padding-inline: 0; justify-content: flex-start; border: 0; background: transparent; color: var(--accent); }
+.auth-home-register { min-height: 44px; margin-top: 12px; padding-inline: 0; color: var(--accent); }
+.auth-unlock-grid { margin-top: 24px; }
+.auth-unlock-identity { display: flex; align-items: center; gap: 12px; padding-block: 18px; border-bottom: 1px solid var(--border-subtle); }
+.auth-unlock .auth-connection-details { margin-top: 12px; }
+.auth-unlock-form { display: grid; gap: 16px; margin-top: 24px; }
+.auth-unlock-action:has(> div > form) { margin-top: 24px; }
+.auth-page .auth-connect .field:focus-visible { outline: none; border-color: var(--accent-ring); box-shadow: 0 0 0 1px var(--accent-ring); }
+.auth-account-switcher { min-width: 0; }
+.auth-connect .auth-account-trigger { height: auto; min-height: 64px; padding: 10px 12px; border-color: var(--border-subtle); border-radius: 8px; background: var(--surface-well); font-size: 14px; }
+.auth-account-trigger:hover:not(:disabled), .auth-account-trigger[aria-expanded='true'] { background: var(--surface-hover); border-color: var(--border-control); }
+.auth-account-trigger .select-value { white-space: normal; }
+.auth-account-identity { display: flex; min-width: 0; align-items: center; gap: 12px; }
+.auth-account-copy { display: block; flex: 1; min-width: 0; }
+.auth-account-copy > span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; line-height: 1.45; }
+.auth-account-copy > span:first-child { font-size: 14px; font-weight: 500; }
+.auth-account-copy > span + span { margin-top: 3px; color: var(--ink-secondary); font-size: 12px; }
+.auth-account-copy > .auth-account-server { color: var(--ink-tertiary); }
+.auth-account-popup .select-option { min-height: 70px; padding: 10px; }
+.auth-account-popup .auth-account-copy > span { white-space: normal; overflow-wrap: anywhere; }
+.auth-account-popup .select-option[data-value='add-account'] { min-height: 42px; margin-top: 4px; border-top: 1px solid var(--border-subtle); border-radius: 0; }
+.auth-account-add { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.auth-account-error { margin-top: 8px; color: var(--risk); font-size: 13px; }
+.quick-auth-head { height: 46px; min-height: 46px; padding-block: 0; }
+.quick-auth-brand { display: flex; flex: 1; align-items: center; gap: 7px; min-width: 0; font-size: 14px; font-weight: 600; }
+.quick-close { margin-left: 2px; }
+.quick-unlock-layout { display: grid; grid-template-columns: 240px minmax(0, 1fr); min-height: 0; flex: 1; }
+.quick-unlock-layout[data-single] { grid-template-columns: minmax(0, 1fr); }
+.quick-unlock-sidebar { display: flex; min-height: 0; flex-direction: column; padding: 20px 12px 12px; border-right: 1px solid var(--border-subtle); background: var(--surface-content); }
+.quick-unlock-sidebar > h2 { padding: 0 10px; margin-bottom: 10px; color: var(--ink-secondary); font-size: 12px; font-weight: 500; }
+.quick-unlock-main { display: flex; flex-direction: column; min-width: 0; overflow-y: auto; padding: 24px 32px; }
+.quick-unlock-form { flex: none; width: 100%; max-width: 320px; margin: auto; }
+.quick-unlock-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.quick-unlock-heading > h1 { font-size: 18px; font-weight: 600; line-height: 1.4; letter-spacing: -0.02em; }
+.quick-unlock-back { width: 32px; height: 32px; padding: 0; flex-shrink: 0; }
+.quick-unlock-identity { min-width: 0; }
+.quick-unlock-identity > p { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 14px; line-height: 1.45; font-weight: 500; }
+.quick-unlock-identity > p + p { margin-top: 3px; color: var(--ink-tertiary); font-size: 12px; font-weight: 400; }
+.quick-unlock-password { display: grid; gap: 14px; margin-top: 28px; }
+.quick-unlock-label { margin-bottom: 8px; display: block; font-size: 12px; color: var(--ink-secondary); }
+.quick-unlock-form .field { height: 36px; min-height: 36px; font-size: 14px; border-radius: 6px; }
+.quick-unlock-form .auth-password-toggle { min-height: 30px; width: 36px; }
+.quick-unlock-form .field:focus-visible { outline: none; border-color: var(--accent-ring); box-shadow: 0 0 0 1px var(--accent-ring); }
+.quick-unlock-form .btn-primary { height: 36px; min-height: 36px; padding-block: 0; border-radius: 6px; font-weight: 500; }
+.quick-panel > .panel-foot { padding-block: 7px; font-size: 12px; }
+.quick-unlock-two-factor { margin-top: 20px; }
+.quick-unlock-main[data-stage='twoFactor'] { padding-top: 20px; padding-bottom: 20px; }
+.quick-unlock-two-factor > form { display: grid; gap: 10px; }
+.quick-unlock-two-factor > form > * { margin-block: 0; }
+.quick-unlock-two-factor .select-control { height: 36px; min-height: 36px; }
+.quick-unlock-main[data-stage='twoFactor'] .quick-unlock-error { margin-top: 8px; }
+.quick-unlock-layout[data-single] .quick-unlock-main { padding-top: 20px; padding-bottom: 20px; }
+.quick-unlock-layout[data-single] .quick-unlock-heading { margin-bottom: 14px; }
+.quick-unlock-layout[data-single] .quick-unlock-password { margin-top: 16px; gap: 14px; }
+.quick-unlock-layout[data-single] .quick-unlock-label { margin-bottom: 8px; }
+.quick-unlock-layout[data-single] .quick-unlock-two-factor { margin-top: 10px; }
+.quick-unlock-error { margin-top: 10px; color: var(--risk); font-size: 13px; line-height: 1.5; overflow-wrap: anywhere; }
+.quick-accounts { min-height: 0; display: flex; flex: 1; flex-direction: column; }
+.quick-account-list { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+.quick-account-row { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 64px; padding: 5px 10px; border-radius: 6px; text-align: left; }
+.quick-account-row:hover:not(:disabled) { background: var(--surface-hover); }
+.quick-account-row[aria-current='true'] { background: var(--accent-tint); }
+.quick-account-row[aria-current='true'] > [aria-hidden='true'] { background: var(--surface-paper); }
+.quick-account-row:disabled { opacity: .5; }
+.quick-account-copy { flex: 1; min-width: 0; }
+.quick-account-copy > span { display: block; overflow-wrap: anywhere; font-size: 12px; font-weight: 400; line-height: 1.35; }
+.quick-account-copy > [data-quick-account-label] { font-size: 13px; font-weight: 500; }
+.quick-account-copy > span + span { margin-top: 2px; color: var(--ink-secondary); }
+.quick-account-copy > [data-quick-account-server] { color: var(--ink-tertiary); font-size: 12px; }
+.quick-account-row > svg { flex-shrink: 0; color: var(--accent); }
+.quick-accounts-login { align-self: flex-start; min-height: 32px; margin-top: 10px; color: var(--accent); }
+.quick-accounts-empty { display: flex; min-height: 0; flex: 1; flex-direction: column; align-items: center; justify-content: center; gap: 16px; padding: 24px; color: var(--ink-secondary); font-size: 13px; }
+.quick-account-standalone { padding: 18px 24px; }
+.quick-account-standalone > h1 { margin-bottom: 16px; font-size: 22px; font-weight: 600; }
 /* Search is already one full-width surface. Put focus on its lower edge, not
    another rounded input inside it; pin/results retain their own focus rings. */
 .quick-search-input, .quick-search-input:focus-visible {
@@ -329,7 +412,6 @@ body {
 :focus-visible {
   outline: 2px solid var(--accent-ring);
   outline-offset: 2px;
-  border-radius: var(--radius-sm);
 }
 
 ::-webkit-scrollbar { width: 11px; height: 11px; }

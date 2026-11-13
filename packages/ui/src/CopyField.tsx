@@ -1,5 +1,6 @@
 import { useId, type ReactNode } from 'react';
-import { CLIPBOARD_CLEAR_MS, scheduleClipboardClear } from './clipboard';
+import { scheduleClipboardClear } from './clipboard';
+import { useClipboardClearMs } from './useClipboardClearMs';
 import { useCopyAction, type CopyActionProps } from './useCopyAction';
 
 /** The value itself is the action. Other controls (such as reveal) stay siblings. */
@@ -8,6 +9,7 @@ export function CopyField({ label, children, className = '', onCopied = schedule
   children: ReactNode;
   className?: string;
 }) {
+  const clearMs = useClipboardClearMs();
   const { state, copy } = useCopyAction({ ...action, onCopied });
   const contentId = useId();
   const feedback = state === 'ok' ? '已复制' : state === 'error' ? '复制失败' : state === 'busy' ? '复制中…' : '';
@@ -23,7 +25,7 @@ export function CopyField({ label, children, className = '', onCopied = schedule
       void copy();
     }}>
     <span id={contentId} className="contents">{children}
-      <span className="sr-only">复制后 {CLIPBOARD_CLEAR_MS / 1000} 秒自动清空剪贴板。</span>
+      <span className="sr-only">复制后 {clearMs / 1000} 秒自动清空剪贴板。</span>
     </span>
     <span data-copy-feedback className="inline-copy-feedback shrink-0 text-xs" role="status" aria-live="polite" aria-atomic="true">
       {feedback || <span aria-hidden="true">点击复制</span>}

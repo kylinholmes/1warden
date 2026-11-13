@@ -1,13 +1,14 @@
 import { useLocalStore, useStoreField } from '@1warden/state/react';
-import { useEffect, useRef, type FormEvent, type ReactNode } from 'react';
+import { useEffect, useId, useRef, type FormEvent, type ReactNode } from 'react';
 import {
-  IconAlert, IconChevronDown, IconGlobe, IconPlus, IconServer, IconSpinner,
+  IconAlert, IconChevronDown, IconGlobe, IconLock, IconPlus, IconServer, IconSpinner,
 } from './icons';
 import { TwoFactorForm } from './TwoFactorForm';
 import type { SavedAccount } from './accounts';
 import { BackButton } from './PageHeader';
 import { initialServerUrl, ServerSelector } from './ServerSelector';
 import { ServerSpeed } from './ServerSpeed';
+import { PasswordInput } from './PasswordInput';
 
 /**
  * 连接 / 解锁这一屏 —— **两端共用这一份**。
@@ -60,6 +61,8 @@ export function ConnectScreen({
   onPickAccount,
   onBack,
   canGoBack = false,
+  allowAccountPicker = true,
+  backLabel = '返回上一级',
   onRegister,
 }: {
   /** `null` = 还在读（见 `accounts.ts` 对 `null` 和 `[]` 区别的说明） */
@@ -81,6 +84,8 @@ export function ConnectScreen({
   onPickAccount?: (account: SavedAccount) => void;
   onBack?: () => void;
   canGoBack?: boolean;
+  allowAccountPicker?: boolean;
+  backLabel?: string;
   onRegister?: ((fields: Pick<ConnectCreds, 'serverUrl' | 'email'>) => void) | undefined;
 }) {
   /*
@@ -127,6 +132,7 @@ export function ConnectScreen({
   }, [accounts, view]);
 
   const passwordRef = useRef<HTMLInputElement>(null);
+  const passwordId = useId();
   // 进到 quick 视图时把焦点放到密码框 —— 用户点完账户就该直接打字
   useEffect(() => {
     if (view === 'quick') passwordRef.current?.focus();
@@ -146,17 +152,17 @@ export function ConnectScreen({
   }
 
   return (
-    <>
+    <div className="auth-connect">
       {brand !== undefined && <div className="mb-7 flex items-center gap-2.5">{brand}</div>}
 
-      <h1 className={inFlow || view === null ? 'sr-only' : 'text-md font-medium text-[var(--ink-secondary)]'}>
+      {(view === 'form' || inFlow) && (canGoBack || (allowAccountPicker && Boolean(accounts?.length))) && (
+        <BackButton label={backLabel} onBack={goBack} showLabel className="auth-back" />
+      )}
+      <h1 className={view === null ? 'sr-only' : 'auth-title'}>
         {cert !== undefined ? '确认服务器证书' : challenge ? '两步验证' : view === 'pick' ? '选择要登录的账户' : '登录你的保险库'}
       </h1>
 
-      <div className="mt-5">
-        {(view === 'form' || inFlow) && (canGoBack || Boolean(accounts?.length)) && (
-          <BackButton label="返回上一级" onBack={goBack} showLabel className="mb-4" />
-        )}
+      <div className="auth-connect-content">
         {view === null ? (
           /* 账户还在读。**不渲染表单** —— 见上面那个 effect 的说明 */
           <div className="h-[176px]" aria-hidden />
@@ -186,7 +192,7 @@ export function ConnectScreen({
             onOther={() => { returning.current = false; setServerUrl(initialServerUrl(undefined, accounts ?? [])); setEmail(''); setPassword(''); setView('form'); }}
           />
         ) : (
-          <form onSubmit={submit} className="space-y-4">
+          <form onSubmit={submit} className="auth-connect-form">
             {view === 'quick' && (
               <AccountChip
                 email={email}
@@ -195,32 +201,34 @@ export function ConnectScreen({
               />
             )}
 
+            {view === 'form' && <ServerSelector compact value={serverUrl} accounts={accounts ?? []} disabled={busy}
+              onChange={url => { setServerUrl(url); setPassword(''); }} />}
+
+            <div className="auth-login-credentials">
             {view === 'form' && (
-              <>
-                <ServerSelector value={serverUrl} accounts={accounts ?? []} disabled={busy}
-                  onChange={url => { setServerUrl(url); setPassword(''); }} />
                 <Field label="邮箱">
                   <input
                     type="email" required value={email} autoFocus disabled={busy} autoComplete="username"
                     onChange={(e) => setEmail(e.target.value)}
-                    className="field"
+                    className="field" placeholder="name@example.com"
                   />
                 </Field>
-              </>
             )}
 
-            {view === 'quick' && <ServerSpeed serverUrl={serverUrl} disabled={busy} />}
+            {view === 'quick' && <ServerSpeed collapsible serverUrl={serverUrl} disabled={busy} />}
 
-            <Field label="主密码">
-              <input
+            <div>
+              <label htmlFor={passwordId} className="auth-field-label">主密码</label>
+              <PasswordInput
+                id={passwordId}
                 ref={passwordRef}
-                type="password" required value={password} disabled={busy} autoComplete="current-password"
+                required value={password} disabled={busy} autoComplete="current-password" placeholder="输入主密码"
                 onChange={(e) => setPassword(e.target.value)}
                 className="field secret"
               />
-            </Field>
+            </div>
 
-            <button type="submit" disabled={busy} className="btn btn-primary w-full py-2.5">
+            <button type="submit" disabled={busy} className="btn btn-primary auth-submit w-full">
               {busy && <IconSpinner size={15} />}
               {busy ? '正在登录…' : '登录'}
             </button>
@@ -234,11 +242,12 @@ export function ConnectScreen({
                 这台服务器上的其他账户
               </button>
             )}
+            </div>
           </form>
         )}
       </div>
 
-      {!inFlow && view !== null && onRegister && <p className="mt-5 text-center text-sm text-[var(--ink-secondary)]">
+      {!inFlow && view !== null && onRegister && <p className="auth-register">
         还没有账户？<button type="button" disabled={busy} className="btn btn-ghost ml-1 px-2 text-[var(--accent)]"
           onClick={() => { setPassword(''); onRegister({ serverUrl, email }); }}>创建账户</button>
       </p>}
@@ -251,13 +260,11 @@ export function ConnectScreen({
       )}
 
       {!inFlow && view !== null && (
-        <p className="mt-8 text-xs leading-relaxed text-[var(--ink-tertiary)]">
-          主密码只在本地用于派生密钥，<strong className="font-medium">永不发送到服务器</strong>。
-          {/* 只有在账户列表那一屏才说这句 —— 别的屏上用户还没被问过要不要记住 */}
-          {view === 'pick' && '服务器地址和邮箱会留在本机，方便下次连接。'}
+        <p className="auth-security">
+          <IconLock size={15} /><span>主密码不会发送到服务器。</span>
         </p>
       )}
-    </>
+    </div>
   );
 }
 

@@ -112,6 +112,10 @@ export function Quick() {
     locked={locked} accounts={accounts} busy={busy} notice={notice} pinned={pinned} authReset={authReset}
     authError={authError}
     syncing={syncing} syncError={syncError} activeAccount={activeAccount}
+    onOpenMain={() => {
+      setNotice(null);
+      void invoke('quick_open_main').catch(() => setNotice('无法打开主窗口，请重试'));
+    }}
     onRetrySync={() => { void askMain(state.current.query, ++state.current.seq, false, true).catch(() => setNotice('无法重试同步，请稍后再试')); }}
     onAuthenticate={(accountId, input) => {
       clearAuthentication(); setNotice(null); setAuthError(null);

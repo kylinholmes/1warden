@@ -32,9 +32,10 @@ async function mount(items = [fixture()], compact = false) {
   await client.initialize();
   const host = document.createElement('div'); document.body.append(host); const root = createRoot(host);
   cleanups.push(async () => { await act(() => root.unmount()); client.dispose(); host.remove(); });
-  await act(() => root.render(createElement(ToastProvider, null, createElement(VaultView, { client, onLock: () => {} }))));
+  const onLock = vi.fn();
+  await act(() => root.render(createElement(ToastProvider, null, createElement(VaultView, { client, onLock }))));
   const button = (text: string) => [...host.querySelectorAll<HTMLButtonElement>('button')].find(b => b.textContent?.trim() === text)!;
-  return { host, vault, client, save, button };
+  return { host, vault, client, save, button, onLock };
 }
 async function key(element: HTMLElement, key: string) {
   await act(() => element.dispatchEvent(new KeyboardEvent('keydown', { key, bubbles: true, cancelable: true })));
@@ -45,6 +46,31 @@ async function value(input: HTMLInputElement, value: string) {
     input.dispatchEvent(new Event('input', { bubbles: true }));
   });
 }
+it('routes Ctrl+F from settings to vault search and keeps an editor draft in place', async () => {
+  const { host, onLock } = await mount();
+  const shortcut = async (key: string) => {
+    const event = new KeyboardEvent('keydown', { key, ctrlKey: true, bubbles: true, cancelable: true });
+    await act(() => (document.activeElement ?? window).dispatchEvent(event));
+    return event;
+  };
+  expect((await shortcut('f')).defaultPrevented).toBe(true);
+  const search = host.querySelector<HTMLInputElement>('input[aria-label="搜索条目"]')!;
+  expect(document.activeElement).toBe(search);
+  await shortcut(',');
+  expect(host.querySelector('.floating-layer[data-open=true] #settings-title')).not.toBeNull();
+  expect((await shortcut('l')).defaultPrevented).toBe(true);
+  expect(onLock).toHaveBeenCalledTimes(1);
+  expect((await shortcut('F')).defaultPrevented).toBe(true);
+  expect(host.querySelector('.floating-layer[data-open=true] #settings-title')).toBeNull();
+  expect(document.activeElement).toBe(search);
+  await shortcut('n');
+  const editor = host.querySelector<HTMLInputElement>('input[aria-label="名称"]')!;
+  await value(editor, 'Unsaved shortcut draft'); editor.focus();
+  expect((await shortcut('f')).defaultPrevented).toBe(true);
+  expect(editor.value).toBe('Unsaved shortcut draft'); expect(document.activeElement).toBe(editor);
+  expect((await shortcut('L')).defaultPrevented).toBe(true);
+  expect(onLock).toHaveBeenCalledTimes(2);
+});
 it('uses the shared sorting keyboard contract and exposes persisted current choice', async () => {
   const { host } = await mount(); const sort = host.querySelector<HTMLButtonElement>('[role=combobox][aria-label="排序方式"]')!;
   await act(() => sort.focus()); await key(sort, 'ArrowDown');

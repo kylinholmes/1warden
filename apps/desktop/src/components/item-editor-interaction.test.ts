@@ -84,7 +84,9 @@ describe('complete native editor and custom-field interactions', () => {
     const password = host.querySelector<HTMLInputElement>('[aria-label="密码"]')!;
     expect(password.type).toBe('password');
     await click(host.querySelector<HTMLButtonElement>('[aria-label="显示密码"]')!);
-    await click(host.querySelector<HTMLButtonElement>('[title="生成随机密码"]')!);
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="密码生成选项"]')!);
+    expect(password.value).toBe(''); expect(password.type).toBe('text');
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="生成并填入密码"]')!);
     expect(password.value).toHaveLength(20); expect(password.type).toBe('password');
     await click(button('添加自定义字段'));
     await click(host.querySelector<HTMLButtonElement>('[data-add-custom="1"]')!);
@@ -332,9 +334,73 @@ describe('complete native editor and custom-field interactions', () => {
     const password = host.querySelector<HTMLElement>('[data-editor-field="login.password"]')!;
     const meter = password.querySelector<HTMLElement>('span[aria-hidden]')!.parentElement!;
     expect(meter.classList.contains('flex-wrap')).toBe(true);
-    const generate = password.querySelector<HTMLButtonElement>('[title="生成随机密码"]')!;
+    const generate = password.querySelector<HTMLButtonElement>('[aria-label="密码生成选项"]')!;
     await click(generate);
+    expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')!.value).toBe('Synthetic password');
+    await click(password.querySelector<HTMLButtonElement>('[aria-label="生成并填入密码"]')!);
     expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')!.value).toHaveLength(20);
+  });
+  it('configures a password inline without replacing the draft until explicit generation, then saves the result', async () => {
+    let saved: VaultItem | undefined;
+    await mount({ ...blankEditorItem(), name: 'Configured password', login: { ...blankEditorItem().login!, password: 'Keep existing value' } },
+      async draft => { saved = draft; return { id: 'saved', name: draft.name }; });
+    const password = host.querySelector<HTMLInputElement>('[aria-label="密码"]')!;
+    const toggle = host.querySelector<HTMLButtonElement>('[aria-label="密码生成选项"]')!;
+    await click(toggle);
+    expect(toggle.getAttribute('aria-expanded')).toBe('true');
+    const options = host.querySelector<HTMLFieldSetElement>('fieldset[aria-label="密码生成选项"]')!;
+    await input(options.querySelector<HTMLInputElement>('[aria-label="生成密码长度"]')!, '32');
+    const checkbox = (label: string) => [...options.querySelectorAll('label')].find(node => node.textContent?.trim() === label)!.querySelector<HTMLInputElement>('input')!;
+    for (const label of ['大写', '小写', '符号']) await click(checkbox(label));
+    expect(checkbox('数字').disabled).toBe(true);
+    await click(checkbox('排除易混字符 Il1O0o'));
+    expect(password.value).toBe('Keep existing value');
+    await act(() => options.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true })));
+    expect(toggle.getAttribute('aria-expanded')).toBe('false'); expect(document.activeElement).toBe(toggle);
+    await click(toggle);
+    expect(options.querySelector<HTMLInputElement>('[aria-label="生成密码长度"]')?.value).toBe('32');
+    await click(options.querySelector<HTMLButtonElement>('[aria-label="生成并填入密码"]')!);
+    expect(password.value).toMatch(/^[2-9]{32}$/); expect(password.type).toBe('password');
+    const generated = password.value;
+    await click(button('保存')); expect(saved?.login?.password).toBe(generated);
+    expect(JSON.stringify(saved)).not.toMatch(/generatorOpen|avoidAmbiguous/);
+  });
+  it('prevents inline generation while the editor is saving or inert', async () => {
+    let finish!: () => void;
+    await mount({ ...blankEditorItem(), name: 'Busy password', login: { ...blankEditorItem().login!, password: 'Keep until saved' } },
+      async draft => { await new Promise<void>(resolve => { finish = resolve; }); return { id: 'saved', name: draft.name }; });
+    await click(host.querySelector<HTMLButtonElement>('[aria-label="密码生成选项"]')!);
+    const generate = host.querySelector<HTMLButtonElement>('[aria-label="生成并填入密码"]')!;
+    const options = host.querySelector<HTMLFieldSetElement>('fieldset[aria-label="密码生成选项"]')!;
+    options.parentElement!.setAttribute('inert', '');
+    await click(generate);
+    expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')!.value).toBe('Keep until saved');
+    options.parentElement!.removeAttribute('inert');
+    await click(button('保存'));
+    expect(generate.matches(':disabled')).toBe(true);
+    expect(host.querySelector<HTMLInputElement>('[aria-label="生成密码长度"]')!.matches(':disabled')).toBe(true);
+    await click(generate);
+    expect(host.querySelector<HTMLInputElement>('[aria-label="密码"]')!.value).toBe('Keep until saved');
+    await act(async () => { finish(); });
+  });
+  it('reveals the inline options only on expansion without moving focus or scrolling for parameter edits', async () => {
+    const previous = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollIntoView');
+    const scroll = vi.fn(); Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', { configurable: true, value: scroll });
+    try {
+      await mount(null);
+      const toggle = host.querySelector<HTMLButtonElement>('[aria-label="密码生成选项"]')!;
+      toggle.focus(); await click(toggle);
+      const panel = host.querySelector('fieldset[aria-label="密码生成选项"]')!.parentElement;
+      expect(scroll).toHaveBeenCalledExactlyOnceWith({ block: 'nearest', inline: 'nearest', behavior: 'instant' });
+      expect(scroll.mock.contexts[0]).toBe(panel); expect(document.activeElement).toBe(toggle);
+      await input(host.querySelector<HTMLInputElement>('[aria-label="生成密码长度"]')!, '32');
+      expect(scroll).toHaveBeenCalledTimes(1);
+      await click(toggle); expect(scroll).toHaveBeenCalledTimes(1);
+      await click(toggle); expect(scroll).toHaveBeenCalledTimes(2);
+    } finally {
+      if (previous) Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', previous);
+      else Reflect.deleteProperty(HTMLElement.prototype, 'scrollIntoView');
+    }
   });
   it.each(TYPE_ORDER)('uses label-above-value markup consistently for all %s native fields', async type => {
     await mount({ ...blankEditorItem(), type, name: 'Single-column template' });

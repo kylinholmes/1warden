@@ -62,29 +62,30 @@ it('opens a single account directly and restores input focus after a wrong passw
   expect(node.querySelector('[role=alert]')!.textContent).toContain('主密码不正确');
   expect(field.disabled).toBe(false); expect(document.activeElement).toBe(field);
 });
-it('finishes two-factor in the same window and returns to password on Escape', async () => {
+it('returns from two-factor with its back button and closes on Escape', async () => {
   const authenticate = vi.fn().mockResolvedValueOnce(result('password'))
     .mockResolvedValueOnce(result('twoFactor', { providers: [7, 0] }));
   const props = await mount({ accounts: accounts.slice(0, 1), onAuthenticate: authenticate });
   await input('input[type=password]', 'synthetic-password'); await submit();
   expect(node.querySelector('[aria-label="验证码"]')).not.toBeNull();
   expect(node.querySelector('input[type=password]')).toBeNull();
-  await escape();
+  await act(() => node.querySelector<HTMLButtonElement>('[aria-label="返回密码解锁"]')!.click());
   expect(document.activeElement).toBe(node.querySelector('input[type=password]'));
   expect(props.onCancelAuthentication).toHaveBeenCalled(); expect(props.onClose).not.toHaveBeenCalled();
   await escape(); expect(props.onClose).toHaveBeenCalledOnce();
 });
-it('ignores successful authentication after returning to account choices', async () => {
+it('ignores successful authentication after closing with Escape', async () => {
   let reply!: (value: QuickAuthResult) => void;
   const authenticate = vi.fn().mockResolvedValueOnce(result('password'))
     .mockImplementationOnce(() => new Promise(resolve => { reply = resolve; }));
   const props = await mount({ onAuthenticate: authenticate });
   await act(() => node.querySelector<HTMLButtonElement>('[data-quick-account="one"]')!.click());
   await input('input[type=password]', 'synthetic-password'); await submit();
-  await act(() => node.querySelector<HTMLButtonElement>('[aria-label="返回选择账户"]')!.click());
+  await escape();
   await act(() => reply(result('unlocked')));
   expect(node.querySelectorAll('[data-quick-account]')).toHaveLength(2);
   expect(props.onAuthenticationComplete).not.toHaveBeenCalled();
+  expect(props.onClose).toHaveBeenCalledOnce();
 });
 it('routes Escape from the header pin through the active authentication step', async () => {
   const props = await mount({ onTogglePin: vi.fn() });
@@ -92,7 +93,7 @@ it('routes Escape from the header pin through the active authentication step', a
   node.querySelector<HTMLButtonElement>('[aria-label="固定快速搜索"]')!.focus();
   await escape();
   expect(node.querySelectorAll('[data-quick-account]')).toHaveLength(2);
-  expect(props.onClose).not.toHaveBeenCalled();
+  expect(props.onClose).toHaveBeenCalledOnce();
 });
 it('keeps search text across lock and unlock and permits choosing another account', async () => {
   const props = await mount({ locked: false });
@@ -103,4 +104,45 @@ it('keeps search text across lock and unlock and permits choosing another accoun
   expect(document.activeElement).toBe(node.querySelector('[aria-label="搜索保险库"]'));
   await act(() => node.querySelector<HTMLButtonElement>('[aria-label="切换搜索账户"]')!.click());
   expect(node.querySelectorAll('[data-quick-account]')).toHaveLength(2);
+});
+
+it('selects the current account on arrival and keeps the account list available during unlock', async () => {
+  const props = await mount({ activeAccount: { email: accounts[1]!.email, serverUrl: accounts[1]!.serverUrl } });
+  expect(props.onAuthenticate).toHaveBeenCalledExactlyOnceWith('two', { action: 'select' });
+  expect(node.querySelector('[data-quick-account="two"]')?.getAttribute('aria-current')).toBe('true');
+  expect(node.querySelector('input[type=password]')).not.toBeNull();
+  expect(node.querySelector('[aria-label="搜索保险库"]')?.hasAttribute('hidden')).toBe(true);
+});
+
+it('cancels a pending unlock when switching accounts and ignores the late reply', async () => {
+  let reply!: (value: QuickAuthResult) => void;
+  const authenticate = vi.fn().mockResolvedValueOnce(result('password'))
+    .mockImplementationOnce(() => new Promise(resolve => { reply = resolve; }))
+    .mockResolvedValueOnce(result('password', { accountId: 'two' }));
+  const props = await mount({ onAuthenticate: authenticate });
+  await input('input[type=password]', 'synthetic-password'); await submit();
+  const second = node.querySelector<HTMLButtonElement>('[data-quick-account="two"]')!;
+  expect(second.disabled).toBe(false);
+  await act(() => second.click());
+  expect(props.onCancelAuthentication).toHaveBeenCalled();
+  expect(authenticate).toHaveBeenLastCalledWith('two', { action: 'select' });
+  expect(node.querySelector<HTMLInputElement>('input[type=password]')!.value).toBe('');
+  await act(() => reply(result('unlocked')));
+  expect(props.onAuthenticationComplete).not.toHaveBeenCalled();
+  expect(node.querySelector('[data-quick-account="two"]')?.getAttribute('aria-current')).toBe('true');
+  expect(document.activeElement).toBe(node.querySelector('input[type=password]'));
+});
+
+it('invalidates a pending unlock when closing from the header', async () => {
+  let reply!: (value: QuickAuthResult) => void;
+  const authenticate = vi.fn().mockResolvedValueOnce(result('password'))
+    .mockImplementationOnce(() => new Promise(resolve => { reply = resolve; }));
+  const props = await mount({ onAuthenticate: authenticate });
+  await input('input[type=password]', 'synthetic-password'); await submit();
+  await act(() => node.querySelector<HTMLButtonElement>('.quick-close')!.click());
+  expect(props.onClose).toHaveBeenCalledOnce();
+  expect(props.onCancelAuthentication).toHaveBeenCalled();
+  await act(() => reply(result('unlocked')));
+  expect(props.onAuthenticationComplete).not.toHaveBeenCalled();
+  expect(node.querySelector<HTMLInputElement>('input[type=password]')!.value).toBe('');
 });

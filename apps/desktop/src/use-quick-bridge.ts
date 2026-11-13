@@ -6,6 +6,7 @@
  * 剪贴板（见 quick-bridge.ts 顶部对这条边界的说明）。
  */
 import { useEffect } from 'react';
+import { getClipboardClearMs } from '@1warden/ui/clipboard';
 import { emitTo, listen } from '@tauri-apps/api/event';
 import {
   searchItems, totpCode, summaryOf, iconDomainOf, avatarOf, isProfileItem,
@@ -137,14 +138,16 @@ export function useQuickBridge(source: VaultClient | (() => VaultClient), subscr
           switch (e.payload.action) {
             case 'copy-password': {
               if (item.login.password === null) { await reply(false, '这条记录没有密码'); return; }
+              const clearSeconds = getClipboardClearMs() / 1000;
               await copyQuickValue(item.login.password);
-              await reply(true, '密码已复制，30 秒后清空');
+              await reply(true, `密码已复制，${clearSeconds} 秒后清空`);
               return;
             }
             case 'copy-username': {
               if (item.login.username === null) { await reply(false, '这条记录没有用户名'); return; }
+              const clearSeconds = getClipboardClearMs() / 1000;
               await copyQuickValue(item.login.username);
-              await reply(true, '用户名已复制，30 秒后清空');
+              await reply(true, `用户名已复制，${clearSeconds} 秒后清空`);
               return;
             }
             case 'copy-totp': {

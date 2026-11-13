@@ -42,7 +42,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, c
     <div
       role="radiogroup"
       aria-label={label}
-      className={`inline-flex gap-0.5 rounded-[var(--radius-md)] border border-[var(--border-subtle)] bg-[var(--surface-well)] p-0.5 ${className}`}
+      className={`segmented ${className}`}
     >
       {options.map((o) => {
         const active = o.value === value;
@@ -65,12 +65,7 @@ export function Segmented<T extends string>({ value, options, onChange, label, c
               e.preventDefault();
               select(index + delta);
             }}
-            className={`inline-flex items-center gap-1.5 rounded-[var(--radius-sm)] px-2.5 py-1 text-xs transition-colors duration-[var(--dur-fast)] ${
-              active
-                ? 'bg-[var(--accent-tint)] font-medium text-[var(--accent)]'
-                : 'text-[var(--ink-secondary)] hover:bg-[var(--surface-hover)] hover:text-[var(--ink-primary)]'
-            }`}
-            style={active ? { boxShadow: 'var(--elev-raise)' } : undefined}
+            className="segmented-option"
           >
             {o.icon && <span className={active ? 'text-[var(--accent)]' : 'text-[var(--ink-tertiary)]'}>{o.icon}</span>}
             {o.label}

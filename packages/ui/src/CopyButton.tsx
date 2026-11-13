@@ -1,5 +1,5 @@
 import { IconCheck, IconCopy } from './icons';
-import { CLIPBOARD_CLEAR_MS } from './clipboard';
+import { useClipboardClearMs } from './useClipboardClearMs';
 import { useCopyAction } from './useCopyAction';
 
 /**
@@ -73,6 +73,7 @@ export function CopyButton({
   getValue, onCopied, onError, className = 'btn btn-ghost shrink-0 gap-1.5',
   iconOnly = false, iconSize = 13, label = '复制', feedbackKey,
 }: CopyButtonProps) {
+  const clearMs = useClipboardClearMs();
   const { state, copy } = useCopyAction({ getValue, onCopied, onError, feedbackKey });
   const copied = state === 'ok';
 
@@ -81,7 +82,7 @@ export function CopyButton({
       type="button"
       disabled={state === 'busy'}
       onClick={() => { void copy(); }}
-      title={copied ? '已复制' : `复制（${CLIPBOARD_CLEAR_MS / 1000} 秒后自动清空剪贴板）`}
+      title={copied ? '已复制' : `复制（${clearMs / 1000} 秒后自动清空剪贴板）`}
       aria-label={copied ? '已复制' : '复制'}
       data-state={copied ? 'ok' : undefined}
       className={className}

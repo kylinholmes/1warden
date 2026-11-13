@@ -4,6 +4,7 @@ import type { SavedAccount } from './accounts';
 import { Select } from './Select';
 import { ServerSpeed, ServerLatencyStatus } from './ServerSpeed';
 import { normalizeServerUrl, useServerLatencies } from './server-latency';
+import { IconChevronDown, IconGlobe } from './icons';
 
 export const DEFAULT_SERVER_URL = 'https://vault.vaultwarden.com';
 const presets = [
@@ -25,8 +26,8 @@ export function initialServerUrl(value: string | undefined, accounts: SavedAccou
 }
 
 /** Keep the public URL as account identity; measurements use public endpoints only. */
-export function ServerSelector({ value, accounts, disabled, onChange }: {
-  value: string; accounts: SavedAccount[]; disabled: boolean; onChange: (url: string) => void;
+export function ServerSelector({ value, accounts, disabled, onChange, compact = false }: {
+  value: string; accounts: SavedAccount[]; disabled: boolean; onChange: (url: string) => void; compact?: boolean;
 }) {
   const servers = knownServers(accounts);
   const latency = useServerLatencies(servers.map(option => option.url));
@@ -51,7 +52,7 @@ export function ServerSelector({ value, accounts, disabled, onChange }: {
     if (next === 'custom') custom.current = value;
   }, [value, accounts]);
   function update(url: string) { last.current = url; onChange(url); }
-  return <div className="space-y-3">
+  const selector = <>
     <label className="block">
       <span className="mb-1.5 block text-xs font-medium text-[var(--ink-secondary)]">服务器</span>
       <Select aria-label="服务器" value={choice} options={options} disabled={disabled} onChange={next => {
@@ -60,12 +61,29 @@ export function ServerSelector({ value, accounts, disabled, onChange }: {
         update(next === 'custom' ? custom.current : options.find(option => option.value === next)!.url);
       }} />
     </label>
-    {choice === 'custom' ? <label className="block">
+  </>;
+  const address = choice === 'custom' ? <label className="block">
       <span className="mb-1.5 block text-xs font-medium text-[var(--ink-secondary)]">服务器地址</span>
       <input type="url" required autoComplete="url" disabled={disabled} value={value}
         placeholder="https://vault.example.com" className="field"
         onChange={event => { custom.current = event.target.value; update(event.target.value); }} />
-    </label> : null}
-    <ServerSpeed serverUrl={value} disabled={disabled} />
+    </label> : null;
+  if (compact) {
+    let label = value || '自定义服务器';
+    try { const url = new URL(value); label = `${url.host}${url.pathname.replace(/\/$/, '')}`; } catch { /* Keep incomplete public input visible. */ }
+    return <div className="auth-server">
+      <details className="auth-server-details">
+        <summary aria-disabled={disabled} onClick={event => { if (disabled) event.preventDefault(); }}>
+          <IconGlobe size={18} />
+          <span className="auth-server-identity"><span>服务器</span><span title={value}>{label}</span></span>
+          <span className="auth-server-change">更改<IconChevronDown size={14} /></span>
+        </summary>
+        <div className="auth-server-options">{selector}<ServerSpeed serverUrl={value} disabled={disabled} /></div>
+      </details>
+      {address && <div className="auth-server-address">{address}</div>}
+    </div>;
+  }
+  return <div className="space-y-3">
+    {selector}{address}<ServerSpeed serverUrl={value} disabled={disabled} />
   </div>;
 }

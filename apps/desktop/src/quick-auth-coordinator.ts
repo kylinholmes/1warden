@@ -3,7 +3,10 @@ import { accountKey } from './application/account-target';
 import type { QuickAccount } from './quick-bridge';
 import type { QuickAccountNavigation } from './quick-accounts';
 import type { QuickAuthCancellation, QuickAuthKey, QuickAuthRequest, QuickAuthResult } from './quick-auth';
-import { twoFactorChallenge, twoFactorErrorMessage } from './screens/auth-error';
+import { authenticationErrorMessage, twoFactorChallenge, twoFactorErrorMessage } from './screens/auth-error';
+
+/** Intentional account recovery messages, distinct from authentication diagnostics. */
+class AccountSelectionError extends Error {}
 
 interface Options {
   getActiveVault(): VaultClient;
@@ -62,7 +65,7 @@ export function createQuickAuthCoordinator(options: Options) {
   }
   async function assertCurrent(key: QuickAuthKey, selection?: Selection) {
     if (!localCurrent(key, selection) || !await nativeCurrent(key) || !localCurrent(key, selection)) {
-      throw new Error('认证已取消，请重新选择账户');
+      throw new AccountSelectionError('认证已取消，请重新选择账户');
     }
   }
   async function reply(request: QuickAuthKey & { accountId: string }, selection: Selection | null, error?: string) {
@@ -108,25 +111,25 @@ export function createQuickAuthCoordinator(options: Options) {
             version, selecting: false, switched: false, stage: 'password' };
           selected = selection;
         } else if (!selection || selection.generation !== request.generation || selection.accountId !== request.accountId) {
-          throw new Error('请重新选择账户');
+          throw new AccountSelectionError('请重新选择账户');
         }
         const available = await options.loadAccounts();
         await assertCurrent(request, selection ?? undefined);
         const account = available.find(value => value.id === request.accountId);
-        if (!account) { invalidate(); throw new Error('账户已移除，请重新选择'); }
-        if (!selection) throw new Error('请重新选择账户');
+        if (!account) { invalidate(); throw new AccountSelectionError('账户已移除，请重新选择'); }
+        if (!selection) throw new AccountSelectionError('请重新选择账户');
         if (selectAccount) {
           selection.selecting = true;
           try {
             await options.openAccount({ serverUrl: account.serverUrl, email: account.email }, () => assertCurrent(request, selection!));
           } finally { selection.selecting = false; }
           await assertCurrent(request, selection);
-          if (!matches(selection.vault, request.accountId)) throw new Error('账户已切换，请重新选择');
+          if (!matches(selection.vault, request.accountId)) throw new AccountSelectionError('账户已切换，请重新选择');
           selection.stage = selection.vault.isUnlocked() ? 'unlocked' : 'password';
           if (request.action === 'select') { await reply(request, selection); return; }
         }
         const vault = selection.vault;
-        if (!matches(vault, request.accountId)) throw new Error('账户已切换，请重新选择');
+        if (!matches(vault, request.accountId)) throw new AccountSelectionError('账户已切换，请重新选择');
         if (vault.isUnlocked()) {
           selection.stage = 'unlocked';
           await reply(request, selection); return;
@@ -134,12 +137,12 @@ export function createQuickAuthCoordinator(options: Options) {
         await assertCurrent(request, selection);
         if (request.action === 'twoFactor' && (selection.stage !== 'twoFactor' || !selection.authentication?.isCurrent())) {
           selection.stage = 'password'; delete selection.providers;
-          throw new Error('两步验证已过期，请重新输入主密码');
+          throw new AccountSelectionError('两步验证已过期，请重新输入主密码');
         }
         if (selection.pendingRequest !== undefined) {
           selection.authentication?.cancel();
           selection.stage = 'password'; delete selection.providers;
-          throw new Error('认证请求已变更，请重新输入主密码');
+          throw new AccountSelectionError('认证请求已变更，请重新输入主密码');
         }
         // Starting an operation is synchronous up to VaultClient's generation
         // increment. Capture it immediately, before any await or session switch.
@@ -152,7 +155,7 @@ export function createQuickAuthCoordinator(options: Options) {
         selection.authentication = vault.captureAuthentication();
         await operation;
         await assertCurrent(request, selection);
-        if (!selection.authentication.isCurrent()) throw new Error('认证已变更，请重新选择账户');
+        if (!selection.authentication.isCurrent()) throw new AccountSelectionError('认证已变更，请重新选择账户');
         selection.stage = 'unlocked'; delete selection.providers;
         await options.refresh();
         await assertCurrent(request, selection);
@@ -169,7 +172,7 @@ export function createQuickAuthCoordinator(options: Options) {
             selection.stage = 'password'; delete selection.providers;
           }
         }
-        const message = (value: unknown) => value instanceof Error ? value.message : '解锁失败，请重试';
+        const message = (value: unknown) => value instanceof AccountSelectionError ? value.message : authenticationErrorMessage(value);
         await reply(request, selected === selection ? selection : null,
           request.action === 'twoFactor' ? twoFactorErrorMessage(error, message) : message(error));
       } finally {

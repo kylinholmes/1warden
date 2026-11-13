@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>1Warden · 登录与快捷解锁方案</title>
+  <link rel="stylesheet" href="./gallery.css" />
+</head>
+<body>
+  <main class="gallery">
+    <header class="gallery-header"><div><div class="project"><img src="./brand.png" alt="" />1Warden / 界面提案</div><h1>先看结构，再选方向。</h1><p>相同配色，三种登录与解锁方式。每个方案都可以直接操作，也有独立的窄屏布局。</p></div><a class="source-link" href="./README.md">设计说明</a></header>
+    <nav class="directions" aria-label="选择设计方案">
+      <button data-variant="a" aria-pressed="true"><span class="option-name"><span class="letter">A</span>聚焦表单<span class="recommend">建议先看</span></span><strong>少一点干扰，直接完成登录。</strong><span>单列布局、紧凑账户切换、清晰的密码与主操作。</span></button>
+      <button data-variant="b" aria-pressed="false"><span class="option-name"><span class="letter">B</span>明确分区</span><strong>把选择和输入各放在合适的位置。</strong><span>首次登录分步骤；小窗口宽屏分栏、窄屏折叠。</span></button>
+      <button data-variant="c" aria-pressed="false"><span class="option-name"><span class="letter">C</span>账户优先</span><strong>从熟悉的账户继续。</strong><span>已保存账户置前；快捷解锁直接在账户行内展开。</span></button>
+    </nav>
+    <div class="preview-toolbar"><div class="segmented" aria-label="预览页面"><button data-surface="login" aria-pressed="true">登录页</button><button data-surface="quick" aria-pressed="false">快捷解锁</button></div><div class="toolbar-tools"><button id="theme" aria-pressed="false">深色预览</button><a id="open" href="./concept.html" target="_blank" rel="noopener">原尺寸打开 ↗</a></div></div>
+    <p class="scenario" id="scenario"></p>
+    <section class="preview-stage" aria-label="桌面与窄屏预览"><div class="viewport"><div class="viewport-label"><strong id="desktop-label">桌面</strong><span id="desktop-size">960 × 720</span></div><div class="frame-space" id="desktop-space"><iframe id="desktop" title="桌面登录预览" src="about:blank"></iframe></div></div><div class="viewport mobile-viewport"><div class="viewport-label"><strong id="mobile-label">移动端</strong><span id="mobile-size">390 × 760</span></div><div class="frame-space" id="mobile-space"><iframe id="mobile" title="窄屏登录预览" src="about:blank"></iframe></div></div></section>
+    <footer class="gallery-footer"><p id="tradeoff"></p><p>独立原型 · 账户均为虚构数据 · 交互演示密码：<code>preview</code> · 不会进行真实登录</p><div><a href="./comparison.html?surface=login">对比三种移动端登录</a><a href="./comparison.html?surface=quick">对比三种快捷解锁</a></div></footer>
+  </main>
+  <script type="module" src="./gallery.js"></script>
+</body>
+</html>

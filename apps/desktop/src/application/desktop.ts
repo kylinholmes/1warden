@@ -1,7 +1,7 @@
 import { VaultClient } from '@1warden/vault';
 import { subscribeNotifications } from '@1warden/api';
 import { NativeWebSocket } from '../native-websocket';
-import { host, IS_DESKTOP, kdfCache, syncCache, rememberAccount } from '@1warden/ui';
+import { host, IS_DESKTOP, kdfCache, syncCache, rememberAccount, rememberLastAccount } from '@1warden/ui';
 import { fromBase64 } from '@1warden/crypto';
 import { canSaveFiles, saveFile } from '../save';
 import { tauriAvailable } from '../capabilities';
@@ -9,9 +9,11 @@ import type { ConnectionDraft } from './types';
 import { createApplicationClient } from './client';
 import { createProfileCache } from './profile-cache';
 import { createAccountSessions } from './account-sessions';
-import { lockedAccount } from './account-target';
+import { accountKey, lockedAccount } from './account-target';
+import { getSecurityPreferences, initializeSecurityPreferences, securityPreferencesStore } from '../security-preferences';
 
 export function createDesktopApplication() {
+  initializeSecurityPreferences();
   const listeners = new Set<() => void>();
   const changed = () => { for (const listener of listeners) listener(); };
   let draft: ConnectionDraft | null = null;
@@ -19,7 +21,7 @@ export function createDesktopApplication() {
   const sessions = createAccountSessions(onStatus => new VaultClient({
     fetchImpl: host().fetch,
     notifications: options => subscribeNotifications(options, tauriAvailable() ? NativeWebSocket : globalThis.WebSocket),
-    autoLockMs: 15 * 60 * 1000,
+    autoLockMs: getSecurityPreferences().autoLockMinutes * 60 * 1000,
     onLock: changed, onStatus: status => { onStatus(status); changed(); }, onSync: changed,
     syncCache, kdfCache,
   }), createProfileCache(host().storage), account => {
@@ -29,6 +31,9 @@ export function createDesktopApplication() {
     remembered = remembered.then(() => rememberAccount(account));
   });
   sessions.subscribeActiveVault(changed);
+  const stopSecurityUpdates = securityPreferencesStore.subscribe((state, previous) => {
+    if (state.autoLockMinutes !== previous.autoLockMinutes) sessions.setAutoLockMs(state.autoLockMinutes * 60 * 1000);
+  });
   const client = createApplicationClient(sessions.service, {
     capabilities: { native: IS_DESKTOP && tauriAvailable(), browser: false, saveAttachments: canSaveFiles() },
     saveFile: (name, data) => saveFile(name, fromBase64(data)),
@@ -44,16 +49,21 @@ export function createDesktopApplication() {
   };
   const switchAccount = client.switchAccount;
   client.switchAccount = async (target) => {
-    if (target) lockedAccount(target);
+    const selected = target ? lockedAccount(target) : null;
     const previous = sessions.getActiveVault().getSession().account;
     // switchAccount immediately publishes the connection screen, whose first read needs this draft.
     draft = target || !previous ? null : { serverUrl: '', email: '', error: null,
       returnAccount: { serverUrl: previous.serverUrl, email: previous.email },
     };
     await switchAccount(target);
+    const current = sessions.getActiveVault().getSession().account;
+    if (selected && current && accountKey(selected) === accountKey(current)) {
+      remembered = remembered.then(() => rememberLastAccount(selected));
+    }
     await remembered;
   };
   return { client, get vault() { return sessions.getActiveVault(); },
+    dispose: stopSecurityUpdates,
     getActiveVault: sessions.getActiveVault, subscribeActiveVault: sessions.subscribeActiveVault,
     subscribeVaultChanges(listener: () => void) { listeners.add(listener); return () => { listeners.delete(listener); }; },
   };

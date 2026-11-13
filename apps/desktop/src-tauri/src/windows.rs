@@ -10,6 +10,8 @@ use windows_sys::Win32::{
 };
 use crate::autotype::{autotype_enabled, TypeAction};
 use tauri::{utils::config::WindowEffectsConfig, window::Effect};
+use webview2_com::Microsoft::Web::WebView2::Win32::ICoreWebView2Settings3;
+use windows_core::Interface;
 use windows_sys::{Wdk::System::SystemServices::RtlGetVersion, Win32::System::SystemInformation::OSVERSIONINFOW};
 
 fn windows_version() -> Option<(u32, u32)> {
@@ -50,6 +52,21 @@ fn set_main_effect(config: &mut tauri::Config, version: Option<(u32, u32)>) {
 /// Blur can lag on Windows 11 22H2+, so a static fallback list is not sufficient.
 pub fn configure_effects(config: &mut tauri::Config) {
     set_main_effect(config, windows_version());
+}
+
+/// The application owns Find/New/Lock shortcuts. WebView2's browser toolbar
+/// can consume them before DOM handlers, including when a modal is open.
+/// Text editing shortcuts (copy/paste/select all/undo) remain native.
+pub fn configure_browser_keys(webview: &tauri::Webview) {
+    if let Err(error) = webview.with_webview(|platform| {
+        // SAFETY: Tauri invokes this on the WebView's owning thread. The COM
+        // settings are used only during the callback and no pointers escape.
+        let result = unsafe { (|| -> windows_core::Result<()> {
+            let settings = platform.controller().CoreWebView2()?.Settings()?;
+            settings.cast::<ICoreWebView2Settings3>()?.SetAreBrowserAcceleratorKeysEnabled(false)
+        })() };
+        if let Err(error) = result { eprintln!("[onewarden] 无法禁用浏览器快捷键：{error}"); }
+    }) { eprintln!("[onewarden] 无法配置窗口快捷键：{error}"); }
 }
 
 pub const SHORTCUT: &str = "Ctrl+Shift+\\";

@@ -1,10 +1,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { installHost, resetHost, readAccounts } from '@1warden/ui';
+import { installHost, resetHost, readAccounts, readLastAccount } from '@1warden/ui';
 import { buildProfileItem, type VaultClient, type UserProfile } from '@1warden/vault';
 import {
   concatBytes, deriveMasterKey, encryptBytes, encryptString, hashMasterPassword, makeUserKey, stretchMasterKey,
 } from '@1warden/crypto';
 import { createDesktopApplication } from './desktop';
+import { setSecurityPreference, securityPreferencesStore } from '../security-preferences';
 
 const a = { serverUrl: 'https://one.example', email: 'same@example.com' };
 const b = { serverUrl: 'https://two.example', email: 'same@example.com' };
@@ -12,6 +13,7 @@ const password = 'test-master-password';
 const profileA: UserProfile = { displayName: 'Account A', avatarDataUrl: null };
 const profileB: UserProfile = { displayName: 'Account B', avatarDataUrl: null };
 const clients = new Set<VaultClient>();
+const runtimes = new Set<ReturnType<typeof createDesktopApplication>>();
 
 function deferred() {
   let resolve!: () => void;
@@ -76,6 +78,7 @@ async function setup() {
     },
   });
   const runtime = createDesktopApplication();
+  runtimes.add(runtime);
   const active = () => { clients.add(runtime.vault); return runtime.vault; };
   active();
   await runtime.client.initialize();
@@ -97,11 +100,63 @@ beforeEach(() => {
   vi.spyOn(console, 'warn').mockImplementation(() => {});
 });
 afterEach(() => {
+  for (const runtime of runtimes) runtime.dispose();
+  runtimes.clear();
+  securityPreferencesStore.setState({ autoLockMinutes: 15, clipboardClearSeconds: 30 });
   for (const client of clients) client.logout();
   clients.clear(); resetHost(); vi.unstubAllGlobals(); vi.restoreAllMocks(); vi.useRealTimers();
 });
 
 describe('desktop retained account sessions', () => {
+  it('updates every retained account deadline from its own unlock, including during sync', async () => {
+    const { app, active, connect, pauseSync } = await setup();
+    vi.useFakeTimers();
+    await connect(a);
+    const first = active();
+    await vi.advanceTimersByTimeAsync(40_000);
+    await app.switchAccount(null); active();
+    await connect(b);
+    const second = active();
+    const wait = pauseSync(b.serverUrl);
+    const sync = app.sync();
+    await wait.started.promise;
+    setSecurityPreference('autoLockMinutes', 1);
+    expect(first.isUnlocked()).toBe(true);
+    expect(second.isUnlocked()).toBe(true);
+    await vi.advanceTimersByTimeAsync(20_000);
+    expect(first.isUnlocked()).toBe(false);
+    expect(second.isUnlocked()).toBe(true);
+    wait.release.resolve(); await sync;
+    await app.switchAccount(a); active();
+    await app.switchAccount(b); active();
+    await vi.advanceTimersByTimeAsync(40_000);
+    expect(second.isUnlocked()).toBe(false);
+  });
+
+  it('remembers the selected identity without reordering accounts or losing it in Add Account', async () => {
+    const { app, active, storage } = await setup();
+    storage.set('1warden.accounts', JSON.stringify([a, b]));
+    await app.switchAccount(b); active();
+    expect(await readLastAccount()).toEqual(b);
+    expect(await readAccounts()).toEqual([a, b]);
+    await app.switchAccount({ serverUrl: 'HTTPS://ONE.EXAMPLE/', email: ' SAME@EXAMPLE.COM ' }); active();
+    await app.switchAccount(null); active();
+    expect(await readLastAccount()).toEqual(a);
+    expect(await readAccounts()).toEqual([a, b]);
+    await expect(app.switchAccount({ ...b, serverUrl: 'file:///invalid' })).rejects.toThrow();
+    expect(await readLastAccount()).toEqual(a);
+  });
+
+  it('remembers a newly authenticated account but not an unsuccessful login', async () => {
+    const { app, active, connect } = await setup();
+    await connect(a);
+    await app.switchAccount(null); active();
+    await expect(app.connect({ ...b, masterPassword: 'wrong' })).rejects.toThrow();
+    expect(await readLastAccount()).toEqual(a);
+    await connect(b);
+    await app.switchAccount(null); active();
+    expect(await readLastAccount()).toEqual(b);
+  });
   it.each([false, true])('remembers a newly authenticated account before leaving during sync (OTP %s)', async otp => {
     const { app, active, pauseSync, requireTwoFactor } = await setup();
     await app.connectionDraft?.save({ ...a, error: null });
